@@ -158,8 +158,9 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 2
+Bloque actual: Bloque 3
 Bloque 0: Completado
 Bloque 1: Completado
-Siguiente paso: Modelo de datos y almacenamiento local
+Bloque 2: Completado
+Siguiente paso: Pantalla Inicio / Proyectos
 ```
