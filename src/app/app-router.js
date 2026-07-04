@@ -18,6 +18,8 @@ Con qué se conecta:
 - reg-eventos.js
 - fin-main.js
 - fin-eventos.js
+- arc-main.js
+- arc-eventos.js
 - iad-main.js
 - iad-eventos.js
 ========================================================= */
@@ -40,10 +42,12 @@ import { renderizarRegMain } from "../pantallas/04-registro-diario/reg-main.js";
 import { conectarRegEventos } from "../pantallas/04-registro-diario/reg-eventos.js";
 import { renderizarFinMain } from "../pantallas/05-finanzas/fin-main.js";
 import { conectarFinEventos } from "../pantallas/05-finanzas/fin-eventos.js";
+import { renderizarArcMain } from "../pantallas/06-archivos/arc-main.js";
+import { conectarArcEventos } from "../pantallas/06-archivos/arc-eventos.js";
 import { renderizarIadMain } from "../pantallas/07-ia-diagnostico/iad-main.js";
 import { conectarIadEventos } from "../pantallas/07-ia-diagnostico/iad-eventos.js";
 
-const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "ia"];
+const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "documentos", "ia"];
 
 export function iniciarRouter(contenedor){
   if(!contenedor){
@@ -80,6 +84,7 @@ function renderizarApp(contenedor){
         ${crearBotonNav("proyectos", "Proyectos", pantallaActual)}
         ${crearBotonNav("registro", "Registro", pantallaActual)}
         ${crearBotonNav("finanzas", "Finanzas", pantallaActual)}
+        ${crearBotonNav("documentos", "Documentos", pantallaActual)}
         ${crearBotonNav("ia", "IA", pantallaActual)}
       </nav>
     </header>
@@ -111,73 +116,53 @@ function conectarEventosGenerales(contenedor){
 function conectarEventosPantallaActual(contenedor, pantallaActual){
   if(pantallaActual === "inicio"){
     conectarIniEventos(contenedor, {
-      abrirProyecto: function(proyectoId){
-        abrirDetalleProyecto(proyectoId, contenedor);
-      },
-      crearProyecto: function(){
-        cambiarPantallaActual("proyectos");
-        renderizarApp(contenedor);
-      }
+      abrirProyecto: function(proyectoId){ abrirDetalleProyecto(proyectoId, contenedor); },
+      crearProyecto: function(){ cambiarPantallaActual("proyectos"); renderizarApp(contenedor); }
     });
     return;
   }
 
   if(pantallaActual === "proyectos"){
     conectarPryEventos(contenedor, {
-      alGuardar: function(){
-        renderizarApp(contenedor);
-      },
-      abrirProyecto: function(proyectoId){
-        abrirDetalleProyecto(proyectoId, contenedor);
-      }
+      alGuardar: function(){ renderizarApp(contenedor); },
+      abrirProyecto: function(proyectoId){ abrirDetalleProyecto(proyectoId, contenedor); }
     });
     return;
   }
 
   if(pantallaActual === "detalle"){
     conectarDetEventos(contenedor, {
-      volverInicio: function(){
-        cambiarPantallaActual("inicio");
-        renderizarApp(contenedor);
-      },
-      irProyectos: function(){
-        cambiarPantallaActual("proyectos");
-        renderizarApp(contenedor);
-      }
+      volverInicio: function(){ cambiarPantallaActual("inicio"); renderizarApp(contenedor); },
+      irProyectos: function(){ cambiarPantallaActual("proyectos"); renderizarApp(contenedor); }
     });
     return;
   }
 
   if(pantallaActual === "registro"){
     conectarRegEventos(contenedor, {
-      alGuardar: function(proyectoId){
-        seleccionarProyecto(proyectoId);
-        renderizarApp(contenedor);
-      }
+      alGuardar: function(proyectoId){ seleccionarProyecto(proyectoId); renderizarApp(contenedor); }
     });
     return;
   }
 
   if(pantallaActual === "finanzas"){
     conectarFinEventos(contenedor, {
-      cambiarProyecto: function(proyectoId){
-        seleccionarProyectoFinanzas(proyectoId);
-        renderizarApp(contenedor);
-      },
-      alActualizar: function(proyectoId){
-        seleccionarProyectoFinanzas(proyectoId);
-        renderizarApp(contenedor);
-      }
+      cambiarProyecto: function(proyectoId){ seleccionarProyectoFinanzas(proyectoId); renderizarApp(contenedor); },
+      alActualizar: function(proyectoId){ seleccionarProyectoFinanzas(proyectoId); renderizarApp(contenedor); }
+    });
+    return;
+  }
+
+  if(pantallaActual === "documentos"){
+    conectarArcEventos(contenedor, {
+      alGuardar: function(proyectoId){ seleccionarProyecto(proyectoId); renderizarApp(contenedor); }
     });
     return;
   }
 
   if(pantallaActual === "ia"){
     conectarIadEventos(contenedor, {
-      cambiarProyecto: function(proyectoId){
-        seleccionarProyecto(proyectoId);
-        renderizarApp(contenedor);
-      }
+      cambiarProyecto: function(proyectoId){ seleccionarProyecto(proyectoId); renderizarApp(contenedor); }
     });
   }
 }
@@ -205,6 +190,11 @@ function renderizarPantalla(pantallaActual){
 
   if(pantallaActual === "finanzas"){
     return renderizarFinMain(obtenerProyectoFinanzasId());
+  }
+
+  if(pantallaActual === "documentos"){
+    const proyecto = obtenerProyectoSeleccionado();
+    return renderizarArcMain(proyecto?.id || null);
   }
 
   if(pantallaActual === "ia"){
