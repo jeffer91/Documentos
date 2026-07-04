@@ -12,17 +12,22 @@ Con qué se conecta:
 - ini-eventos.js
 - pry-main.js
 - pry-eventos.js
+- det-main.js
+- det-eventos.js
 ========================================================= */
 
 import {
   cambiarPantallaActual,
   obtenerPantallaActual,
+  obtenerProyectoSeleccionado,
   seleccionarProyecto
 } from "./app-state.js";
 import { renderizarIniMain } from "../pantallas/01-inicio/ini-main.js";
 import { conectarIniEventos } from "../pantallas/01-inicio/ini-eventos.js";
 import { renderizarPryMain } from "../pantallas/02-proyectos/pry-main.js";
 import { conectarPryEventos } from "../pantallas/02-proyectos/pry-eventos.js";
+import { renderizarDetMain } from "../pantallas/03-detalle-proyecto/det-main.js";
+import { conectarDetEventos } from "../pantallas/03-detalle-proyecto/det-eventos.js";
 
 const rutasPermitidas = ["inicio", "proyectos", "detalle", "finanzas", "ia"];
 
@@ -111,6 +116,20 @@ function conectarEventosPantallaActual(contenedor, pantallaActual){
         abrirDetalleProyecto(proyectoId, contenedor);
       }
     });
+    return;
+  }
+
+  if(pantallaActual === "detalle"){
+    conectarDetEventos(contenedor, {
+      volverInicio: function(){
+        cambiarPantallaActual("inicio");
+        renderizarApp(contenedor);
+      },
+      irProyectos: function(){
+        cambiarPantallaActual("proyectos");
+        renderizarApp(contenedor);
+      }
+    });
   }
 }
 
@@ -126,7 +145,8 @@ function renderizarPantalla(pantallaActual){
   }
 
   if(pantallaActual === "detalle"){
-    return renderizarDetalleDemo();
+    const proyecto = obtenerProyectoSeleccionado();
+    return renderizarDetMain(proyecto?.id || null);
   }
 
   if(pantallaActual === "finanzas"){
@@ -138,17 +158,6 @@ function renderizarPantalla(pantallaActual){
   }
 
   return renderizarIniMain();
-}
-
-function renderizarDetalleDemo(){
-  return `
-    <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 5</p>
-      <h2>Detalle del proyecto</h2>
-      <p>Esta vista se construirá en el Bloque 5. Aquí aparecerá el estado, semáforo, finanzas, diagnóstico y siguiente acción.</p>
-      <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
-    </section>
-  `;
 }
 
 function renderizarFinanzasDemo(){
