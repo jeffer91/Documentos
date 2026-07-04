@@ -24,6 +24,8 @@ Con qué se conecta:
 - iad-eventos.js
 - rep-main.js
 - rep-eventos.js
+- cfg-main.js
+- cfg-eventos.js
 ========================================================= */
 
 import {
@@ -50,8 +52,10 @@ import { renderizarIadMain } from "../pantallas/07-ia-diagnostico/iad-main.js";
 import { conectarIadEventos } from "../pantallas/07-ia-diagnostico/iad-eventos.js";
 import { renderizarRepMain } from "../pantallas/08-reportes/rep-main.js";
 import { conectarRepEventos } from "../pantallas/08-reportes/rep-eventos.js";
+import { renderizarCfgMain } from "../pantallas/09-configuracion/cfg-main.js";
+import { conectarCfgEventos } from "../pantallas/09-configuracion/cfg-eventos.js";
 
-const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "documentos", "ia", "reportes"];
+const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "documentos", "ia", "reportes", "configuracion"];
 
 export function iniciarRouter(contenedor){
   if(!contenedor){
@@ -91,6 +95,7 @@ function renderizarApp(contenedor){
         ${crearBotonNav("documentos", "Documentos", pantallaActual)}
         ${crearBotonNav("ia", "IA", pantallaActual)}
         ${crearBotonNav("reportes", "Reportes", pantallaActual)}
+        ${crearBotonNav("configuracion", "Config", pantallaActual)}
       </nav>
     </header>
 
@@ -174,6 +179,13 @@ function conectarEventosPantallaActual(contenedor, pantallaActual){
 
   if(pantallaActual === "reportes"){
     conectarRepEventos(contenedor);
+    return;
+  }
+
+  if(pantallaActual === "configuracion"){
+    conectarCfgEventos(contenedor, {
+      alActualizar: function(){ renderizarApp(contenedor); }
+    });
   }
 }
 
@@ -214,6 +226,10 @@ function renderizarPantalla(pantallaActual){
 
   if(pantallaActual === "reportes"){
     return renderizarRepMain();
+  }
+
+  if(pantallaActual === "configuracion"){
+    return renderizarCfgMain();
   }
 
   return renderizarIniMain();
