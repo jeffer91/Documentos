@@ -158,9 +158,10 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 3
+Bloque actual: Bloque 4
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
-Siguiente paso: Pantalla Inicio / Proyectos
+Bloque 3: Completado
+Siguiente paso: Crear y editar proyectos
 ```
