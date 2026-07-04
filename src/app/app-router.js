@@ -4,12 +4,14 @@ Ruta o ubicación: src/app/app-router.js
 Función o funciones:
 - Manejar navegación básica entre vistas iniciales.
 - Renderizar la estructura general de la app.
-- Delegar la pantalla Inicio a sus propios módulos para evitar archivos gigantes.
+- Delegar pantallas a sus propios módulos para evitar archivos gigantes.
 Con qué se conecta:
 - app-state.js
 - app-inicio.js
 - ini-main.js
 - ini-eventos.js
+- pry-main.js
+- pry-eventos.js
 ========================================================= */
 
 import {
@@ -19,6 +21,8 @@ import {
 } from "./app-state.js";
 import { renderizarIniMain } from "../pantallas/01-inicio/ini-main.js";
 import { conectarIniEventos } from "../pantallas/01-inicio/ini-eventos.js";
+import { renderizarPryMain } from "../pantallas/02-proyectos/pry-main.js";
+import { conectarPryEventos } from "../pantallas/02-proyectos/pry-eventos.js";
 
 const rutasPermitidas = ["inicio", "proyectos", "detalle", "finanzas", "ia"];
 
@@ -85,26 +89,40 @@ function conectarEventosGenerales(contenedor){
 }
 
 function conectarEventosPantallaActual(contenedor, pantallaActual){
-  if(pantallaActual !== "inicio"){
+  if(pantallaActual === "inicio"){
+    conectarIniEventos(contenedor, {
+      abrirProyecto: function(proyectoId){
+        abrirDetalleProyecto(proyectoId, contenedor);
+      },
+      crearProyecto: function(){
+        cambiarPantallaActual("proyectos");
+        renderizarApp(contenedor);
+      }
+    });
     return;
   }
 
-  conectarIniEventos(contenedor, {
-    abrirProyecto: function(proyectoId){
-      seleccionarProyecto(proyectoId);
-      cambiarPantallaActual("detalle");
-      renderizarApp(contenedor);
-    },
-    crearProyecto: function(){
-      cambiarPantallaActual("proyectos");
-      renderizarApp(contenedor);
-    }
-  });
+  if(pantallaActual === "proyectos"){
+    conectarPryEventos(contenedor, {
+      alGuardar: function(){
+        renderizarApp(contenedor);
+      },
+      abrirProyecto: function(proyectoId){
+        abrirDetalleProyecto(proyectoId, contenedor);
+      }
+    });
+  }
+}
+
+function abrirDetalleProyecto(proyectoId, contenedor){
+  seleccionarProyecto(proyectoId);
+  cambiarPantallaActual("detalle");
+  renderizarApp(contenedor);
 }
 
 function renderizarPantalla(pantallaActual){
   if(pantallaActual === "proyectos"){
-    return renderizarProyectos();
+    return renderizarPryMain();
   }
 
   if(pantallaActual === "detalle"){
@@ -120,17 +138,6 @@ function renderizarPantalla(pantallaActual){
   }
 
   return renderizarIniMain();
-}
-
-function renderizarProyectos(){
-  return `
-    <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 4</p>
-      <h2>Crear y editar proyectos</h2>
-      <p>Esta vista quedará funcional en el Bloque 4. Aquí se podrá crear un proyecto rápido y editar sus datos principales.</p>
-      <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
-    </section>
-  `;
 }
 
 function renderizarDetalleDemo(){
