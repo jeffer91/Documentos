@@ -158,7 +158,7 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 11
+Bloque actual: Bloque 12
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
@@ -170,5 +170,6 @@ Bloque 7: Completado
 Bloque 8: Completado
 Bloque 9: Completado
 Bloque 10: Completado
-Siguiente paso: Gráficos y reportes
+Bloque 11: Completado
+Siguiente paso: Configuración, respaldo y limpieza final
 ```
