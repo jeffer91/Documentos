@@ -22,6 +22,8 @@ Con qué se conecta:
 - arc-eventos.js
 - iad-main.js
 - iad-eventos.js
+- rep-main.js
+- rep-eventos.js
 ========================================================= */
 
 import {
@@ -46,8 +48,10 @@ import { renderizarArcMain } from "../pantallas/06-archivos/arc-main.js";
 import { conectarArcEventos } from "../pantallas/06-archivos/arc-eventos.js";
 import { renderizarIadMain } from "../pantallas/07-ia-diagnostico/iad-main.js";
 import { conectarIadEventos } from "../pantallas/07-ia-diagnostico/iad-eventos.js";
+import { renderizarRepMain } from "../pantallas/08-reportes/rep-main.js";
+import { conectarRepEventos } from "../pantallas/08-reportes/rep-eventos.js";
 
-const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "documentos", "ia"];
+const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "documentos", "ia", "reportes"];
 
 export function iniciarRouter(contenedor){
   if(!contenedor){
@@ -86,6 +90,7 @@ function renderizarApp(contenedor){
         ${crearBotonNav("finanzas", "Finanzas", pantallaActual)}
         ${crearBotonNav("documentos", "Documentos", pantallaActual)}
         ${crearBotonNav("ia", "IA", pantallaActual)}
+        ${crearBotonNav("reportes", "Reportes", pantallaActual)}
       </nav>
     </header>
 
@@ -164,6 +169,11 @@ function conectarEventosPantallaActual(contenedor, pantallaActual){
     conectarIadEventos(contenedor, {
       cambiarProyecto: function(proyectoId){ seleccionarProyecto(proyectoId); renderizarApp(contenedor); }
     });
+    return;
+  }
+
+  if(pantallaActual === "reportes"){
+    conectarRepEventos(contenedor);
   }
 }
 
@@ -200,6 +210,10 @@ function renderizarPantalla(pantallaActual){
   if(pantallaActual === "ia"){
     const proyecto = obtenerProyectoSeleccionado();
     return renderizarIadMain(proyecto?.id || null);
+  }
+
+  if(pantallaActual === "reportes"){
+    return renderizarRepMain();
   }
 
   return renderizarIniMain();
