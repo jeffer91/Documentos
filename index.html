@@ -1,0 +1,44 @@
+<!-- =========================================================
+Nombre completo: index.html
+Ruta o ubicación: index.html
+Función o funciones:
+- Crear la estructura HTML inicial de Proyectos IA.
+- Cargar estilos globales y el arranque principal de la app.
+- Definir el contenedor raíz donde se renderizan las pantallas.
+Con qué se conecta:
+- src/app/app-inicio.js
+- src/estilos/variables.css
+- src/estilos/global.css
+- src/estilos/layout.css
+========================================================= -->
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="App inteligente para gestionar proyectos, medir avance, analizar rentabilidad y priorizar acciones."
+    />
+    <title>Proyectos IA</title>
+    <link rel="stylesheet" href="/src/estilos/variables.css" />
+    <link rel="stylesheet" href="/src/estilos/global.css" />
+    <link rel="stylesheet" href="/src/estilos/layout.css" />
+  </head>
+  <body>
+    <div id="app-raiz" class="app-shell" aria-live="polite">
+      <section class="app-cargando">
+        <p>Cargando Proyectos IA...</p>
+      </section>
+    </div>
+
+    <noscript>
+      <section class="app-noscript">
+        <h1>Proyectos IA necesita JavaScript</h1>
+        <p>Activa JavaScript para usar la app.</p>
+      </section>
+    </noscript>
+
+    <script type="module" src="/src/app/app-inicio.js"></script>
+  </body>
+</html>
