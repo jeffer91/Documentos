@@ -4,13 +4,15 @@ Ruta o ubicación: src/app/app-inicio.js
 Función o funciones:
 - Iniciar la app Proyectos IA.
 - Validar que exista el contenedor raíz.
-- Conectar el router inicial con la pantalla principal.
+- Inicializar datos locales y conectar el router inicial.
 Con qué se conecta:
 - index.html
 - app-router.js
+- app-state.js
 ========================================================= */
 
 import { iniciarRouter } from "./app-router.js";
+import { inicializarEstadoApp } from "./app-state.js";
 
 function iniciarApp(){
   const contenedor = document.getElementById("app-raiz");
@@ -20,6 +22,7 @@ function iniciarApp(){
     return;
   }
 
+  inicializarEstadoApp();
   iniciarRouter(contenedor);
 }
 
