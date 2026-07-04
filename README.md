@@ -158,12 +158,13 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 6
+Bloque actual: Bloque 7
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
 Bloque 3: Completado
 Bloque 4: Completado
 Bloque 5: Completado
-Siguiente paso: Finanzas y punto de equilibrio
+Bloque 6: Completado
+Siguiente paso: Registro diario y horas trabajadas
 ```
