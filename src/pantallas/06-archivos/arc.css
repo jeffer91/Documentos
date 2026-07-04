@@ -1,0 +1,217 @@
+/* =========================================================
+Nombre completo: arc.css
+Ruta o ubicación: src/pantallas/06-archivos/arc.css
+Función o funciones:
+- Definir estilos propios de la pantalla Archivos.
+- Estilizar formulario documental, análisis, métricas y lista de registros.
+- Mantener clases con prefijo arc para no mezclar estilos.
+Con qué se conecta:
+- arc-main.js
+- arc-subir.js
+- arc-analisis.js
+- arc-lista.js
+- index.html
+========================================================= */
+
+.arc-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--espacio-lg);
+}
+
+.arc-header p {
+  max-width: 760px;
+  margin-bottom: 0;
+}
+
+.arc-proyecto-activo {
+  min-width: 260px;
+  padding: var(--espacio-md);
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio-md);
+  background: var(--color-panel-suave);
+}
+
+.arc-proyecto-activo span {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--color-texto-suave);
+  font-weight: 800;
+}
+
+.arc-grid-principal,
+.arc-grid-secundario {
+  display: grid;
+  gap: var(--espacio-lg);
+}
+
+.arc-grid-principal {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+}
+
+.arc-form {
+  display: grid;
+  gap: var(--espacio-md);
+}
+
+.arc-campo {
+  display: grid;
+  gap: var(--espacio-xs);
+}
+
+.arc-campo span {
+  color: var(--color-texto);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.arc-campo input,
+.arc-campo select,
+.arc-campo textarea {
+  width: 100%;
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio-sm);
+  background: var(--color-panel-suave);
+  color: var(--color-texto);
+  outline: none;
+}
+
+.arc-campo input,
+.arc-campo select {
+  min-height: 44px;
+  padding: 0 0.85rem;
+}
+
+.arc-campo textarea {
+  min-height: 220px;
+  padding: 0.85rem;
+  resize: vertical;
+}
+
+.arc-campo input:focus,
+.arc-campo select:focus,
+.arc-campo textarea:focus {
+  border-color: var(--color-primario);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.arc-mensaje {
+  min-height: 24px;
+  font-weight: 800;
+}
+
+.arc-mensaje-ok {
+  color: var(--color-verde);
+}
+
+.arc-mensaje-error {
+  color: var(--color-rojo);
+}
+
+.arc-metricas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--espacio-md);
+  margin-bottom: var(--espacio-lg);
+}
+
+.arc-metrica,
+.arc-bloque-lista,
+.arc-lista-vacia,
+.arc-item {
+  padding: var(--espacio-md);
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio-md);
+  background: var(--color-panel-suave);
+}
+
+.arc-metrica strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 1.6rem;
+}
+
+.arc-metrica span {
+  color: var(--color-texto-suave);
+  font-weight: 800;
+}
+
+.arc-bloque-lista {
+  margin-bottom: var(--espacio-md);
+}
+
+.arc-bloque-lista h3 {
+  margin-bottom: var(--espacio-sm);
+}
+
+.arc-bloque-lista p,
+.arc-lista-vacia p {
+  margin-bottom: 0;
+}
+
+.arc-bloque-lista ul {
+  display: grid;
+  gap: var(--espacio-xs);
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--color-texto-suave);
+}
+
+.arc-lista {
+  display: grid;
+  gap: var(--espacio-md);
+}
+
+.arc-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--espacio-md);
+  margin-bottom: var(--espacio-sm);
+}
+
+.arc-item-header h3 {
+  margin-bottom: 0.2rem;
+}
+
+.arc-item-header span,
+.arc-item-header small {
+  color: var(--color-texto-suave);
+  font-weight: 700;
+}
+
+.arc-item p {
+  margin-bottom: var(--espacio-sm);
+}
+
+.arc-item-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--espacio-sm);
+}
+
+.arc-item-pills span {
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--color-texto-suave);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+@media (max-width: 980px) {
+  .arc-header,
+  .arc-grid-principal,
+  .arc-metricas {
+    grid-template-columns: 1fr;
+  }
+
+  .arc-header {
+    display: grid;
+  }
+
+  .arc-proyecto-activo {
+    min-width: 0;
+  }
+}
