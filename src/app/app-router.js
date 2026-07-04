@@ -14,13 +14,17 @@ Con qué se conecta:
 - pry-eventos.js
 - det-main.js
 - det-eventos.js
+- fin-main.js
+- fin-eventos.js
 ========================================================= */
 
 import {
   cambiarPantallaActual,
   obtenerPantallaActual,
+  obtenerProyectoFinanzasId,
   obtenerProyectoSeleccionado,
-  seleccionarProyecto
+  seleccionarProyecto,
+  seleccionarProyectoFinanzas
 } from "./app-state.js";
 import { renderizarIniMain } from "../pantallas/01-inicio/ini-main.js";
 import { conectarIniEventos } from "../pantallas/01-inicio/ini-eventos.js";
@@ -28,6 +32,8 @@ import { renderizarPryMain } from "../pantallas/02-proyectos/pry-main.js";
 import { conectarPryEventos } from "../pantallas/02-proyectos/pry-eventos.js";
 import { renderizarDetMain } from "../pantallas/03-detalle-proyecto/det-main.js";
 import { conectarDetEventos } from "../pantallas/03-detalle-proyecto/det-eventos.js";
+import { renderizarFinMain } from "../pantallas/05-finanzas/fin-main.js";
+import { conectarFinEventos } from "../pantallas/05-finanzas/fin-eventos.js";
 
 const rutasPermitidas = ["inicio", "proyectos", "detalle", "finanzas", "ia"];
 
@@ -130,6 +136,20 @@ function conectarEventosPantallaActual(contenedor, pantallaActual){
         renderizarApp(contenedor);
       }
     });
+    return;
+  }
+
+  if(pantallaActual === "finanzas"){
+    conectarFinEventos(contenedor, {
+      cambiarProyecto: function(proyectoId){
+        seleccionarProyectoFinanzas(proyectoId);
+        renderizarApp(contenedor);
+      },
+      alActualizar: function(proyectoId){
+        seleccionarProyectoFinanzas(proyectoId);
+        renderizarApp(contenedor);
+      }
+    });
   }
 }
 
@@ -150,7 +170,7 @@ function renderizarPantalla(pantallaActual){
   }
 
   if(pantallaActual === "finanzas"){
-    return renderizarFinanzasDemo();
+    return renderizarFinMain(obtenerProyectoFinanzasId());
   }
 
   if(pantallaActual === "ia"){
@@ -158,17 +178,6 @@ function renderizarPantalla(pantallaActual){
   }
 
   return renderizarIniMain();
-}
-
-function renderizarFinanzasDemo(){
-  return `
-    <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 6</p>
-      <h2>Finanzas</h2>
-      <p>Esta vista se construirá en el Bloque 6. Aquí se calculará utilidad, dinero por hora y punto de equilibrio.</p>
-      <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
-    </section>
-  `;
 }
 
 function renderizarIaDemo(){
