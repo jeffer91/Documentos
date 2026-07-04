@@ -158,7 +158,7 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 8
+Bloque actual: Bloque 9
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
@@ -167,5 +167,6 @@ Bloque 4: Completado
 Bloque 5: Completado
 Bloque 6: Completado
 Bloque 7: Completado
-Siguiente paso: Semáforo, avance y prioridad inteligente
+Bloque 8: Completado
+Siguiente paso: IA de diagnóstico
 ```
