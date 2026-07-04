@@ -3,7 +3,7 @@ Nombre completo: app-state.js
 Ruta o ubicación: src/app/app-state.js
 Función o funciones:
 - Mantener el estado general de la app.
-- Guardar la pantalla activa y el proyecto seleccionado.
+- Guardar la pantalla activa, el proyecto seleccionado y el proyecto activo en Finanzas.
 - Obtener proyectos desde el servicio de datos locales.
 Con qué se conecta:
 - app-router.js
@@ -20,6 +20,7 @@ import {
 const appState = {
   pantallaActual: "inicio",
   proyectoSeleccionadoId: null,
+  proyectoFinanzasId: null,
   cargando: false,
   mensaje: ""
 };
@@ -57,7 +58,17 @@ export function obtenerProyectosApp(){
 
 export function seleccionarProyecto(proyectoId){
   appState.proyectoSeleccionadoId = proyectoId || null;
+  appState.proyectoFinanzasId = proyectoId || appState.proyectoFinanzasId;
   return appState.proyectoSeleccionadoId;
+}
+
+export function seleccionarProyectoFinanzas(proyectoId){
+  appState.proyectoFinanzasId = proyectoId || null;
+  return appState.proyectoFinanzasId;
+}
+
+export function obtenerProyectoFinanzasId(){
+  return appState.proyectoFinanzasId || appState.proyectoSeleccionadoId;
 }
 
 export function obtenerProyectoSeleccionado(){
