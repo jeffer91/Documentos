@@ -158,7 +158,7 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 7
+Bloque actual: Bloque 8
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
@@ -166,5 +166,6 @@ Bloque 3: Completado
 Bloque 4: Completado
 Bloque 5: Completado
 Bloque 6: Completado
-Siguiente paso: Registro diario y horas trabajadas
+Bloque 7: Completado
+Siguiente paso: Semáforo, avance y prioridad inteligente
 ```
