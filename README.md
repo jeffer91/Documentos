@@ -102,6 +102,20 @@ Reglas principales:
 
 ---
 
+## Documentación inicial
+
+```text
+docs/01-plan-bloques.md
+docs/02-estructura-proyecto.md
+docs/03-mvp.md
+docs/04-pantallas.md
+docs/05-modelo-datos.md
+docs/06-ia.md
+docs/07-finanzas.md
+```
+
+---
+
 ## Plan de construcción
 
 El plan completo por bloques está en:
@@ -133,6 +147,7 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 0
-Estado: Documentación inicial en construcción
+Bloque actual: Bloque 1
+Bloque 0: Completado
+Siguiente paso: Base técnica de la app
 ```
