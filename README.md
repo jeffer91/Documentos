@@ -62,22 +62,18 @@ Cerrado
 
 ---
 
-## Pantallas iniciales
+## Pantallas funcionales
 
 ```text
 1. Inicio / Proyectos
-2. Detalle del proyecto
-3. Registro diario
-4. Finanzas
-5. IA / Diagnóstico
-```
-
-Después se agregarán:
-
-```text
-6. Archivos
-7. Reportes
-8. Configuración
+2. Crear y editar proyectos
+3. Detalle del proyecto
+4. Registro diario
+5. Finanzas
+6. Documentos
+7. IA / Diagnóstico
+8. Reportes
+9. Configuración
 ```
 
 ---
@@ -158,7 +154,8 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 12
+Versión actual: MVP 1.0
+Bloque actual: Cierre primera versión
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
@@ -171,5 +168,6 @@ Bloque 8: Completado
 Bloque 9: Completado
 Bloque 10: Completado
 Bloque 11: Completado
-Siguiente paso: Configuración, respaldo y limpieza final
+Bloque 12: Completado
+Siguiente paso: Probar la app completa, corregir errores reales y preparar mejoras V2
 ```
