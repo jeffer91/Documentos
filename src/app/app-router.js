@@ -18,6 +18,8 @@ Con qué se conecta:
 - reg-eventos.js
 - fin-main.js
 - fin-eventos.js
+- iad-main.js
+- iad-eventos.js
 ========================================================= */
 
 import {
@@ -38,6 +40,8 @@ import { renderizarRegMain } from "../pantallas/04-registro-diario/reg-main.js";
 import { conectarRegEventos } from "../pantallas/04-registro-diario/reg-eventos.js";
 import { renderizarFinMain } from "../pantallas/05-finanzas/fin-main.js";
 import { conectarFinEventos } from "../pantallas/05-finanzas/fin-eventos.js";
+import { renderizarIadMain } from "../pantallas/07-ia-diagnostico/iad-main.js";
+import { conectarIadEventos } from "../pantallas/07-ia-diagnostico/iad-eventos.js";
 
 const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "ia"];
 
@@ -165,6 +169,16 @@ function conectarEventosPantallaActual(contenedor, pantallaActual){
         renderizarApp(contenedor);
       }
     });
+    return;
+  }
+
+  if(pantallaActual === "ia"){
+    conectarIadEventos(contenedor, {
+      cambiarProyecto: function(proyectoId){
+        seleccionarProyecto(proyectoId);
+        renderizarApp(contenedor);
+      }
+    });
   }
 }
 
@@ -194,19 +208,9 @@ function renderizarPantalla(pantallaActual){
   }
 
   if(pantallaActual === "ia"){
-    return renderizarIaDemo();
+    const proyecto = obtenerProyectoSeleccionado();
+    return renderizarIadMain(proyecto?.id || null);
   }
 
   return renderizarIniMain();
-}
-
-function renderizarIaDemo(){
-  return `
-    <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 9</p>
-      <h2>IA / Diagnóstico</h2>
-      <p>Esta vista se construirá en el Bloque 9. Aquí la IA dirá qué va bien, qué va mal y qué hacer ahora.</p>
-      <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
-    </section>
-  `;
 }
