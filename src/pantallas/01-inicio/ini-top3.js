@@ -3,11 +3,12 @@ Nombre completo: ini-top3.js
 Ruta o ubicación: src/pantallas/01-inicio/ini-top3.js
 Función o funciones:
 - Renderizar el bloque Top 3 proyectos de hoy.
-- Mostrar la razón visual de prioridad según los datos actuales.
+- Mostrar prioridad calculada, razón del semáforo y siguiente acción.
 - Mantener separada la lógica visual del Top 3.
 Con qué se conecta:
 - ini-main.js
 - ini-eventos.js
+- srv-prioridad.js
 ========================================================= */
 
 export function renderizarIniTop3(proyectos){
@@ -34,7 +35,8 @@ function renderizarIniTop3Item(proyecto, index){
       <span class="ini-top3-posicion">${index + 1}</span>
       <span class="ini-top3-contenido">
         <strong>${proyecto.nombre}</strong>
-        <small>${obtenerTextoPrioridad(proyecto)}</small>
+        <small>${obtenerTextoPrioridad(proyecto)} · Prioridad ${Number(proyecto.prioridad || 0)}/100</small>
+        <small>${proyecto.razonSemaforo || "Sin razón calculada todavía."}</small>
         <em>${proyecto.siguienteAccion}</em>
       </span>
     </button>
@@ -44,13 +46,13 @@ function renderizarIniTop3Item(proyecto, index){
 function obtenerTextoPrioridad(proyecto){
   const prioridad = Number(proyecto.prioridad || 0);
 
-  if(prioridad >= 85){
-    return "Alta prioridad: conviene avanzar pronto.";
+  if(prioridad >= 80){
+    return "Alta prioridad";
   }
 
-  if(prioridad >= 65){
-    return "Prioridad media: revisar avance y monetización.";
+  if(prioridad >= 60){
+    return "Prioridad media";
   }
 
-  return "Prioridad baja: necesita claridad antes de crecer.";
+  return "Prioridad baja";
 }
