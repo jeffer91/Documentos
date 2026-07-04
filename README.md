@@ -158,7 +158,7 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 9
+Bloque actual: Bloque 10
 Bloque 0: Completado
 Bloque 1: Completado
 Bloque 2: Completado
@@ -168,5 +168,6 @@ Bloque 5: Completado
 Bloque 6: Completado
 Bloque 7: Completado
 Bloque 8: Completado
-Siguiente paso: IA de diagnóstico
+Bloque 9: Completado
+Siguiente paso: Archivos y análisis documental
 ```
