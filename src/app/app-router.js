@@ -14,6 +14,8 @@ Con qué se conecta:
 - pry-eventos.js
 - det-main.js
 - det-eventos.js
+- reg-main.js
+- reg-eventos.js
 - fin-main.js
 - fin-eventos.js
 ========================================================= */
@@ -32,10 +34,12 @@ import { renderizarPryMain } from "../pantallas/02-proyectos/pry-main.js";
 import { conectarPryEventos } from "../pantallas/02-proyectos/pry-eventos.js";
 import { renderizarDetMain } from "../pantallas/03-detalle-proyecto/det-main.js";
 import { conectarDetEventos } from "../pantallas/03-detalle-proyecto/det-eventos.js";
+import { renderizarRegMain } from "../pantallas/04-registro-diario/reg-main.js";
+import { conectarRegEventos } from "../pantallas/04-registro-diario/reg-eventos.js";
 import { renderizarFinMain } from "../pantallas/05-finanzas/fin-main.js";
 import { conectarFinEventos } from "../pantallas/05-finanzas/fin-eventos.js";
 
-const rutasPermitidas = ["inicio", "proyectos", "detalle", "finanzas", "ia"];
+const rutasPermitidas = ["inicio", "proyectos", "detalle", "registro", "finanzas", "ia"];
 
 export function iniciarRouter(contenedor){
   if(!contenedor){
@@ -70,6 +74,7 @@ function renderizarApp(contenedor){
       <nav class="app-nav" aria-label="Navegación principal">
         ${crearBotonNav("inicio", "Inicio", pantallaActual)}
         ${crearBotonNav("proyectos", "Proyectos", pantallaActual)}
+        ${crearBotonNav("registro", "Registro", pantallaActual)}
         ${crearBotonNav("finanzas", "Finanzas", pantallaActual)}
         ${crearBotonNav("ia", "IA", pantallaActual)}
       </nav>
@@ -139,6 +144,16 @@ function conectarEventosPantallaActual(contenedor, pantallaActual){
     return;
   }
 
+  if(pantallaActual === "registro"){
+    conectarRegEventos(contenedor, {
+      alGuardar: function(proyectoId){
+        seleccionarProyecto(proyectoId);
+        renderizarApp(contenedor);
+      }
+    });
+    return;
+  }
+
   if(pantallaActual === "finanzas"){
     conectarFinEventos(contenedor, {
       cambiarProyecto: function(proyectoId){
@@ -167,6 +182,11 @@ function renderizarPantalla(pantallaActual){
   if(pantallaActual === "detalle"){
     const proyecto = obtenerProyectoSeleccionado();
     return renderizarDetMain(proyecto?.id || null);
+  }
+
+  if(pantallaActual === "registro"){
+    const proyecto = obtenerProyectoSeleccionado();
+    return renderizarRegMain(proyecto?.id || null);
   }
 
   if(pantallaActual === "finanzas"){
