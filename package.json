@@ -1,0 +1,24 @@
+{
+  "name": "proyectos-ia",
+  "version": "0.1.0",
+  "description": "App inteligente para gestionar proyectos, medir avance, analizar rentabilidad y priorizar acciones para aumentar ganancias.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "vite --host 0.0.0.0",
+    "dev": "vite --host 0.0.0.0",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "keywords": [
+    "proyectos",
+    "ia",
+    "finanzas",
+    "productividad",
+    "rentabilidad"
+  ],
+  "author": "Jefferson Villarreal",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
