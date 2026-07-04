@@ -2,55 +2,32 @@
 Nombre completo: app-state.js
 Ruta o ubicación: src/app/app-state.js
 Función o funciones:
-- Mantener el estado inicial de la app.
+- Mantener el estado general de la app.
 - Guardar la pantalla activa y el proyecto seleccionado.
-- Entregar datos temporales de demostración para el Bloque 1.
+- Obtener proyectos desde el servicio de datos locales.
 Con qué se conecta:
 - app-router.js
 - app-inicio.js
+- srv-proyectos.js
 ========================================================= */
+
+import {
+  inicializarDatosLocales,
+  obtenerProyectoPorId,
+  obtenerProyectos
+} from "../servicios/srv-proyectos.js";
 
 const appState = {
   pantallaActual: "inicio",
   proyectoSeleccionadoId: null,
   cargando: false,
-  mensaje: "",
-  proyectosDemo: [
-    {
-      id: "proy_demo_001",
-      nombre: "App Proyectos IA",
-      tipo: "App / software",
-      estado: "MVP",
-      semaforo: "amarillo",
-      porcentajeAvance: 25,
-      dineroGenerado: 0,
-      siguienteAccion: "Construir la base técnica de la app.",
-      prioridad: 92
-    },
-    {
-      id: "proy_demo_002",
-      nombre: "Curso corto rentable",
-      tipo: "Curso",
-      estado: "Validación",
-      semaforo: "verde",
-      porcentajeAvance: 40,
-      dineroGenerado: 75,
-      siguienteAccion: "Definir oferta mínima pagada.",
-      prioridad: 85
-    },
-    {
-      id: "proy_demo_003",
-      nombre: "Canal de contenido",
-      tipo: "Canal de contenido",
-      estado: "Idea",
-      semaforo: "rojo",
-      porcentajeAvance: 10,
-      dineroGenerado: 0,
-      siguienteAccion: "Definir estrategia de monetización.",
-      prioridad: 68
-    }
-  ]
+  mensaje: ""
 };
+
+export function inicializarEstadoApp(){
+  inicializarDatosLocales();
+  return appState;
+}
 
 export function obtenerAppState(){
   return appState;
@@ -71,9 +48,11 @@ export function cambiarPantallaActual(nombrePantalla){
 }
 
 export function obtenerProyectosDemo(){
-  return [...appState.proyectosDemo].sort(function(a, b){
-    return b.prioridad - a.prioridad;
-  });
+  return obtenerProyectos();
+}
+
+export function obtenerProyectosApp(){
+  return obtenerProyectos();
 }
 
 export function seleccionarProyecto(proyectoId){
@@ -86,7 +65,5 @@ export function obtenerProyectoSeleccionado(){
     return null;
   }
 
-  return appState.proyectosDemo.find(function(proyecto){
-    return proyecto.id === appState.proyectoSeleccionadoId;
-  }) || null;
+  return obtenerProyectoPorId(appState.proyectoSeleccionadoId);
 }
