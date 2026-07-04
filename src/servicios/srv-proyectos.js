@@ -4,11 +4,12 @@ Ruta o ubicación: src/servicios/srv-proyectos.js
 Función o funciones:
 - Leer, inicializar, crear y actualizar proyectos.
 - Conectar modelos de datos con almacenamiento local.
-- Entregar proyectos ordenados para la pantalla principal.
+- Entregar proyectos ordenados con avance, semáforo y prioridad inteligente.
 Con qué se conecta:
 - data-proyectos.js
 - shared-storage.js
 - shared-validaciones.js
+- srv-indicadores.js
 - app-state.js
 ========================================================= */
 
@@ -20,6 +21,7 @@ import { archivosIniciales } from "../data/data-archivos.js";
 import { STORAGE_KEYS, guardarStorage, leerStorage } from "../shared/shared-storage.js";
 import { obtenerFechaIsoActual } from "../shared/shared-fechas.js";
 import { validarProyectoBasico } from "../shared/shared-validaciones.js";
+import { enriquecerProyectosConIndicadores } from "./srv-indicadores.js";
 
 export function inicializarDatosLocales(){
   inicializarColeccionSiNoExiste(STORAGE_KEYS.proyectos, proyectosIniciales);
@@ -35,14 +37,20 @@ export function inicializarDatosLocales(){
 export function obtenerProyectos(){
   inicializarDatosLocales();
   const proyectos = leerStorage(STORAGE_KEYS.proyectos, proyectosIniciales);
+  const proyectosBase = proyectos.map(function(proyecto){
+    return crearProyectoBase(proyecto);
+  });
 
-  return proyectos
-    .map(function(proyecto){
-      return crearProyectoBase(proyecto);
-    })
-    .sort(function(a, b){
-      return Number(b.prioridad || 0) - Number(a.prioridad || 0);
-    });
+  return enriquecerProyectosConIndicadores(proyectosBase);
+}
+
+export function obtenerProyectosBase(){
+  inicializarDatosLocales();
+  const proyectos = leerStorage(STORAGE_KEYS.proyectos, proyectosIniciales);
+
+  return proyectos.map(function(proyecto){
+    return crearProyectoBase(proyecto);
+  });
 }
 
 export function obtenerProyectoPorId(proyectoId){
@@ -67,7 +75,7 @@ export function guardarProyecto(datosProyecto){
     };
   }
 
-  const proyectos = obtenerProyectos();
+  const proyectos = obtenerProyectosBase();
   const existe = proyectos.some(function(item){
     return item.id === proyecto.id;
   });
@@ -107,7 +115,7 @@ export function eliminarProyecto(proyectoId){
     return false;
   }
 
-  const proyectos = obtenerProyectos();
+  const proyectos = obtenerProyectosBase();
   const proyectosFiltrados = proyectos.filter(function(proyecto){
     return proyecto.id !== proyectoId;
   });
@@ -119,7 +127,7 @@ export function calcularResumenProyectos(){
   const proyectos = obtenerProyectos();
 
   const dineroTotal = proyectos.reduce(function(total, proyecto){
-    return total + Number(proyecto.dineroGenerado || 0);
+    return total + Number(proyecto.resumenFinanciero?.ingresosTotales || proyecto.dineroGenerado || 0);
   }, 0);
 
   const avancePromedio = proyectos.length
