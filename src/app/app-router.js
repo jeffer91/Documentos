@@ -3,19 +3,22 @@ Nombre completo: app-router.js
 Ruta o ubicación: src/app/app-router.js
 Función o funciones:
 - Manejar navegación básica entre vistas iniciales.
-- Renderizar la estructura visual general de la app.
-- Conectar botones de navegación con el estado de la app.
+- Renderizar la estructura general de la app.
+- Delegar la pantalla Inicio a sus propios módulos para evitar archivos gigantes.
 Con qué se conecta:
 - app-state.js
 - app-inicio.js
+- ini-main.js
+- ini-eventos.js
 ========================================================= */
 
 import {
   cambiarPantallaActual,
   obtenerPantallaActual,
-  obtenerProyectosDemo,
   seleccionarProyecto
 } from "./app-state.js";
+import { renderizarIniMain } from "../pantallas/01-inicio/ini-main.js";
+import { conectarIniEventos } from "../pantallas/01-inicio/ini-eventos.js";
 
 const rutasPermitidas = ["inicio", "proyectos", "detalle", "finanzas", "ia"];
 
@@ -62,7 +65,8 @@ function renderizarApp(contenedor){
     </main>
   `;
 
-  conectarEventos(contenedor);
+  conectarEventosGenerales(contenedor);
+  conectarEventosPantallaActual(contenedor, pantallaActual);
 }
 
 function crearBotonNav(ruta, texto, pantallaActual){
@@ -70,7 +74,7 @@ function crearBotonNav(ruta, texto, pantallaActual){
   return `<button class="${activo}" type="button" data-ruta="${ruta}">${texto}</button>`;
 }
 
-function conectarEventos(contenedor){
+function conectarEventosGenerales(contenedor){
   const botonesNav = contenedor.querySelectorAll("[data-ruta]");
 
   botonesNav.forEach(function(boton){
@@ -78,15 +82,23 @@ function conectarEventos(contenedor){
       navegarA(boton.dataset.ruta, contenedor);
     });
   });
+}
 
-  const botonesDetalle = contenedor.querySelectorAll("[data-proyecto-id]");
+function conectarEventosPantallaActual(contenedor, pantallaActual){
+  if(pantallaActual !== "inicio"){
+    return;
+  }
 
-  botonesDetalle.forEach(function(boton){
-    boton.addEventListener("click", function(){
-      seleccionarProyecto(boton.dataset.proyectoId);
+  conectarIniEventos(contenedor, {
+    abrirProyecto: function(proyectoId){
+      seleccionarProyecto(proyectoId);
       cambiarPantallaActual("detalle");
       renderizarApp(contenedor);
-    });
+    },
+    crearProyecto: function(){
+      cambiarPantallaActual("proyectos");
+      renderizarApp(contenedor);
+    }
   });
 }
 
@@ -107,75 +119,15 @@ function renderizarPantalla(pantallaActual){
     return renderizarIaDemo();
   }
 
-  return renderizarInicio();
-}
-
-function renderizarInicio(){
-  const proyectos = obtenerProyectosDemo();
-  const top3 = proyectos.slice(0, 3);
-
-  return `
-    <section class="app-grid">
-      <article class="app-panel app-panel-principal">
-        <div class="app-panel-header">
-          <div>
-            <p class="app-kicker">Prioridad inteligente</p>
-            <h2>Top 3 proyectos de hoy</h2>
-          </div>
-        </div>
-
-        <div class="app-top3-lista">
-          ${top3.map(renderizarTop3Item).join("")}
-        </div>
-      </article>
-
-      <article class="app-panel">
-        <div class="app-panel-header">
-          <div>
-            <p class="app-kicker">Vista rápida</p>
-            <h2>Estado general</h2>
-          </div>
-        </div>
-
-        <div class="app-metricas">
-          <div class="app-metrica">
-            <strong>${proyectos.length}</strong>
-            <span>Proyectos</span>
-          </div>
-          <div class="app-metrica">
-            <strong>$${calcularDineroTotal(proyectos)}</strong>
-            <span>Generado</span>
-          </div>
-          <div class="app-metrica">
-            <strong>${calcularAvancePromedio(proyectos)}%</strong>
-            <span>Avance promedio</span>
-          </div>
-        </div>
-      </article>
-    </section>
-
-    <section class="app-panel">
-      <div class="app-panel-header">
-        <div>
-          <p class="app-kicker">Proyectos</p>
-          <h2>Lista inicial</h2>
-        </div>
-        <button class="app-btn app-btn-primario" type="button" data-ruta="proyectos">Crear proyecto</button>
-      </div>
-
-      <div class="app-tarjetas">
-        ${proyectos.map(renderizarTarjetaProyecto).join("")}
-      </div>
-    </section>
-  `;
+  return renderizarIniMain();
 }
 
 function renderizarProyectos(){
   return `
     <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 1</p>
+      <p class="app-kicker">Bloque 4</p>
       <h2>Crear y editar proyectos</h2>
-      <p>Esta vista quedará funcional en el Bloque 4. Por ahora la base técnica ya permite navegar sin romper la app.</p>
+      <p>Esta vista quedará funcional en el Bloque 4. Aquí se podrá crear un proyecto rápido y editar sus datos principales.</p>
       <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
     </section>
   `;
@@ -184,7 +136,7 @@ function renderizarProyectos(){
 function renderizarDetalleDemo(){
   return `
     <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 1</p>
+      <p class="app-kicker">Bloque 5</p>
       <h2>Detalle del proyecto</h2>
       <p>Esta vista se construirá en el Bloque 5. Aquí aparecerá el estado, semáforo, finanzas, diagnóstico y siguiente acción.</p>
       <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
@@ -195,7 +147,7 @@ function renderizarDetalleDemo(){
 function renderizarFinanzasDemo(){
   return `
     <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 1</p>
+      <p class="app-kicker">Bloque 6</p>
       <h2>Finanzas</h2>
       <p>Esta vista se construirá en el Bloque 6. Aquí se calculará utilidad, dinero por hora y punto de equilibrio.</p>
       <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
@@ -206,62 +158,10 @@ function renderizarFinanzasDemo(){
 function renderizarIaDemo(){
   return `
     <section class="app-panel app-panel-vacio">
-      <p class="app-kicker">Bloque 1</p>
+      <p class="app-kicker">Bloque 9</p>
       <h2>IA / Diagnóstico</h2>
       <p>Esta vista se construirá en el Bloque 9. Aquí la IA dirá qué va bien, qué va mal y qué hacer ahora.</p>
       <button class="app-btn app-btn-secundario" type="button" data-ruta="inicio">Volver al inicio</button>
     </section>
   `;
-}
-
-function renderizarTop3Item(proyecto, index){
-  return `
-    <button class="app-top3-item" type="button" data-proyecto-id="${proyecto.id}">
-      <span class="app-top3-posicion">${index + 1}</span>
-      <span>
-        <strong>${proyecto.nombre}</strong>
-        <small>${proyecto.siguienteAccion}</small>
-      </span>
-    </button>
-  `;
-}
-
-function renderizarTarjetaProyecto(proyecto){
-  return `
-    <article class="app-card app-card-${proyecto.semaforo}">
-      <div class="app-card-header">
-        <span class="app-semaforo app-semaforo-${proyecto.semaforo}"></span>
-        <span class="app-estado">${proyecto.estado}</span>
-      </div>
-      <h3>${proyecto.nombre}</h3>
-      <p>${proyecto.tipo}</p>
-      <div class="app-barra" aria-label="Avance ${proyecto.porcentajeAvance}%">
-        <span style="width: ${proyecto.porcentajeAvance}%"></span>
-      </div>
-      <div class="app-card-datos">
-        <strong>${proyecto.porcentajeAvance}%</strong>
-        <span>$${proyecto.dineroGenerado}</span>
-      </div>
-      <p class="app-card-accion">${proyecto.siguienteAccion}</p>
-      <button class="app-btn app-btn-secundario" type="button" data-proyecto-id="${proyecto.id}">Ver proyecto</button>
-    </article>
-  `;
-}
-
-function calcularDineroTotal(proyectos){
-  return proyectos.reduce(function(total, proyecto){
-    return total + Number(proyecto.dineroGenerado || 0);
-  }, 0);
-}
-
-function calcularAvancePromedio(proyectos){
-  if(!proyectos.length){
-    return 0;
-  }
-
-  const total = proyectos.reduce(function(suma, proyecto){
-    return suma + Number(proyecto.porcentajeAvance || 0);
-  }, 0);
-
-  return Math.round(total / proyectos.length);
 }
