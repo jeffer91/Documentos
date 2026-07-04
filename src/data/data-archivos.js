@@ -2,12 +2,13 @@
 Nombre completo: data-archivos.js
 Ruta o ubicación: src/data/data-archivos.js
 Función o funciones:
-- Definir la estructura base de archivos asociados a proyectos.
-- Preparar registros para PDF, Excel, imagen y texto pegado.
-- Guardar resumen, tareas detectadas y riesgos detectados.
+- Definir la estructura base de archivos y textos asociados a proyectos.
+- Preparar registros para texto pegado, notas, PDF, Excel, imagen y otros documentos.
+- Guardar resumen, tareas detectadas, alertas detectadas e ideas detectadas.
 Con qué se conecta:
+- srv-archivos.js
 - srv-proyectos.js
-- futuras pantallas de archivos
+- pantallas/06-archivos
 - futura IA de análisis documental
 ========================================================= */
 
@@ -23,9 +24,11 @@ export function crearArchivoBase(datos = {}){
     nombre: normalizarTexto(datos.nombre, "Archivo sin nombre"),
     tipo: normalizarTexto(datos.tipo, "otro"),
     origen: normalizarTexto(datos.origen, "subido"),
+    contenido: normalizarTexto(datos.contenido),
     resumen: normalizarTexto(datos.resumen),
     tareasDetectadas: Array.isArray(datos.tareasDetectadas) ? datos.tareasDetectadas : [],
     riesgosDetectados: Array.isArray(datos.riesgosDetectados) ? datos.riesgosDetectados : [],
+    ideasDetectadas: Array.isArray(datos.ideasDetectadas) ? datos.ideasDetectadas : [],
     creadoEn: datos.creadoEn || obtenerFechaIsoActual()
   };
 }
