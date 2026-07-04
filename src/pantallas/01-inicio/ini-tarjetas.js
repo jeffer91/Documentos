@@ -3,11 +3,12 @@ Nombre completo: ini-tarjetas.js
 Ruta o ubicación: src/pantallas/01-inicio/ini-tarjetas.js
 Función o funciones:
 - Renderizar tarjetas de proyectos para la pantalla Inicio.
-- Mostrar nombre, semáforo, avance, dinero generado y siguiente acción.
+- Mostrar nombre, semáforo, avance, prioridad, dinero generado y siguiente acción.
 - Mantener separada la lógica visual de tarjetas.
 Con qué se conecta:
 - ini-main.js
 - ini-eventos.js
+- srv-indicadores.js
 ========================================================= */
 
 export function renderizarIniTarjetas(proyectos){
@@ -29,6 +30,7 @@ export function renderizarIniTarjetas(proyectos){
 
 function renderizarIniTarjetaProyecto(proyecto){
   const porcentaje = Number(proyecto.porcentajeAvance || 0);
+  const ingresos = Number(proyecto.resumenFinanciero?.ingresosTotales || proyecto.dineroGenerado || 0);
 
   return `
     <article class="ini-card ini-card-${proyecto.semaforo}">
@@ -46,9 +48,11 @@ function renderizarIniTarjetaProyecto(proyecto){
 
       <div class="ini-card-datos">
         <strong>${porcentaje}%</strong>
-        <span>$${Number(proyecto.dineroGenerado || 0)}</span>
+        <span>Prioridad ${Number(proyecto.prioridad || 0)}</span>
+        <span>$${ingresos}</span>
       </div>
 
+      <p class="ini-card-razon">${proyecto.razonSemaforo || "Indicador en construcción."}</p>
       <p class="ini-card-accion">${proyecto.siguienteAccion}</p>
 
       <button class="app-btn app-btn-secundario" type="button" data-ini-proyecto-id="${proyecto.id}">
