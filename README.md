@@ -116,6 +116,17 @@ docs/07-finanzas.md
 
 ---
 
+## Cómo ejecutar la app
+
+```bash
+npm install
+npm start
+```
+
+Luego abre la dirección local que indique la terminal.
+
+---
+
 ## Plan de construcción
 
 El plan completo por bloques está en:
@@ -147,7 +158,8 @@ Bloque 12: Configuración y cierre
 ## Estado actual
 
 ```text
-Bloque actual: Bloque 1
+Bloque actual: Bloque 2
 Bloque 0: Completado
-Siguiente paso: Base técnica de la app
+Bloque 1: Completado
+Siguiente paso: Modelo de datos y almacenamiento local
 ```
