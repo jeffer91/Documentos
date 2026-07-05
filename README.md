@@ -21,8 +21,14 @@ Bloque 3:
 - Mejor proporción de tabla superior, título central y firmas.
 - Control temporal para impedir PDF hasta activar exportación.
 
+Bloque 4:
+- Generador PDF agregado.
+- Selector Word/PDF conectado.
+- Guardado con extensión .docx o .pdf según selección.
+- PDF generado desde una ventana oculta de Electron.
+
 Para ejecutar:
 npm install
 npm start
 
-Nota: en este momento se genera Word. La exportación PDF queda para el siguiente bloque.
+Nota: ya se puede generar Word y PDF desde el selector inicial.
