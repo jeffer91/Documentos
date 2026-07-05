@@ -5,7 +5,7 @@ Funciones principales:
 - Manejar la pantalla inicial.
 - Actualizar la vista previa de la portada.
 - Enviar los datos a Electron para generar Word o PDF.
-- Mostrar historial reciente, abrir archivos y guardar ajustes.
+- Mostrar historial reciente, abrir archivos, guardar ajustes y validar datos.
 ========================================================= */
 
 (function () {
@@ -150,6 +150,12 @@ Funciones principales:
     return currentSettings.signers;
   }
 
+  function mostrarAviso(message) {
+    if ($("noticeBox")) {
+      $("noticeBox").textContent = message;
+    }
+  }
+
   function actualizarFirmasVista() {
     const signers = getSigners();
     setText("previewElaboradoNombre", signers.elaboradoPor.nombre);
@@ -178,13 +184,15 @@ Funciones principales:
     }
 
     if (!tipo) {
-      $("noticeBox").textContent = "Selecciona un tipo de documento para preparar la portada.";
+      mostrarAviso("Selecciona un tipo de documento para preparar la portada.");
       return;
     }
 
-    $("noticeBox").textContent = tipo[3]
-      ? "Este documento usará portada formal. Salida seleccionada: " + textoSalida() + "."
-      : "Este documento usa formato administrativo. Salida seleccionada: " + textoSalida() + ".";
+    mostrarAviso(
+      tipo[3]
+        ? "Este documento usará portada formal. Salida seleccionada: " + textoSalida() + "."
+        : "Este documento usa formato administrativo. Salida seleccionada: " + textoSalida() + "."
+    );
   }
 
   function datosPortada() {
@@ -208,6 +216,25 @@ Funciones principales:
       totalPages: totalPaginas(),
       signers: getSigners()
     };
+  }
+
+  function validarDatosPortada() {
+    const errores = [];
+    const signers = getSigners();
+
+    if (!tipoActual()) errores.push("Selecciona el tipo de documento.");
+    if (!limpiar($("documentTitle").value)) errores.push("Escribe el nombre del documento.");
+    if (!limpiar($("unitName").value)) errores.push("Escribe la unidad o coordinación.");
+    if (!limpiar($("unitCode").value)) errores.push("Escribe la sigla de la unidad.");
+    if (!limpiar($("version").value)) errores.push("Escribe la versión.");
+    if (!limpiar($("documentNumber").value)) errores.push("Escribe el número del documento.");
+    if (!/^\d{4}$/.test(limpiar($("year").value))) errores.push("El año debe tener 4 números.");
+    if (!limpiar($("month").value)) errores.push("Escribe el mes.");
+    if (totalPaginas() < 1) errores.push("El total de páginas debe ser mínimo 1.");
+    if (!signers.elaboradoPor.nombre || !signers.revisadoPor.nombre || !signers.aprobadoPor.nombre) errores.push("Completa los nombres de los tres firmantes en Ajustes rápidos.");
+    if (!signers.elaboradoPor.cargo || !signers.revisadoPor.cargo || !signers.aprobadoPor.cargo) errores.push("Completa los cargos de los tres firmantes en Ajustes rápidos.");
+
+    return errores;
   }
 
   function formatDateTime(value) {
@@ -271,7 +298,7 @@ Funciones principales:
     if (!window.documentosApp || !window.documentosApp.openFile) return;
     const response = await window.documentosApp.openFile(filePath);
     if (!response || !response.ok) {
-      $("noticeBox").textContent = "No se pudo abrir el archivo.";
+      mostrarAviso("No se pudo abrir el archivo.");
     }
   }
 
@@ -338,31 +365,32 @@ Funciones principales:
   async function prepararPortada(event) {
     event.preventDefault();
 
-    if (!tipoActual()) {
-      $("noticeBox").textContent = "Primero selecciona el tipo de documento.";
+    const errores = validarDatosPortada();
+    if (errores.length) {
+      mostrarAviso("Revisa esto: " + errores[0]);
       return;
     }
 
     if (!window.documentosApp || !window.documentosApp.generateCover) {
-      $("noticeBox").textContent = "No se encontró la conexión con Electron.";
+      mostrarAviso("No se encontró la conexión con Electron.");
       return;
     }
 
-    $("noticeBox").textContent = "Generando archivo " + textoSalida() + "...";
+    mostrarAviso("Generando archivo " + textoSalida() + "...");
 
     const respuesta = await window.documentosApp.generateCover(datosPortada());
 
     if (respuesta && respuesta.canceled) {
-      $("noticeBox").textContent = "Guardado cancelado.";
+      mostrarAviso("Guardado cancelado.");
       return;
     }
 
     if (!respuesta || !respuesta.ok) {
-      $("noticeBox").textContent = "No se pudo generar la portada: " + (respuesta && respuesta.error ? respuesta.error : "error desconocido");
+      mostrarAviso("No se pudo generar la portada: " + (respuesta && respuesta.error ? respuesta.error : "error desconocido"));
       return;
     }
 
-    $("noticeBox").textContent = "Portada " + textoSalida() + " generada correctamente: " + respuesta.path;
+    mostrarAviso("Portada " + textoSalida() + " generada correctamente: " + respuesta.path);
     await loadHistory();
   }
 
