@@ -4,7 +4,7 @@ Ruta: /src/main/document-generator.cjs
 Funciones principales:
 - Generar una portada institucional en Word.
 - Crear tabla superior, título central y tabla inferior de firmas.
-- Aplicar proporciones más cercanas al formato institucional.
+- Aplicar fecha editable y número total de páginas.
 ========================================================= */
 
 const {
@@ -30,6 +30,16 @@ const GRAY = "F2F2F2";
 
 function text(value) {
   return String(value || "").trim();
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return fallback;
+  return Math.floor(number);
+}
+
+function pageText(data) {
+  return "Página 1 de " + positiveNumber(data.totalPages, 1);
 }
 
 function run(value, options) {
@@ -118,7 +128,7 @@ function buildHeaderTable(data) {
           cell([paragraph([run(title, { bold: true, size: 18 })])], 46),
           cell([
             paragraph([run("Versión: " + version, { size: 18 })]),
-            paragraph([run("Página 1 de 1", { size: 18 })])
+            paragraph([run(pageText(data), { size: 18 })])
           ], 26)
         ]
       })
