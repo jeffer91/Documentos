@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Generador de Documentos ITSQMET</title>
+  <link rel="stylesheet" href="./src/renderer/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-box">
+        <div class="brand-icon">D</div>
+        <div>
+          <h1>Documentos</h1>
+          <p>Generador institucional</p>
+        </div>
+      </div>
+      <nav class="menu">
+        <button class="menu-item active" type="button">Portadas</button>
+        <button class="menu-item" type="button" disabled>Documentos</button>
+        <button class="menu-item" type="button" disabled>Historial</button>
+        <button class="menu-item" type="button" disabled>Ajustes</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span>Modo Electron</span>
+        <strong id="appVersion">v1.0.0</strong>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <h2>Generador de portadas</h2>
+          <p>Selecciona el tipo de documento institucional que deseas crear.</p>
+        </div>
+        <div class="status-pill">Bloque 1</div>
+      </header>
+
+      <section class="content-grid">
+        <form class="card form-card" id="documentForm">
+          <h3>Datos del documento</h3>
+
+          <div class="form-group">
+            <label for="documentType">Tipo de documento</label>
+            <select id="documentType" name="documentType" required>
+              <option value="">Selecciona una opción</option>
+              <option value="REG">Reglamento</option>
+              <option value="POL">Política</option>
+              <option value="MP">Manual de Procesos</option>
+              <option value="INS">Instructivo</option>
+              <option value="INSO">Informe de Socialización</option>
+              <option value="ACT">Acta de Reunión</option>
+              <option value="INF">Informe de cualquier índole</option>
+              <option value="PROG">Programa</option>
+              <option value="OFI">Oficio</option>
+              <option value="MEM">Memorando</option>
+              <option value="COM">Comunicado</option>
+              <option value="CERT">Certificado</option>
+              <option value="RGI">Formato / Registro</option>
+            </select>
+          </div>
+
+          <div class="form-row two-columns">
+            <div class="form-group">
+              <label for="unitName">Unidad o coordinación</label>
+              <input id="unitName" name="unitName" type="text" value="Titulación y Eficiencia Terminal" />
+            </div>
+            <div class="form-group small">
+              <label for="unitCode">Sigla</label>
+              <input id="unitCode" name="unitCode" type="text" value="UTET" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="documentTitle">Nombre del documento</label>
+            <input id="documentTitle" name="documentTitle" type="text" placeholder="Ejemplo: Reglamento de Titulación" />
+          </div>
+
+          <div class="form-row three-columns">
+            <div class="form-group small">
+              <label for="version">Versión</label>
+              <input id="version" name="version" type="text" value="1.0" />
+            </div>
+            <div class="form-group small">
+              <label for="documentNumber">N°</label>
+              <input id="documentNumber" name="documentNumber" type="text" value="01" />
+            </div>
+            <div class="form-group small">
+              <label for="processNumber">Proceso</label>
+              <input id="processNumber" name="processNumber" type="text" value="0X" />
+            </div>
+          </div>
+
+          <div class="form-row three-columns">
+            <div class="form-group small">
+              <label for="year">Año</label>
+              <input id="year" name="year" type="text" value="2026" />
+            </div>
+            <div class="form-group small">
+              <label for="month">Mes</label>
+              <input id="month" name="month" type="text" value="07" />
+            </div>
+            <div class="form-group small">
+              <label for="outputType">Salida</label>
+              <select id="outputType" name="outputType">
+                <option value="docx">Word</option>
+                <option value="pdf">PDF</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="primary-button" type="submit">Preparar portada</button>
+        </form>
+
+        <section class="card preview-card">
+          <div class="preview-header">
+            <h3>Vista previa lógica</h3>
+            <span id="docBadge">Sin seleccionar</span>
+          </div>
+
+          <div class="preview-box">
+            <div class="mini-header">
+              <div class="mini-logo">ITSQMET</div>
+              <div class="mini-center">
+                <p id="previewUnit">Unidad / Coordinación</p>
+                <strong id="previewHeaderTitle">Nombre del documento</strong>
+              </div>
+              <div class="mini-code">
+                <p>Código:</p>
+                <strong id="previewCode">----</strong>
+                <p>Versión: <span id="previewVersion">1.0</span></p>
+              </div>
+            </div>
+
+            <div class="mini-title" id="previewMainTitle">Portada del documento</div>
+
+            <div class="signatures">
+              <div>
+                <h4>ELABORADO POR:</h4>
+                <p><strong>NOMBRE:</strong> Mgs. Jefferson Villarreal</p>
+                <p><strong>CARGO:</strong> Coordinador de Titulación y Eficiencia Terminal</p>
+              </div>
+              <div>
+                <h4>REVISADO POR:</h4>
+                <p><strong>NOMBRE:</strong> Mgs Martha Tomalá</p>
+                <p><strong>CARGO:</strong> Coordinadora General de Carreras</p>
+              </div>
+              <div>
+                <h4>APROBADO POR:</h4>
+                <p><strong>NOMBRE:</strong> Dr. Alex León</p>
+                <p><strong>CARGO:</strong> Vicerrector</p>
+              </div>
+            </div>
+          </div>
+          <div class="notice" id="noticeBox">Completa los datos y presiona Preparar portada.</div>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="./src/renderer/app.js"></script>
+</body>
+</html>
