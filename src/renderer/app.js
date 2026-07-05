@@ -4,6 +4,7 @@ Ruta: /src/renderer/app.js
 Funciones principales:
 - Manejar la pantalla inicial.
 - Actualizar la vista previa de la portada.
+- Enviar los datos a Electron para generar Word.
 ========================================================= */
 
 (function () {
@@ -112,7 +113,42 @@ Funciones principales:
       : "Este documento usa formato administrativo, no portada clásica.";
   }
 
-  function prepararPortada(event) {
+  function datosPortada() {
+    const tipo = tipoActual();
+
+    return {
+      typeKey: $("documentType").value,
+      typeLabel: tipo ? tipo[0] : "",
+      code: construirCodigo(),
+      unitName: limpiar($("unitName").value),
+      unitCode: limpiar($("unitCode").value),
+      title: construirTitulo(),
+      rawTitle: limpiar($("documentTitle").value),
+      version: limpiar($("version").value) || "1.0",
+      number: dosDigitos($("documentNumber").value),
+      processNumber: limpiar($("processNumber").value),
+      year: limpiar($("year").value),
+      month: dosDigitos($("month").value),
+      outputType: $("outputType").value,
+      date: "día/mes/año",
+      signers: {
+        elaboradoPor: {
+          nombre: "Mgs. Jefferson Villarreal",
+          cargo: "Coordinador de Titulación y Eficiencia Terminal"
+        },
+        revisadoPor: {
+          nombre: "Mgs Martha Tomalá",
+          cargo: "Coordinadora General de Carreras"
+        },
+        aprobadoPor: {
+          nombre: "Dr. Alex León",
+          cargo: "Vicerrector"
+        }
+      }
+    };
+  }
+
+  async function prepararPortada(event) {
     event.preventDefault();
 
     if (!tipoActual()) {
@@ -120,7 +156,26 @@ Funciones principales:
       return;
     }
 
-    $("noticeBox").textContent = "Portada preparada correctamente. En el siguiente bloque se generará el Word y el PDF.";
+    if (!window.documentosApp || !window.documentosApp.generateCover) {
+      $("noticeBox").textContent = "No se encontró la conexión con Electron.";
+      return;
+    }
+
+    $("noticeBox").textContent = "Generando archivo Word...";
+
+    const respuesta = await window.documentosApp.generateCover(datosPortada());
+
+    if (respuesta && respuesta.canceled) {
+      $("noticeBox").textContent = "Guardado cancelado.";
+      return;
+    }
+
+    if (!respuesta || !respuesta.ok) {
+      $("noticeBox").textContent = "No se pudo generar la portada: " + (respuesta && respuesta.error ? respuesta.error : "error desconocido");
+      return;
+    }
+
+    $("noticeBox").textContent = "Portada Word generada correctamente: " + respuesta.path;
   }
 
   campos.forEach(function (id) {
