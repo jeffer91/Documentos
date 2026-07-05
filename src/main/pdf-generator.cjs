@@ -4,6 +4,7 @@ Ruta: /src/main/pdf-generator.cjs
 Funciones principales:
 - Generar una portada institucional en PDF desde Electron.
 - Usar una ventana oculta para imprimir HTML a PDF.
+- Aplicar fecha editable y total de páginas.
 ========================================================= */
 
 const fs = require("fs");
@@ -12,6 +13,16 @@ const { getDocumentRule } = require("./document-rules.cjs");
 
 function text(value) {
   return String(value || "").trim();
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return fallback;
+  return Math.floor(number);
+}
+
+function pageText(data) {
+  return "Página 1 de " + positiveNumber(data.totalPages, 1);
 }
 
 function escapeHtml(value) {
@@ -92,7 +103,7 @@ function buildCoverHtml(data) {
       <tr style="height: 15mm;">
         <td class="date">${escapeHtml(rule.dateLabel)}<br />${escapeHtml(data.date || "día/mes/año")}</td>
         <td class="doc-name">${escapeHtml(title)}</td>
-        <td class="code">Versión: ${escapeHtml(data.version || "1.0")}<br />Página 1 de 1</td>
+        <td class="code">Versión: ${escapeHtml(data.version || "1.0")}<br />${escapeHtml(pageText(data))}</td>
       </tr>
     </table>
 
