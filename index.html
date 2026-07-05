@@ -11,7 +11,7 @@
     .brand-box { display: flex; gap: 14px; align-items: center; }
     .brand-icon { width: 48px; height: 48px; border-radius: 16px; background: #0f766e; color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 22px; }
     .brand-box h1 { margin: 0; font-size: 22px; }
-    .brand-box p, .topbar p, .sidebar-footer, .notice, .history-empty, .history-meta { color: #6b7280; }
+    .brand-box p, .topbar p, .sidebar-footer, .notice, .history-empty, .history-meta, .settings-help { color: #6b7280; }
     .menu { display: flex; flex-direction: column; gap: 8px; }
     .menu-item { width: 100%; border: 1px solid transparent; background: transparent; color: #1f2937; text-align: left; padding: 12px 14px; border-radius: 12px; font-size: 15px; }
     .menu-item.active { background: #ecfdf5; border-color: #99f6e4; color: #115e59; font-weight: 700; }
@@ -23,15 +23,16 @@
     .status-pill { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; }
     .content-grid { margin-top: 24px; display: grid; grid-template-columns: 460px 1fr; gap: 24px; align-items: start; }
     .right-column { display: grid; gap: 24px; }
-    .form-card, .preview-card, .history-card { padding: 22px; }
+    .form-card, .preview-card, .history-card, .settings-card { padding: 22px; }
     .form-group { margin-bottom: 16px; }
     .form-row { display: grid; gap: 14px; }
     .two-columns { grid-template-columns: 1fr 120px; }
+    .two-even-columns { grid-template-columns: 1fr 1fr; }
     .three-columns { grid-template-columns: 1fr 1fr 1fr; }
     label { display: block; font-weight: 700; margin-bottom: 7px; font-size: 13px; }
     input, select { width: 100%; border: 1px solid #d9dee7; border-radius: 12px; padding: 11px 12px; font-size: 14px; box-sizing: border-box; }
     .primary-button { width: 100%; margin-top: 8px; border: none; background: #0f766e; color: #fff; font-weight: 700; border-radius: 14px; padding: 13px 16px; font-size: 15px; cursor: pointer; }
-    .preview-header, .history-header { display: flex; justify-content: space-between; align-items: center; }
+    .preview-header, .history-header, .settings-header { display: flex; justify-content: space-between; align-items: center; }
     .preview-header span { background: #fef2f2; color: #d71920; border: 1px solid #fecaca; padding: 7px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
     .preview-box { background: #fff; border: 1px solid #111827; min-height: 560px; padding: 22px; }
     .mini-header { display: grid; grid-template-columns: 180px 1fr 190px; border: 1px solid #111827; }
@@ -49,7 +50,8 @@
     .history-meta { font-size: 12px; }
     .history-actions { display: flex; gap: 8px; }
     .small-button { border: 1px solid #0f766e; background: #fff; color: #0f766e; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-    .history-empty { margin-top: 12px; font-size: 14px; }
+    .history-empty, .settings-help { margin-top: 12px; font-size: 14px; }
+    .settings-block-title { margin: 16px 0 10px; font-size: 14px; color: #0f766e; }
   </style>
 </head>
 <body>
@@ -80,7 +82,7 @@
           <h2>Generador de portadas</h2>
           <p>Selecciona el tipo de documento institucional que deseas crear.</p>
         </div>
-        <div class="status-pill">Bloque 6</div>
+        <div class="status-pill">Bloque 7</div>
       </header>
 
       <section class="content-grid">
@@ -197,18 +199,18 @@
               <div class="signatures">
                 <div>
                   <h4>ELABORADO POR:</h4>
-                  <p><strong>NOMBRE:</strong> Mgs. Jefferson Villarreal</p>
-                  <p><strong>CARGO:</strong> Coordinador de Titulación y Eficiencia Terminal</p>
+                  <p><strong>NOMBRE:</strong> <span id="previewElaboradoNombre">Mgs. Jefferson Villarreal</span></p>
+                  <p><strong>CARGO:</strong> <span id="previewElaboradoCargo">Coordinador de Titulación y Eficiencia Terminal</span></p>
                 </div>
                 <div>
                   <h4>REVISADO POR:</h4>
-                  <p><strong>NOMBRE:</strong> Mgs Martha Tomalá</p>
-                  <p><strong>CARGO:</strong> Coordinadora General de Carreras</p>
+                  <p><strong>NOMBRE:</strong> <span id="previewRevisadoNombre">Mgs Martha Tomalá</span></p>
+                  <p><strong>CARGO:</strong> <span id="previewRevisadoCargo">Coordinadora General de Carreras</span></p>
                 </div>
                 <div>
                   <h4>APROBADO POR:</h4>
-                  <p><strong>NOMBRE:</strong> Dr. Alex León</p>
-                  <p><strong>CARGO:</strong> Vicerrector</p>
+                  <p><strong>NOMBRE:</strong> <span id="previewAprobadoNombre">Dr. Alex León</span></p>
+                  <p><strong>CARGO:</strong> <span id="previewAprobadoCargo">Vicerrector</span></p>
                 </div>
               </div>
             </div>
@@ -222,6 +224,63 @@
             </div>
             <div id="historyList" class="history-list"></div>
             <div id="historyEmpty" class="history-empty">Aún no hay documentos generados.</div>
+          </section>
+
+          <section class="card settings-card">
+            <div class="settings-header">
+              <h3>Ajustes rápidos</h3>
+              <button class="small-button" type="button" id="saveSettingsButton">Guardar</button>
+            </div>
+            <div class="settings-help">Estos datos quedarán guardados para las siguientes portadas.</div>
+
+            <div class="settings-block-title">Unidad por defecto</div>
+            <div class="form-row two-even-columns">
+              <div class="form-group">
+                <label for="settingsUnitName">Unidad</label>
+                <input id="settingsUnitName" type="text" />
+              </div>
+              <div class="form-group">
+                <label for="settingsUnitCode">Sigla</label>
+                <input id="settingsUnitCode" type="text" />
+              </div>
+            </div>
+
+            <div class="settings-block-title">Elaborado por</div>
+            <div class="form-row two-even-columns">
+              <div class="form-group">
+                <label for="settingsElaboradoNombre">Nombre</label>
+                <input id="settingsElaboradoNombre" type="text" />
+              </div>
+              <div class="form-group">
+                <label for="settingsElaboradoCargo">Cargo</label>
+                <input id="settingsElaboradoCargo" type="text" />
+              </div>
+            </div>
+
+            <div class="settings-block-title">Revisado por</div>
+            <div class="form-row two-even-columns">
+              <div class="form-group">
+                <label for="settingsRevisadoNombre">Nombre</label>
+                <input id="settingsRevisadoNombre" type="text" />
+              </div>
+              <div class="form-group">
+                <label for="settingsRevisadoCargo">Cargo</label>
+                <input id="settingsRevisadoCargo" type="text" />
+              </div>
+            </div>
+
+            <div class="settings-block-title">Aprobado por</div>
+            <div class="form-row two-even-columns">
+              <div class="form-group">
+                <label for="settingsAprobadoNombre">Nombre</label>
+                <input id="settingsAprobadoNombre" type="text" />
+              </div>
+              <div class="form-group">
+                <label for="settingsAprobadoCargo">Cargo</label>
+                <input id="settingsAprobadoCargo" type="text" />
+              </div>
+            </div>
+            <div class="notice" id="settingsNotice">Ajustes cargados.</div>
           </section>
         </div>
       </section>
