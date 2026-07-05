@@ -15,8 +15,14 @@ Bloque 2:
 - Botón de la pantalla conectado con Electron.
 - Guardado de archivo .docx mediante ventana de guardar.
 
+Bloque 3:
+- Reglas documentales separadas por tipo de documento.
+- Fecha automática en la portada.
+- Mejor proporción de tabla superior, título central y firmas.
+- Control temporal para impedir PDF hasta activar exportación.
+
 Para ejecutar:
 npm install
 npm start
 
-Nota: en este bloque se genera Word. La exportación PDF queda para el siguiente bloque.
+Nota: en este momento se genera Word. La exportación PDF queda para el siguiente bloque.
