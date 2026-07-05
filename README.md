@@ -33,8 +33,14 @@ Bloque 5:
 - Campo editable de total de páginas.
 - Word y PDF usan el total de páginas indicado.
 
+Bloque 6:
+- Historial local de documentos generados.
+- Lista visual de últimos documentos.
+- Botón para actualizar historial.
+- Botón para abrir archivos generados.
+
 Para ejecutar:
 npm install
 npm start
 
-Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha y páginas editables.
+Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha, páginas editables e historial local.
