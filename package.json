@@ -1,6 +1,6 @@
 {
   "name": "documentos",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "description": "App Electron para generar documentos institucionales ITSQMET",
   "main": "main.cjs",
   "author": "Jefferson Villarreal",
@@ -8,7 +8,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "check": "node scripts/check-project.cjs"
   },
   "dependencies": {
     "docx": "^9.5.1"
