@@ -54,6 +54,14 @@ Funciones principales:
     return texto;
   }
 
+  function fechaActual() {
+    const hoy = new Date();
+    const dia = String(hoy.getDate()).padStart(2, "0");
+    const mes = String(hoy.getMonth() + 1).padStart(2, "0");
+    const anio = String(hoy.getFullYear());
+    return dia + "/" + mes + "/" + anio;
+  }
+
   function tipoActual() {
     const clave = $("documentType").value;
     return tipos[clave] || null;
@@ -130,7 +138,7 @@ Funciones principales:
       year: limpiar($("year").value),
       month: dosDigitos($("month").value),
       outputType: $("outputType").value,
-      date: "día/mes/año",
+      date: fechaActual(),
       signers: {
         elaboradoPor: {
           nombre: "Mgs. Jefferson Villarreal",
@@ -153,6 +161,11 @@ Funciones principales:
 
     if (!tipoActual()) {
       $("noticeBox").textContent = "Primero selecciona el tipo de documento.";
+      return;
+    }
+
+    if ($("outputType").value === "pdf") {
+      $("noticeBox").textContent = "PDF se activará en el siguiente bloque. Por ahora genera Word.";
       return;
     }
 
