@@ -4,7 +4,7 @@ Ruta: /src/renderer/app.js
 Funciones principales:
 - Manejar la pantalla inicial.
 - Actualizar la vista previa de la portada.
-- Enviar los datos a Electron para generar Word.
+- Enviar los datos a Electron para generar Word o PDF.
 ========================================================= */
 
 (function () {
@@ -99,6 +99,10 @@ Funciones principales:
     return tipo[1] + " " + titulo;
   }
 
+  function textoSalida() {
+    return $("outputType").value === "pdf" ? "PDF" : "Word";
+  }
+
   function actualizarVista() {
     const tipo = tipoActual();
     const unidad = limpiar($("unitName").value) || "Unidad / Coordinación";
@@ -117,8 +121,8 @@ Funciones principales:
     }
 
     $("noticeBox").textContent = tipo[3]
-      ? "Este documento usará portada formal con tabla superior y tabla inferior de firmas."
-      : "Este documento usa formato administrativo, no portada clásica.";
+      ? "Este documento usará portada formal. Salida seleccionada: " + textoSalida() + "."
+      : "Este documento usa formato administrativo. Salida seleccionada: " + textoSalida() + ".";
   }
 
   function datosPortada() {
@@ -164,17 +168,12 @@ Funciones principales:
       return;
     }
 
-    if ($("outputType").value === "pdf") {
-      $("noticeBox").textContent = "PDF se activará en el siguiente bloque. Por ahora genera Word.";
-      return;
-    }
-
     if (!window.documentosApp || !window.documentosApp.generateCover) {
       $("noticeBox").textContent = "No se encontró la conexión con Electron.";
       return;
     }
 
-    $("noticeBox").textContent = "Generando archivo Word...";
+    $("noticeBox").textContent = "Generando archivo " + textoSalida() + "...";
 
     const respuesta = await window.documentosApp.generateCover(datosPortada());
 
@@ -188,7 +187,7 @@ Funciones principales:
       return;
     }
 
-    $("noticeBox").textContent = "Portada Word generada correctamente: " + respuesta.path;
+    $("noticeBox").textContent = "Portada " + textoSalida() + " generada correctamente: " + respuesta.path;
   }
 
   campos.forEach(function (id) {
