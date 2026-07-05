@@ -5,12 +5,14 @@ Funciones principales:
 - Iniciar la aplicación Electron.
 - Crear la ventana principal.
 - Conectar la pantalla con el generador de Word y PDF.
+- Guardar y consultar historial local.
 ========================================================= */
 
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const path = require("path");
 const { generateCoverDocx } = require("./src/main/document-generator.cjs");
 const { generateCoverPdf } = require("./src/main/pdf-generator.cjs");
+const { addHistoryItem, readHistory } = require("./src/main/history-service.cjs");
 
 let mainWindow = null;
 
@@ -88,10 +90,29 @@ function registerIpcHandlers() {
       }
 
       const savedPath = await generateByOutputType(data, result.filePath);
-      return { ok: true, path: savedPath, outputType: config.outputType };
+      const historyItem = addHistoryItem(app.getPath("userData"), {
+        typeKey: data.typeKey,
+        typeLabel: data.typeLabel,
+        title: data.title,
+        code: data.code,
+        outputType: config.outputType,
+        filePath: savedPath
+      });
+
+      return { ok: true, path: savedPath, outputType: config.outputType, historyItem: historyItem };
     } catch (error) {
       return { ok: false, error: error.message || String(error) };
     }
+  });
+
+  ipcMain.handle("documents:get-history", async function () {
+    return { ok: true, items: readHistory(app.getPath("userData")) };
+  });
+
+  ipcMain.handle("documents:open-file", async function (_event, filePath) {
+    if (!filePath) return { ok: false, error: "Ruta vacía" };
+    const result = await shell.openPath(filePath);
+    return result ? { ok: false, error: result } : { ok: true };
   });
 }
 
