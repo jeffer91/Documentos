@@ -40,7 +40,9 @@ Funciones principales:
     "processNumber",
     "year",
     "month",
-    "outputType"
+    "outputType",
+    "documentDate",
+    "totalPages"
   ];
 
   function limpiar(valor) {
@@ -54,12 +56,28 @@ Funciones principales:
     return texto;
   }
 
-  function fechaActual() {
+  function fechaIsoActual() {
     const hoy = new Date();
     const dia = String(hoy.getDate()).padStart(2, "0");
     const mes = String(hoy.getMonth() + 1).padStart(2, "0");
     const anio = String(hoy.getFullYear());
-    return dia + "/" + mes + "/" + anio;
+    return anio + "-" + mes + "-" + dia;
+  }
+
+  function fechaActual() {
+    return convertirFechaIso(limpiar($("documentDate").value) || fechaIsoActual());
+  }
+
+  function convertirFechaIso(valor) {
+    const partes = limpiar(valor).split("-");
+    if (partes.length !== 3) return valor || "día/mes/año";
+    return partes[2] + "/" + partes[1] + "/" + partes[0];
+  }
+
+  function totalPaginas() {
+    const numero = Number(limpiar($("totalPages").value));
+    if (!Number.isFinite(numero) || numero < 1) return 1;
+    return Math.floor(numero);
   }
 
   function tipoActual() {
@@ -115,6 +133,10 @@ Funciones principales:
     $("previewVersion").textContent = limpiar($("version").value) || "1.0";
     $("previewMainTitle").textContent = titulo;
 
+    if ($("previewTotalPages")) {
+      $("previewTotalPages").textContent = String(totalPaginas());
+    }
+
     if (!tipo) {
       $("noticeBox").textContent = "Selecciona un tipo de documento para preparar la portada.";
       return;
@@ -143,6 +165,7 @@ Funciones principales:
       month: dosDigitos($("month").value),
       outputType: $("outputType").value,
       date: fechaActual(),
+      totalPages: totalPaginas(),
       signers: {
         elaboradoPor: {
           nombre: "Mgs. Jefferson Villarreal",
@@ -190,8 +213,13 @@ Funciones principales:
     $("noticeBox").textContent = "Portada " + textoSalida() + " generada correctamente: " + respuesta.path;
   }
 
+  if ($("documentDate") && !$("documentDate").value) {
+    $("documentDate").value = fechaIsoActual();
+  }
+
   campos.forEach(function (id) {
     const campo = $(id);
+    if (!campo) return;
     campo.addEventListener("input", actualizarVista);
     campo.addEventListener("change", actualizarVista);
   });
