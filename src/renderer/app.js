@@ -5,6 +5,7 @@ Funciones principales:
 - Manejar la pantalla inicial.
 - Actualizar la vista previa de la portada.
 - Enviar los datos a Electron para generar Word o PDF.
+- Mostrar historial reciente y permitir abrir archivos generados.
 ========================================================= */
 
 (function () {
@@ -183,6 +184,71 @@ Funciones principales:
     };
   }
 
+  function formatDateTime(value) {
+    if (!value) return "Fecha no registrada";
+    try {
+      return new Date(value).toLocaleString();
+    } catch (_error) {
+      return value;
+    }
+  }
+
+  function renderHistory(items) {
+    const list = $("historyList");
+    const empty = $("historyEmpty");
+    if (!list || !empty) return;
+
+    list.innerHTML = "";
+    const safeItems = Array.isArray(items) ? items.slice(0, 5) : [];
+    empty.style.display = safeItems.length ? "none" : "block";
+
+    safeItems.forEach(function (item) {
+      const card = document.createElement("div");
+      card.className = "history-item";
+
+      const title = document.createElement("div");
+      title.className = "history-title";
+      title.textContent = item.title || "Documento sin título";
+
+      const meta = document.createElement("div");
+      meta.className = "history-meta";
+      meta.textContent = (item.code || "Sin código") + " | " + (item.outputType || "docx").toUpperCase() + " | " + formatDateTime(item.createdAt);
+
+      const actions = document.createElement("div");
+      actions.className = "history-actions";
+
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "small-button";
+      openButton.textContent = "Abrir";
+      openButton.addEventListener("click", function () {
+        openGeneratedFile(item.filePath);
+      });
+
+      actions.appendChild(openButton);
+      card.appendChild(title);
+      card.appendChild(meta);
+      card.appendChild(actions);
+      list.appendChild(card);
+    });
+  }
+
+  async function loadHistory() {
+    if (!window.documentosApp || !window.documentosApp.getHistory) return;
+    const response = await window.documentosApp.getHistory();
+    if (response && response.ok) {
+      renderHistory(response.items || []);
+    }
+  }
+
+  async function openGeneratedFile(filePath) {
+    if (!window.documentosApp || !window.documentosApp.openFile) return;
+    const response = await window.documentosApp.openFile(filePath);
+    if (!response || !response.ok) {
+      $("noticeBox").textContent = "No se pudo abrir el archivo.";
+    }
+  }
+
   async function prepararPortada(event) {
     event.preventDefault();
 
@@ -211,6 +277,7 @@ Funciones principales:
     }
 
     $("noticeBox").textContent = "Portada " + textoSalida() + " generada correctamente: " + respuesta.path;
+    await loadHistory();
   }
 
   if ($("documentDate") && !$("documentDate").value) {
@@ -226,9 +293,14 @@ Funciones principales:
 
   $("documentForm").addEventListener("submit", prepararPortada);
 
+  if ($("refreshHistoryButton")) {
+    $("refreshHistoryButton").addEventListener("click", loadHistory);
+  }
+
   if (window.documentosApp && window.documentosApp.version) {
     $("appVersion").textContent = "v" + window.documentosApp.version;
   }
 
   actualizarVista();
+  loadHistory();
 })();
