@@ -4,12 +4,13 @@ Ruta: /main.cjs
 Funciones principales:
 - Iniciar la aplicación Electron.
 - Crear la ventana principal.
-- Conectar la pantalla con el generador de Word.
+- Conectar la pantalla con el generador de Word y PDF.
 ========================================================= */
 
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const path = require("path");
 const { generateCoverDocx } = require("./src/main/document-generator.cjs");
+const { generateCoverPdf } = require("./src/main/pdf-generator.cjs");
 
 let mainWindow = null;
 
@@ -43,22 +44,51 @@ function safeFileName(value) {
     .trim();
 }
 
+function getOutputConfig(data) {
+  const outputType = data && data.outputType === "pdf" ? "pdf" : "docx";
+
+  if (outputType === "pdf") {
+    return {
+      outputType: "pdf",
+      extension: "pdf",
+      title: "Guardar portada PDF",
+      filterName: "Documento PDF"
+    };
+  }
+
+  return {
+    outputType: "docx",
+    extension: "docx",
+    title: "Guardar portada Word",
+    filterName: "Documento Word"
+  };
+}
+
+async function generateByOutputType(data, filePath) {
+  if (data && data.outputType === "pdf") {
+    return generateCoverPdf(data, filePath);
+  }
+
+  return generateCoverDocx(data, filePath);
+}
+
 function registerIpcHandlers() {
   ipcMain.handle("documents:generate-cover", async function (_event, data) {
     try {
+      const config = getOutputConfig(data);
       const baseName = safeFileName(data && data.code ? data.code : "portada-institucional");
       const result = await dialog.showSaveDialog(mainWindow, {
-        title: "Guardar portada Word",
-        defaultPath: baseName + ".docx",
-        filters: [{ name: "Documento Word", extensions: ["docx"] }]
+        title: config.title,
+        defaultPath: baseName + "." + config.extension,
+        filters: [{ name: config.filterName, extensions: [config.extension] }]
       });
 
       if (result.canceled || !result.filePath) {
         return { ok: false, canceled: true };
       }
 
-      const savedPath = await generateCoverDocx(data, result.filePath);
-      return { ok: true, path: savedPath };
+      const savedPath = await generateByOutputType(data, result.filePath);
+      return { ok: true, path: savedPath, outputType: config.outputType };
     } catch (error) {
       return { ok: false, error: error.message || String(error) };
     }
