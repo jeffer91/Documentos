@@ -9,8 +9,14 @@ Bloque 1:
 - Vista previa lógica de portada.
 - Firmantes institucionales configurados.
 
+Bloque 2:
+- Dependencia docx agregada.
+- Generador de portada Word creado.
+- Botón de la pantalla conectado con Electron.
+- Guardado de archivo .docx mediante ventana de guardar.
+
 Para ejecutar:
 npm install
 npm start
 
-Siguiente bloque: generación real de portadas en Word y PDF.
+Nota: en este bloque se genera Word. La exportación PDF queda para el siguiente bloque.
