@@ -3,12 +3,15 @@ Archivo: preload.cjs
 Ruta: /preload.cjs
 Funciones principales:
 - Comunicar de forma segura Electron con la pantalla.
-- Exponer información básica de la app al renderer.
+- Exponer funciones autorizadas para generar documentos.
 ========================================================= */
 
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "1.0.0",
-  modo: "electron"
+  version: "1.1.0",
+  modo: "electron",
+  generateCover: function (data) {
+    return ipcRenderer.invoke("documents:generate-cover", data);
+  }
 });
