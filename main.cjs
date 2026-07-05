@@ -5,7 +5,7 @@ Funciones principales:
 - Iniciar la aplicación Electron.
 - Crear la ventana principal.
 - Conectar la pantalla con el generador de Word y PDF.
-- Guardar y consultar historial local.
+- Guardar y consultar historial y ajustes locales.
 ========================================================= */
 
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
@@ -13,6 +13,7 @@ const path = require("path");
 const { generateCoverDocx } = require("./src/main/document-generator.cjs");
 const { generateCoverPdf } = require("./src/main/pdf-generator.cjs");
 const { addHistoryItem, readHistory } = require("./src/main/history-service.cjs");
+const { readSettings, saveSettings } = require("./src/main/settings-service.cjs");
 
 let mainWindow = null;
 
@@ -113,6 +114,14 @@ function registerIpcHandlers() {
     if (!filePath) return { ok: false, error: "Ruta vacía" };
     const result = await shell.openPath(filePath);
     return result ? { ok: false, error: result } : { ok: true };
+  });
+
+  ipcMain.handle("documents:get-settings", async function () {
+    return { ok: true, settings: readSettings(app.getPath("userData")) };
+  });
+
+  ipcMain.handle("documents:save-settings", async function (_event, settings) {
+    return { ok: true, settings: saveSettings(app.getPath("userData"), settings) };
   });
 }
 
