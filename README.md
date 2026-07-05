@@ -45,8 +45,17 @@ Bloque 7:
 - Botón para guardar ajustes.
 - Las nuevas portadas usan automáticamente los datos guardados.
 
+Bloque 8:
+- Validaciones antes de generar portada.
+- Diagnóstico del proyecto con npm run check.
+- Archivo .gitignore agregado.
+- Versión del proyecto actualizada.
+
 Para ejecutar:
 npm install
 npm start
 
-Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha, páginas editables, historial local y ajustes guardados.
+Para revisar diagnóstico:
+npm run check
+
+Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha, páginas editables, historial local, ajustes guardados y validaciones básicas.
