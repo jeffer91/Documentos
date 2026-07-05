@@ -11,7 +11,7 @@
     .brand-box { display: flex; gap: 14px; align-items: center; }
     .brand-icon { width: 48px; height: 48px; border-radius: 16px; background: #0f766e; color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 22px; }
     .brand-box h1 { margin: 0; font-size: 22px; }
-    .brand-box p, .topbar p, .sidebar-footer, .notice { color: #6b7280; }
+    .brand-box p, .topbar p, .sidebar-footer, .notice, .history-empty, .history-meta { color: #6b7280; }
     .menu { display: flex; flex-direction: column; gap: 8px; }
     .menu-item { width: 100%; border: 1px solid transparent; background: transparent; color: #1f2937; text-align: left; padding: 12px 14px; border-radius: 12px; font-size: 15px; }
     .menu-item.active { background: #ecfdf5; border-color: #99f6e4; color: #115e59; font-weight: 700; }
@@ -22,15 +22,16 @@
     .topbar h2 { margin: 0; font-size: 26px; }
     .status-pill { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; }
     .content-grid { margin-top: 24px; display: grid; grid-template-columns: 460px 1fr; gap: 24px; align-items: start; }
-    .form-card, .preview-card { padding: 22px; }
+    .right-column { display: grid; gap: 24px; }
+    .form-card, .preview-card, .history-card { padding: 22px; }
     .form-group { margin-bottom: 16px; }
     .form-row { display: grid; gap: 14px; }
     .two-columns { grid-template-columns: 1fr 120px; }
     .three-columns { grid-template-columns: 1fr 1fr 1fr; }
     label { display: block; font-weight: 700; margin-bottom: 7px; font-size: 13px; }
     input, select { width: 100%; border: 1px solid #d9dee7; border-radius: 12px; padding: 11px 12px; font-size: 14px; box-sizing: border-box; }
-    .primary-button { width: 100%; margin-top: 8px; border: none; background: #0f766e; color: #fff; font-weight: 700; border-radius: 14px; padding: 13px 16px; font-size: 15px; }
-    .preview-header { display: flex; justify-content: space-between; align-items: center; }
+    .primary-button { width: 100%; margin-top: 8px; border: none; background: #0f766e; color: #fff; font-weight: 700; border-radius: 14px; padding: 13px 16px; font-size: 15px; cursor: pointer; }
+    .preview-header, .history-header { display: flex; justify-content: space-between; align-items: center; }
     .preview-header span { background: #fef2f2; color: #d71920; border: 1px solid #fecaca; padding: 7px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
     .preview-box { background: #fff; border: 1px solid #111827; min-height: 560px; padding: 22px; }
     .mini-header { display: grid; grid-template-columns: 180px 1fr 190px; border: 1px solid #111827; }
@@ -42,6 +43,13 @@
     .signatures h4 { margin: 0; text-align: center; padding: 8px; border-bottom: 1px solid #111827; font-size: 15px; font-weight: 500; }
     .signatures p { margin: 0; padding: 6px 8px; border-top: 1px solid #111827; font-size: 11px; }
     .notice { margin-top: 16px; background: #f8fafc; border: 1px solid #d9dee7; border-radius: 14px; padding: 12px 14px; font-size: 14px; }
+    .history-list { display: grid; gap: 10px; margin-top: 14px; }
+    .history-item { border: 1px solid #d9dee7; border-radius: 14px; padding: 12px; background: #f8fafc; display: grid; gap: 6px; }
+    .history-title { font-weight: 700; font-size: 14px; }
+    .history-meta { font-size: 12px; }
+    .history-actions { display: flex; gap: 8px; }
+    .small-button { border: 1px solid #0f766e; background: #fff; color: #0f766e; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+    .history-empty { margin-top: 12px; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -72,7 +80,7 @@
           <h2>Generador de portadas</h2>
           <p>Selecciona el tipo de documento institucional que deseas crear.</p>
         </div>
-        <div class="status-pill">Bloque 5</div>
+        <div class="status-pill">Bloque 6</div>
       </header>
 
       <section class="content-grid">
@@ -162,49 +170,60 @@
           <button class="primary-button" type="submit">Generar portada</button>
         </form>
 
-        <section class="card preview-card">
-          <div class="preview-header">
-            <h3>Vista previa lógica</h3>
-            <span id="docBadge">Sin seleccionar</span>
-          </div>
-
-          <div class="preview-box">
-            <div class="mini-header">
-              <div class="mini-logo">ITSQMET</div>
-              <div class="mini-center">
-                <p id="previewUnit">Unidad / Coordinación</p>
-                <strong id="previewHeaderTitle">Nombre del documento</strong>
-              </div>
-              <div class="mini-code">
-                <p>Código:</p>
-                <strong id="previewCode">----</strong>
-                <p>Versión: <span id="previewVersion">1.0</span></p>
-                <p>Página 1 de <span id="previewTotalPages">1</span></p>
-              </div>
+        <div class="right-column">
+          <section class="card preview-card">
+            <div class="preview-header">
+              <h3>Vista previa lógica</h3>
+              <span id="docBadge">Sin seleccionar</span>
             </div>
 
-            <div class="mini-title" id="previewMainTitle">Portada del documento</div>
+            <div class="preview-box">
+              <div class="mini-header">
+                <div class="mini-logo">ITSQMET</div>
+                <div class="mini-center">
+                  <p id="previewUnit">Unidad / Coordinación</p>
+                  <strong id="previewHeaderTitle">Nombre del documento</strong>
+                </div>
+                <div class="mini-code">
+                  <p>Código:</p>
+                  <strong id="previewCode">----</strong>
+                  <p>Versión: <span id="previewVersion">1.0</span></p>
+                  <p>Página 1 de <span id="previewTotalPages">1</span></p>
+                </div>
+              </div>
 
-            <div class="signatures">
-              <div>
-                <h4>ELABORADO POR:</h4>
-                <p><strong>NOMBRE:</strong> Mgs. Jefferson Villarreal</p>
-                <p><strong>CARGO:</strong> Coordinador de Titulación y Eficiencia Terminal</p>
-              </div>
-              <div>
-                <h4>REVISADO POR:</h4>
-                <p><strong>NOMBRE:</strong> Mgs Martha Tomalá</p>
-                <p><strong>CARGO:</strong> Coordinadora General de Carreras</p>
-              </div>
-              <div>
-                <h4>APROBADO POR:</h4>
-                <p><strong>NOMBRE:</strong> Dr. Alex León</p>
-                <p><strong>CARGO:</strong> Vicerrector</p>
+              <div class="mini-title" id="previewMainTitle">Portada del documento</div>
+
+              <div class="signatures">
+                <div>
+                  <h4>ELABORADO POR:</h4>
+                  <p><strong>NOMBRE:</strong> Mgs. Jefferson Villarreal</p>
+                  <p><strong>CARGO:</strong> Coordinador de Titulación y Eficiencia Terminal</p>
+                </div>
+                <div>
+                  <h4>REVISADO POR:</h4>
+                  <p><strong>NOMBRE:</strong> Mgs Martha Tomalá</p>
+                  <p><strong>CARGO:</strong> Coordinadora General de Carreras</p>
+                </div>
+                <div>
+                  <h4>APROBADO POR:</h4>
+                  <p><strong>NOMBRE:</strong> Dr. Alex León</p>
+                  <p><strong>CARGO:</strong> Vicerrector</p>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="notice" id="noticeBox">Completa los datos y presiona Generar portada.</div>
-        </section>
+            <div class="notice" id="noticeBox">Completa los datos y presiona Generar portada.</div>
+          </section>
+
+          <section class="card history-card">
+            <div class="history-header">
+              <h3>Historial reciente</h3>
+              <button class="small-button" type="button" id="refreshHistoryButton">Actualizar</button>
+            </div>
+            <div id="historyList" class="history-list"></div>
+            <div id="historyEmpty" class="history-empty">Aún no hay documentos generados.</div>
+          </section>
+        </div>
       </section>
     </main>
   </div>
