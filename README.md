@@ -39,8 +39,14 @@ Bloque 6:
 - Botón para actualizar historial.
 - Botón para abrir archivos generados.
 
+Bloque 7:
+- Ajustes locales de unidad y sigla por defecto.
+- Ajustes locales de los tres firmantes.
+- Botón para guardar ajustes.
+- Las nuevas portadas usan automáticamente los datos guardados.
+
 Para ejecutar:
 npm install
 npm start
 
-Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha, páginas editables e historial local.
+Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha, páginas editables, historial local y ajustes guardados.
