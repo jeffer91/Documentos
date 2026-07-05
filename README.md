@@ -27,8 +27,14 @@ Bloque 4:
 - Guardado con extensión .docx o .pdf según selección.
 - PDF generado desde una ventana oculta de Electron.
 
+Bloque 5:
+- Pantalla visual mejorada con estilos internos.
+- Campo editable de fecha de portada.
+- Campo editable de total de páginas.
+- Word y PDF usan el total de páginas indicado.
+
 Para ejecutar:
 npm install
 npm start
 
-Nota: ya se puede generar Word y PDF desde el selector inicial.
+Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha y páginas editables.
