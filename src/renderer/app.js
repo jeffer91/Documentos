@@ -5,7 +5,7 @@ Funciones principales:
 - Manejar la pantalla inicial.
 - Actualizar la vista previa de la portada.
 - Enviar los datos a Electron para generar Word o PDF.
-- Mostrar historial reciente y permitir abrir archivos generados.
+- Mostrar historial reciente, abrir archivos y guardar ajustes.
 ========================================================= */
 
 (function () {
@@ -25,6 +25,25 @@ Funciones principales:
     COM: ["Comunicado", "Comunicado", "COM", false],
     CERT: ["Certificado", "Certificado", "CERT", false],
     RGI: ["Formato / Registro", "Formato", "RGI", false]
+  };
+
+  let currentSettings = {
+    unitName: "Titulación y Eficiencia Terminal",
+    unitCode: "UTET",
+    signers: {
+      elaboradoPor: {
+        nombre: "Mgs. Jefferson Villarreal",
+        cargo: "Coordinador de Titulación y Eficiencia Terminal"
+      },
+      revisadoPor: {
+        nombre: "Mgs Martha Tomalá",
+        cargo: "Coordinadora General de Carreras"
+      },
+      aprobadoPor: {
+        nombre: "Dr. Alex León",
+        cargo: "Vicerrector"
+      }
+    }
   };
 
   const $ = function (id) {
@@ -122,6 +141,25 @@ Funciones principales:
     return $("outputType").value === "pdf" ? "PDF" : "Word";
   }
 
+  function setText(id, value) {
+    const element = $(id);
+    if (element) element.textContent = value;
+  }
+
+  function getSigners() {
+    return currentSettings.signers;
+  }
+
+  function actualizarFirmasVista() {
+    const signers = getSigners();
+    setText("previewElaboradoNombre", signers.elaboradoPor.nombre);
+    setText("previewElaboradoCargo", signers.elaboradoPor.cargo);
+    setText("previewRevisadoNombre", signers.revisadoPor.nombre);
+    setText("previewRevisadoCargo", signers.revisadoPor.cargo);
+    setText("previewAprobadoNombre", signers.aprobadoPor.nombre);
+    setText("previewAprobadoCargo", signers.aprobadoPor.cargo);
+  }
+
   function actualizarVista() {
     const tipo = tipoActual();
     const unidad = limpiar($("unitName").value) || "Unidad / Coordinación";
@@ -133,6 +171,7 @@ Funciones principales:
     $("previewCode").textContent = construirCodigo();
     $("previewVersion").textContent = limpiar($("version").value) || "1.0";
     $("previewMainTitle").textContent = titulo;
+    actualizarFirmasVista();
 
     if ($("previewTotalPages")) {
       $("previewTotalPages").textContent = String(totalPaginas());
@@ -167,20 +206,7 @@ Funciones principales:
       outputType: $("outputType").value,
       date: fechaActual(),
       totalPages: totalPaginas(),
-      signers: {
-        elaboradoPor: {
-          nombre: "Mgs. Jefferson Villarreal",
-          cargo: "Coordinador de Titulación y Eficiencia Terminal"
-        },
-        revisadoPor: {
-          nombre: "Mgs Martha Tomalá",
-          cargo: "Coordinadora General de Carreras"
-        },
-        aprobadoPor: {
-          nombre: "Dr. Alex León",
-          cargo: "Vicerrector"
-        }
-      }
+      signers: getSigners()
     };
   }
 
@@ -249,6 +275,66 @@ Funciones principales:
     }
   }
 
+  function fillSettingsForm(settings) {
+    if (!settings) return;
+    currentSettings = settings;
+
+    if ($("settingsUnitName")) $("settingsUnitName").value = settings.unitName || "";
+    if ($("settingsUnitCode")) $("settingsUnitCode").value = settings.unitCode || "";
+    if ($("settingsElaboradoNombre")) $("settingsElaboradoNombre").value = settings.signers.elaboradoPor.nombre || "";
+    if ($("settingsElaboradoCargo")) $("settingsElaboradoCargo").value = settings.signers.elaboradoPor.cargo || "";
+    if ($("settingsRevisadoNombre")) $("settingsRevisadoNombre").value = settings.signers.revisadoPor.nombre || "";
+    if ($("settingsRevisadoCargo")) $("settingsRevisadoCargo").value = settings.signers.revisadoPor.cargo || "";
+    if ($("settingsAprobadoNombre")) $("settingsAprobadoNombre").value = settings.signers.aprobadoPor.nombre || "";
+    if ($("settingsAprobadoCargo")) $("settingsAprobadoCargo").value = settings.signers.aprobadoPor.cargo || "";
+
+    if ($("unitName")) $("unitName").value = settings.unitName || "";
+    if ($("unitCode")) $("unitCode").value = settings.unitCode || "";
+    actualizarVista();
+  }
+
+  function settingsFromForm() {
+    return {
+      unitName: limpiar($("settingsUnitName").value),
+      unitCode: limpiar($("settingsUnitCode").value),
+      signers: {
+        elaboradoPor: {
+          nombre: limpiar($("settingsElaboradoNombre").value),
+          cargo: limpiar($("settingsElaboradoCargo").value)
+        },
+        revisadoPor: {
+          nombre: limpiar($("settingsRevisadoNombre").value),
+          cargo: limpiar($("settingsRevisadoCargo").value)
+        },
+        aprobadoPor: {
+          nombre: limpiar($("settingsAprobadoNombre").value),
+          cargo: limpiar($("settingsAprobadoCargo").value)
+        }
+      }
+    };
+  }
+
+  async function loadSettings() {
+    if (!window.documentosApp || !window.documentosApp.getSettings) return;
+    const response = await window.documentosApp.getSettings();
+    if (response && response.ok) {
+      fillSettingsForm(response.settings);
+    }
+  }
+
+  async function saveSettings() {
+    if (!window.documentosApp || !window.documentosApp.saveSettings) return;
+    const response = await window.documentosApp.saveSettings(settingsFromForm());
+
+    if (!response || !response.ok) {
+      if ($("settingsNotice")) $("settingsNotice").textContent = "No se pudieron guardar los ajustes.";
+      return;
+    }
+
+    fillSettingsForm(response.settings);
+    if ($("settingsNotice")) $("settingsNotice").textContent = "Ajustes guardados correctamente.";
+  }
+
   async function prepararPortada(event) {
     event.preventDefault();
 
@@ -297,10 +383,15 @@ Funciones principales:
     $("refreshHistoryButton").addEventListener("click", loadHistory);
   }
 
+  if ($("saveSettingsButton")) {
+    $("saveSettingsButton").addEventListener("click", saveSettings);
+  }
+
   if (window.documentosApp && window.documentosApp.version) {
     $("appVersion").textContent = "v" + window.documentosApp.version;
   }
 
   actualizarVista();
+  loadSettings();
   loadHistory();
 })();
