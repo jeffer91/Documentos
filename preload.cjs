@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "2.1.0",
+  version: "2.2.0",
   createProject: (meta) => ipcRenderer.invoke("projects:create", meta),
   listProjects: () => ipcRenderer.invoke("projects:list"),
   getProject: (id) => ipcRenderer.invoke("projects:get", id),
@@ -19,5 +19,6 @@ contextBridge.exposeInMainWorld("documentosApp", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   getAiProviders: () => ipcRenderer.invoke("ai:get"),
-  saveAiProviders: (providers) => ipcRenderer.invoke("ai:save", providers)
+  saveAiProviders: (providers) => ipcRenderer.invoke("ai:save", providers),
+  getSyncStatus: () => ipcRenderer.invoke("sync:get-status")
 });
