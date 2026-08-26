@@ -6,6 +6,7 @@ const ROOT = path.join(__dirname, "..");
 const MAX_LINES = 800;
 const REQUIRED_FILES = [
   "package.json",
+  "package-lock.json",
   "main.cjs",
   "preload.cjs",
   "index.html",

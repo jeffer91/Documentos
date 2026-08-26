@@ -201,3 +201,35 @@ npm start
 ```
 
 `npm start` ejecuta `electron .` y abre la aplicación de escritorio.
+
+
+## Almacén histórico por huella
+
+Las versiones guardan información en SQLite y referencian archivos por su huella SHA-256.
+
+Los archivos necesarios para reconstruir una versión se conservan una sola vez en:
+
+```text
+documentos-workspace/
+└── objects/
+    └── sha256/
+        └── <prefijo>/
+            └── <hash>
+```
+
+Al restaurar una versión, la app recupera sus fuentes, datos y evidencias desde este almacén sin guardar un PDF histórico por cada versión.
+
+## Generación segura
+
+El PDF nuevo se crea primero en una carpeta temporal. La salida `generated/current/` solo se reemplaza cuando Word/PDF terminó correctamente. Si la nueva generación falla, el último PDF válido permanece disponible.
+
+## Instalación reproducible
+
+El repositorio incluye `package-lock.json`.
+
+```bash
+npm ci
+npm start
+```
+
+`npm start` continúa siendo el comando normal para abrir la app en Electron.

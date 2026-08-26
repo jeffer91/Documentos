@@ -93,3 +93,24 @@ Cuando se defina el backend externo:
 5. Resolver conflictos por entidad y versión/fecha.
 
 No se debe reemplazar SQLite. La base externa será una capa de sincronización sobre el modelo local.
+
+
+## Almacén de objetos
+
+Las fuentes, datos y evidencias que forman parte de una versión se preservan por contenido mediante SHA-256.
+
+```text
+documentos-workspace/
+├── documentos.db
+├── objects/sha256/
+├── templates/
+└── projects/
+```
+
+`document_versions.files_json` conserva la huella y metadatos. El archivo físico histórico se mantiene una sola vez en `objects/sha256/`.
+
+Esto permite reconstruir versiones anteriores sin duplicar PDFs o Word generados.
+
+## Salida actual segura
+
+La generación usa una carpeta de staging. Solo después de producir correctamente Word/PDF se sustituye `generated/current/`. Un error de generación no elimina el último resultado válido.
