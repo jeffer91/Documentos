@@ -103,6 +103,11 @@
     state.aiProviders = response && response.ok ? response.providers || [] : [];
   }
 
+  async function loadSync() {
+    const response = await api.getSyncStatus();
+    state.sync = response && response.ok ? response.sync : null;
+  }
+
   function activeTemplate(documentId) {
     return state.templates.find((item) => item.documentId === documentId && item.active) || null;
   }
@@ -214,7 +219,7 @@
 
     if (route === "settings") {
       setNav("settings");
-      await loadSettings();
+      await Promise.all([loadSettings(), loadSync()]);
       renderSettings();
     }
   }
@@ -629,6 +634,11 @@
           <div class="field"><label>IA</label><select id="defaultAiMode"><option value="fallback" ${settings.generation.defaultAiMode !== "deep" ? "selected" : ""}>Automático</option><option value="deep" ${settings.generation.defaultAiMode === "deep" ? "selected" : ""}>Profundo</option></select></div>
           <div class="field"><label>Abrir PDF</label><select id="openAfterGenerate"><option value="yes" ${settings.generation.openAfterGenerate ? "selected" : ""}>Sí</option><option value="no" ${!settings.generation.openAfterGenerate ? "selected" : ""}>No</option></select></div>
         </div>
+      </section>
+      <section class="panel compact">
+        <div class="panel-title"><h3>Datos</h3><span class="status ${state.sync && state.sync.enabled ? "good" : "warn"}">${state.sync && state.sync.enabled ? "Sincronización activa" : "Externa pendiente"}</span></div>
+        <div class="quick-line"><span>Base local</span><b>SQLite</b></div>
+        <div class="quick-line"><span>Base externa</span><b>${state.sync && state.sync.provider ? escapeHtml(state.sync.provider) : "Pendiente"}</b></div>
       </section>
     `;
   }

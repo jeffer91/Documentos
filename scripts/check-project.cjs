@@ -12,7 +12,7 @@ const REQUIRED_FILES = [
   "src/renderer/styles.css",
   "src/renderer/catalog.js",
   "src/renderer/app.js",
-  "src/main/workspace-service.cjs",
+  "src/main/database-service.cjs",\n  "src/main/legacy-migration-service.cjs",\n  "src/main/sync-service.cjs",\n  "src/main/workspace-service.cjs",
   "src/main/template-markers.cjs",
   "src/main/template-service.cjs",
   "src/main/source-service.cjs",
@@ -112,7 +112,7 @@ function main() {
     errors.push(`No se pudo validar marcadores: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.1");
+  console.log("Documentos ITSQMET · diagnóstico v2.2");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
