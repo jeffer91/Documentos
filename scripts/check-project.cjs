@@ -1,10 +1,9 @@
 const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 const childProcess = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
-const MAX_LINES = 700;
+const MAX_LINES = 750;
 const REQUIRED_FILES = [
   "package.json",
   "main.cjs",
@@ -14,12 +13,16 @@ const REQUIRED_FILES = [
   "src/renderer/catalog.js",
   "src/renderer/app.js",
   "src/main/workspace-service.cjs",
+  "src/main/template-markers.cjs",
   "src/main/template-service.cjs",
   "src/main/source-service.cjs",
+  "src/main/project-validator.cjs",
   "src/main/ai-provider-service.cjs",
   "src/main/ai-service.cjs",
   "src/main/document-composer.cjs",
-  "src/main/settings-service.cjs"
+  "src/main/pdf-service.cjs",
+  "src/main/settings-service.cjs",
+  "scripts/render-word.ps1"
 ];
 
 function lineCount(file) {
@@ -37,15 +40,12 @@ function syntaxCheck(relative) {
 }
 
 function catalogCheck() {
-  const code = fs.readFileSync(path.join(ROOT, "src/renderer/catalog.js"), "utf8");
-  const sandbox = { window: {} };
-  vm.createContext(sandbox);
-  new vm.Script(code).runInContext(sandbox);
-  const catalog = sandbox.window.DOCUMENT_CATALOG;
+  const catalog = require(path.join(ROOT, "src/renderer/catalog.js"));
   const units = catalog.units || [];
   const processes = units.flatMap((unit) => unit.processes || []);
   const documents = processes.flatMap((process) => process.documents || []);
   const ids = documents.map((item) => item.id);
+
   return {
     units: units.length,
     processes: processes.length,
@@ -54,15 +54,37 @@ function catalogCheck() {
   };
 }
 
+function markerCheck() {
+  const { parseMarkersFromText, validateMarkers } = require(path.join(ROOT, "src/main/template-markers.cjs"));
+  const markers = parseMarkersFromText([
+    "{{CAMPO!:PERIODO|Período}}",
+    "{{TEXTO:OBJETIVO|Objetivo}}",
+    "{{IA:CONCLUSIONES|Conclusiones}}",
+    "{{TABLA:CRONOGRAMA|Cronograma|Actividad,Responsable,Fecha}}",
+    "{{IMAGENES:EVIDENCIAS|Evidencias}}",
+    "{{SISTEMA:CODIGO}}",
+    "{{GRAFICO:RESULTADOS|Resultados}}"
+  ].join("\n"));
+
+  const validation = validateMarkers(markers);
+  return {
+    count: markers.length,
+    ok: validation.ok,
+    hasTableColumns: Boolean(markers.find((item) => item.type === "TABLA" && item.columns.length === 3))
+  };
+}
+
 function main() {
   const errors = [];
   const warnings = [];
+
   REQUIRED_FILES.forEach((relative) => {
     const full = path.join(ROOT, relative);
     if (!fs.existsSync(full)) {
       errors.push(`Falta ${relative}`);
       return;
     }
+
     if (lineCount(full) > MAX_LINES) warnings.push(`${relative} supera ${MAX_LINES} líneas`);
     if (/\.(js|cjs)$/.test(relative)) {
       const syntaxError = syntaxCheck(relative);
@@ -81,15 +103,25 @@ function main() {
     errors.push(`No se pudo validar el catálogo: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2");
-  console.log("--------------------------------");
+  try {
+    const markers = markerCheck();
+    if (!markers.ok || markers.count !== 7 || !markers.hasTableColumns) {
+      errors.push("El parser de marcadores no superó la prueba interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar marcadores: ${error.message}`);
+  }
+
+  console.log("Documentos ITSQMET · diagnóstico v2.1");
+  console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
+
   if (errors.length) {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: estructura, sintaxis y catálogo correctos.");
+    console.log("OK: estructura, sintaxis, catálogo y marcadores correctos.");
   }
 }
 

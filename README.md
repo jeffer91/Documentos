@@ -1,57 +1,154 @@
 # Documentos ITSQMET
 
-Aplicación Electron local para organizar, analizar y generar documentación institucional de **UTET** y **UGPA**.
+Aplicación Electron local para generar documentación institucional de **UTET** y **UGPA** a partir de plantillas Word.
 
-## Versión 2.0
+## Flujo principal
 
-La app deja de ser un generador de portadas y pasa a ser un gestor documental por **Unidad → Proceso → Documento**.
+La plantilla manda:
 
-Incluye:
+```text
+Word con marcadores
+        ↓
+La app detecta los campos
+        ↓
+Pide solo lo necesario
+        ↓
+Completa campos de IA
+        ↓
+Inserta datos, tablas, gráficos e imágenes
+        ↓
+PDF final
+```
 
-- 2 unidades: UTET y UGPA.
-- 19 procesos institucionales.
-- 59 documentos organizados por proceso.
-- Pantalla específica para cada documento, con pocos campos y estructura propia.
-- Borradores guardados localmente.
-- Carga local de Word, PDF, Excel, CSV e imágenes.
-- Biblioteca de plantillas Word `.docx`.
-- Detección de marcadores `{{CAMPO}}` dentro de las plantillas.
-- Análisis de Word, PDF y hojas de cálculo.
-- Tablas y propuestas de gráficos a partir de Excel/CSV.
-- Evidencias fotográficas insertadas en el Word completo.
-- Generación Word institucional completa.
-- Generación adicional de una copia de la plantilla cargada cuando tiene marcadores.
-- Trazabilidad de fuentes.
-- Proveedores de IA configurables y ordenados por prioridad.
-- Fallback automático si una IA falla.
-- Modo profundo que consulta varias IAs y consolida el análisis mejor puntuado.
-- Modo local seguro cuando no existe ninguna API configurada.
-- Claves de IA cifradas con `safeStorage` de Electron cuando el sistema lo permite.
+La plantilla se carga una sola vez y queda asociada al documento. Cuando se vuelve a crear ese documento, la app genera automáticamente su formulario usando los marcadores detectados.
+
+## Catálogo
+
+- 2 unidades.
+- 19 procesos.
+- 59 documentos.
+- El catálogo solo define dónde está cada documento.
+- Los campos y la estructura de captura ya no están programados en el catálogo.
 
 ## Marcadores Word
 
-Una plantilla puede incluir campos como:
+Todos los marcadores usan llaves dobles.
+
+### Datos escritos por el usuario
 
 ```text
-{{PERIODO}}
-{{FECHA}}
-{{UNIDAD}}
-{{PROCESO}}
-{{CODIGO}}
-{{TITULO}}
-{{OBJETIVO}}
-{{METODOLOGIA}}
-{{RESULTADOS}}
-{{RESUMEN_EJECUTIVO}}
-{{CONCLUSIONES}}
-{{RECOMENDACIONES}}
+{{CAMPO:PERIODO|Período}}
+{{TEXTO:OBJETIVO|Objetivo}}
+{{FECHA:FECHA_INICIO|Fecha de inicio}}
+{{NUMERO:TOTAL|Total}}
 ```
 
-La app detecta estos marcadores al importar la plantilla y genera una copia llenada. El documento completo generado por la app puede incluir además tablas, gráficos y evidencias.
+Un campo obligatorio lleva `!`:
+
+```text
+{{CAMPO!:PERIODO|Período}}
+```
+
+También se admite el formato corto `{{PERIODO}}`, que se interpreta como un campo de texto.
+
+### Campos automáticos
+
+```text
+{{SISTEMA:UNIDAD}}
+{{SISTEMA:PROCESO}}
+{{SISTEMA:CODIGO}}
+{{SISTEMA:FECHA_ACTUAL}}
+{{SISTEMA:ELABORADO_POR}}
+{{SISTEMA:REVISADO_POR}}
+{{SISTEMA:APROBADO_POR}}
+```
+
+Estos campos no aparecen en el formulario.
+
+### IA
+
+```text
+{{IA:INTRODUCCION|Introducción}}
+{{IA:BASE_LEGAL|Base legal}}
+{{IA:ANALISIS_RESULTADOS|Análisis de resultados}}
+{{IA:RESUMEN_EJECUTIVO|Resumen ejecutivo}}
+{{IA:CONCLUSIONES|Conclusiones}}
+{{IA:RECOMENDACIONES|Recomendaciones}}
+```
+
+Los campos IA tampoco se muestran para escribir manualmente. Se generan usando los datos ingresados y las fuentes adjuntas. La base legal tiene una regla específica: no puede inventar normas o artículos.
+
+### Excel / CSV
+
+```text
+{{DATOS:RESULTADOS|Resultados}}
+```
+
+La app muestra un botón para subir Excel o CSV. Los datos se analizan y pueden insertarse como tablas.
+
+### Tabla editable
+
+```text
+{{TABLA:CRONOGRAMA|Cronograma|Actividad,Responsable,Fecha}}
+```
+
+La app crea una tabla editable con esas columnas.
+
+### Imágenes
+
+```text
+{{IMAGEN:FIRMA|Firma}}
+{{IMAGENES:EVIDENCIAS|Evidencias}}
+```
+
+### Gráficos
+
+```text
+{{GRAFICO:RESULTADOS|Resultados}}
+{{GRAFICOS:RESULTADOS|Resultados}}
+```
+
+Los gráficos se generan únicamente a partir de datos numéricos reales.
+
+## Regla para tablas, gráficos e imágenes
+
+Los marcadores de bloques deben estar solos en su propio párrafo de Word. Ejemplo:
+
+```text
+EVIDENCIAS
+
+{{IMAGENES:EVIDENCIAS|Evidencias}}
+```
+
+## Plantillas
+
+Al importar una plantilla la app intenta identificar automáticamente:
+
+- unidad;
+- proceso;
+- documento.
+
+Si no está segura, la plantilla queda como **Sin asignar** y se puede asociar desde la pantalla Plantillas.
+
+Cuando se sube una nueva plantilla para el mismo documento, la anterior se conserva como versión histórica y la nueva queda activa.
+
+## Salida
+
+La salida principal es siempre:
+
+```text
+PDF
+```
+
+La app conserva un Word generado únicamente como respaldo editable.
+
+Para conservar exactamente el formato del Word y poder insertar tablas, gráficos e imágenes, en Windows la app usa **Microsoft Word** para completar la plantilla y exportarla a PDF. Para plantillas que solo contienen texto, también puede usar LibreOffice como conversor de respaldo.
 
 ## Datos locales
 
-Los borradores, plantillas, fuentes y archivos generados se guardan dentro de la carpeta `userData` de Electron. No se conecta a Firebase, SISACAD ni SharePoint en esta versión.
+Plantillas, borradores, fuentes, evidencias y resultados se guardan dentro de la carpeta local `userData` de Electron.
+
+En esta versión no existe conexión con Firebase, SISACAD ni SharePoint.
 
 ## Ejecutar
 
@@ -66,4 +163,4 @@ npm start
 npm run check
 ```
 
-El diagnóstico verifica archivos principales, sintaxis, IDs del catálogo y que existan exactamente 2 unidades, 19 procesos y 59 documentos.
+El diagnóstico valida estructura, sintaxis, catálogo y parser de marcadores.

@@ -11,8 +11,8 @@ const DEFAULT_SETTINGS = {
   },
   generation: {
     defaultAiMode: "fallback",
-    includeSourceTrace: true,
-    openAfterGenerate: false
+    includeSourceTrace: false,
+    openAfterGenerate: true
   }
 };
 
@@ -28,6 +28,7 @@ function merge(input) {
   const data = input && typeof input === "object" ? input : {};
   const signers = data.signers || {};
   const generation = data.generation || {};
+
   return {
     signers: {
       elaboradoPor: {
@@ -45,8 +46,8 @@ function merge(input) {
     },
     generation: {
       defaultAiMode: generation.defaultAiMode === "deep" ? "deep" : "fallback",
-      includeSourceTrace: generation.includeSourceTrace !== false,
-      openAfterGenerate: generation.openAfterGenerate === true
+      includeSourceTrace: generation.includeSourceTrace === true,
+      openAfterGenerate: generation.openAfterGenerate !== false
     }
   };
 }
@@ -54,7 +55,11 @@ function merge(input) {
 function readSettings(userDataPath) {
   const target = filePath(userDataPath);
   if (!fs.existsSync(target)) return merge(DEFAULT_SETTINGS);
-  try { return merge(JSON.parse(fs.readFileSync(target, "utf8"))); } catch (_error) { return merge(DEFAULT_SETTINGS); }
+  try {
+    return merge(JSON.parse(fs.readFileSync(target, "utf8")));
+  } catch (_error) {
+    return merge(DEFAULT_SETTINGS);
+  }
 }
 
 function saveSettings(userDataPath, settings) {
@@ -63,4 +68,8 @@ function saveSettings(userDataPath, settings) {
   return next;
 }
 
-module.exports = { DEFAULT_SETTINGS, readSettings, saveSettings };
+module.exports = {
+  DEFAULT_SETTINGS,
+  readSettings,
+  saveSettings
+};
