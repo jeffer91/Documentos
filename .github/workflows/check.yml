@@ -1,5 +1,8 @@
 name: Validar app
 
+permissions:
+  contents: write
+
 on:
   push:
     branches:
@@ -25,12 +28,16 @@ jobs:
       - name: Instalar
         run: npm install --no-audit --no-fund
 
-      - name: Publicar package-lock temporal
-        uses: actions/upload-artifact@v4
-        with:
-          name: package-lock-${{ github.sha }}
-          path: package-lock.json
-          retention-days: 1
+      - name: Guardar package-lock en main
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Lock dependencies"
+            git push origin HEAD:main
+          fi
 
       - name: Validar estructura y catálogo
         run: npm run check
