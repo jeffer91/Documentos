@@ -1,61 +1,69 @@
-# Documentos
+# Documentos ITSQMET
 
-App Electron para generar documentos institucionales ITSQMET.
+Aplicación Electron local para organizar, analizar y generar documentación institucional de **UTET** y **UGPA**.
 
-Bloque 1:
-- Base de Electron.
-- Pantalla inicial.
-- Selector de tipo de documento.
-- Vista previa lógica de portada.
-- Firmantes institucionales configurados.
+## Versión 2.0
 
-Bloque 2:
-- Dependencia docx agregada.
-- Generador de portada Word creado.
-- Botón de la pantalla conectado con Electron.
-- Guardado de archivo .docx mediante ventana de guardar.
+La app deja de ser un generador de portadas y pasa a ser un gestor documental por **Unidad → Proceso → Documento**.
 
-Bloque 3:
-- Reglas documentales separadas por tipo de documento.
-- Fecha automática en la portada.
-- Mejor proporción de tabla superior, título central y firmas.
-- Control temporal para impedir PDF hasta activar exportación.
+Incluye:
 
-Bloque 4:
-- Generador PDF agregado.
-- Selector Word/PDF conectado.
-- Guardado con extensión .docx o .pdf según selección.
-- PDF generado desde una ventana oculta de Electron.
+- 2 unidades: UTET y UGPA.
+- 19 procesos institucionales.
+- 59 documentos organizados por proceso.
+- Pantalla específica para cada documento, con pocos campos y estructura propia.
+- Borradores guardados localmente.
+- Carga local de Word, PDF, Excel, CSV e imágenes.
+- Biblioteca de plantillas Word `.docx`.
+- Detección de marcadores `{{CAMPO}}` dentro de las plantillas.
+- Análisis de Word, PDF y hojas de cálculo.
+- Tablas y propuestas de gráficos a partir de Excel/CSV.
+- Evidencias fotográficas insertadas en el Word completo.
+- Generación Word institucional completa.
+- Generación adicional de una copia de la plantilla cargada cuando tiene marcadores.
+- Trazabilidad de fuentes.
+- Proveedores de IA configurables y ordenados por prioridad.
+- Fallback automático si una IA falla.
+- Modo profundo que consulta varias IAs y consolida el análisis mejor puntuado.
+- Modo local seguro cuando no existe ninguna API configurada.
+- Claves de IA cifradas con `safeStorage` de Electron cuando el sistema lo permite.
 
-Bloque 5:
-- Pantalla visual mejorada con estilos internos.
-- Campo editable de fecha de portada.
-- Campo editable de total de páginas.
-- Word y PDF usan el total de páginas indicado.
+## Marcadores Word
 
-Bloque 6:
-- Historial local de documentos generados.
-- Lista visual de últimos documentos.
-- Botón para actualizar historial.
-- Botón para abrir archivos generados.
+Una plantilla puede incluir campos como:
 
-Bloque 7:
-- Ajustes locales de unidad y sigla por defecto.
-- Ajustes locales de los tres firmantes.
-- Botón para guardar ajustes.
-- Las nuevas portadas usan automáticamente los datos guardados.
+```text
+{{PERIODO}}
+{{FECHA}}
+{{UNIDAD}}
+{{PROCESO}}
+{{CODIGO}}
+{{TITULO}}
+{{OBJETIVO}}
+{{METODOLOGIA}}
+{{RESULTADOS}}
+{{RESUMEN_EJECUTIVO}}
+{{CONCLUSIONES}}
+{{RECOMENDACIONES}}
+```
 
-Bloque 8:
-- Validaciones antes de generar portada.
-- Diagnóstico del proyecto con npm run check.
-- Archivo .gitignore agregado.
-- Versión del proyecto actualizada.
+La app detecta estos marcadores al importar la plantilla y genera una copia llenada. El documento completo generado por la app puede incluir además tablas, gráficos y evidencias.
 
-Para ejecutar:
+## Datos locales
+
+Los borradores, plantillas, fuentes y archivos generados se guardan dentro de la carpeta `userData` de Electron. No se conecta a Firebase, SISACAD ni SharePoint en esta versión.
+
+## Ejecutar
+
+```bash
 npm install
 npm start
+```
 
-Para revisar diagnóstico:
+## Diagnóstico
+
+```bash
 npm run check
+```
 
-Nota: ya se puede generar Word y PDF desde el selector inicial, con fecha, páginas editables, historial local, ajustes guardados y validaciones básicas.
+El diagnóstico verifica archivos principales, sintaxis, IDs del catálogo y que existan exactamente 2 unidades, 19 procesos y 59 documentos.

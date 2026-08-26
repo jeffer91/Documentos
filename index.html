@@ -1,291 +1,52 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Generador de Documentos ITSQMET</title>
-  <style>
-    body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #f4f6f8; color: #1f2937; }
-    .app-shell { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
-    .sidebar { background: #fff; border-right: 1px solid #d9dee7; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
-    .brand-box { display: flex; gap: 14px; align-items: center; }
-    .brand-icon { width: 48px; height: 48px; border-radius: 16px; background: #0f766e; color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 22px; }
-    .brand-box h1 { margin: 0; font-size: 22px; }
-    .brand-box p, .topbar p, .sidebar-footer, .notice, .history-empty, .history-meta, .settings-help { color: #6b7280; }
-    .menu { display: flex; flex-direction: column; gap: 8px; }
-    .menu-item { width: 100%; border: 1px solid transparent; background: transparent; color: #1f2937; text-align: left; padding: 12px 14px; border-radius: 12px; font-size: 15px; }
-    .menu-item.active { background: #ecfdf5; border-color: #99f6e4; color: #115e59; font-weight: 700; }
-    .sidebar-footer { margin-top: auto; border-top: 1px solid #d9dee7; padding-top: 18px; display: flex; justify-content: space-between; font-size: 13px; }
-    .main-content { padding: 28px; }
-    .topbar, .card { background: #fff; border: 1px solid #d9dee7; border-radius: 20px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
-    .topbar { padding: 22px 24px; display: flex; justify-content: space-between; align-items: center; }
-    .topbar h2 { margin: 0; font-size: 26px; }
-    .status-pill { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; }
-    .content-grid { margin-top: 24px; display: grid; grid-template-columns: 460px 1fr; gap: 24px; align-items: start; }
-    .right-column { display: grid; gap: 24px; }
-    .form-card, .preview-card, .history-card, .settings-card { padding: 22px; }
-    .form-group { margin-bottom: 16px; }
-    .form-row { display: grid; gap: 14px; }
-    .two-columns { grid-template-columns: 1fr 120px; }
-    .two-even-columns { grid-template-columns: 1fr 1fr; }
-    .three-columns { grid-template-columns: 1fr 1fr 1fr; }
-    label { display: block; font-weight: 700; margin-bottom: 7px; font-size: 13px; }
-    input, select { width: 100%; border: 1px solid #d9dee7; border-radius: 12px; padding: 11px 12px; font-size: 14px; box-sizing: border-box; }
-    .primary-button { width: 100%; margin-top: 8px; border: none; background: #0f766e; color: #fff; font-weight: 700; border-radius: 14px; padding: 13px 16px; font-size: 15px; cursor: pointer; }
-    .preview-header, .history-header, .settings-header { display: flex; justify-content: space-between; align-items: center; }
-    .preview-header span { background: #fef2f2; color: #d71920; border: 1px solid #fecaca; padding: 7px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
-    .preview-box { background: #fff; border: 1px solid #111827; min-height: 560px; padding: 22px; }
-    .mini-header { display: grid; grid-template-columns: 180px 1fr 190px; border: 1px solid #111827; }
-    .mini-header > div { border-right: 1px solid #111827; min-height: 80px; display: grid; place-items: center; text-align: center; padding: 8px; }
-    .mini-center p, .mini-code strong { color: #d71920; }
-    .mini-title { min-height: 300px; display: grid; place-items: center; text-align: center; font-size: 30px; font-weight: 800; }
-    .signatures { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #111827; }
-    .signatures > div { border-right: 1px solid #111827; min-height: 130px; }
-    .signatures h4 { margin: 0; text-align: center; padding: 8px; border-bottom: 1px solid #111827; font-size: 15px; font-weight: 500; }
-    .signatures p { margin: 0; padding: 6px 8px; border-top: 1px solid #111827; font-size: 11px; }
-    .notice { margin-top: 16px; background: #f8fafc; border: 1px solid #d9dee7; border-radius: 14px; padding: 12px 14px; font-size: 14px; }
-    .history-list { display: grid; gap: 10px; margin-top: 14px; }
-    .history-item { border: 1px solid #d9dee7; border-radius: 14px; padding: 12px; background: #f8fafc; display: grid; gap: 6px; }
-    .history-title { font-weight: 700; font-size: 14px; }
-    .history-meta { font-size: 12px; }
-    .history-actions { display: flex; gap: 8px; }
-    .small-button { border: 1px solid #0f766e; background: #fff; color: #0f766e; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-    .history-empty, .settings-help { margin-top: 12px; font-size: 14px; }
-    .settings-block-title { margin: 16px 0 10px; font-size: 14px; color: #0f766e; }
-  </style>
+  <title>Documentos ITSQMET</title>
+  <link rel="stylesheet" href="./src/renderer/styles.css" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand-box">
-        <div class="brand-icon">D</div>
-        <div>
-          <h1>Documentos</h1>
-          <p>Generador institucional</p>
-        </div>
-      </div>
-      <nav class="menu">
-        <button class="menu-item active" type="button">Portadas</button>
-        <button class="menu-item" type="button" disabled>Documentos</button>
-        <button class="menu-item" type="button" disabled>Historial</button>
-        <button class="menu-item" type="button" disabled>Ajustes</button>
+      <button class="brand" data-route="home" type="button" aria-label="Inicio">
+        <span class="brand-mark">D</span>
+        <span class="brand-copy"><b>Documentos</b><small>ITSQMET</small></span>
+      </button>
+
+      <nav class="nav" aria-label="Navegación principal">
+        <button class="nav-item active" data-route="home" type="button"><span>⌂</span><b>Inicio</b></button>
+        <button class="nav-item" data-route="library" type="button"><span>▤</span><b>Documentos</b></button>
+        <button class="nav-item" data-route="templates" type="button"><span>▧</span><b>Plantillas</b></button>
+        <button class="nav-item" data-route="ai" type="button"><span>✦</span><b>IA</b></button>
+        <button class="nav-item" data-route="settings" type="button"><span>⚙</span><b>Ajustes</b></button>
       </nav>
-      <div class="sidebar-footer">
-        <span>Modo Electron</span>
-        <strong id="appVersion">v1.0.0</strong>
+
+      <div class="sidebar-foot">
+        <span class="dot"></span>
+        <span>Local</span>
+        <b id="appVersion">v2.0.0</b>
       </div>
     </aside>
 
-    <main class="main-content">
+    <main class="main">
       <header class="topbar">
         <div>
-          <h2>Generador de portadas</h2>
-          <p>Selecciona el tipo de documento institucional que deseas crear.</p>
+          <div id="breadcrumb" class="breadcrumb">Inicio</div>
+          <h1 id="screenTitle">Documentos</h1>
         </div>
-        <div class="status-pill">Bloque 8</div>
+        <div class="top-actions">
+          <button class="icon-button" id="backButton" type="button" hidden aria-label="Volver">←</button>
+        </div>
       </header>
 
-      <section class="content-grid">
-        <form class="card form-card" id="documentForm">
-          <h3>Datos del documento</h3>
-
-          <div class="form-group">
-            <label for="documentType">Tipo de documento</label>
-            <select id="documentType" name="documentType" required>
-              <option value="">Selecciona una opción</option>
-              <option value="REG">Reglamento</option>
-              <option value="POL">Política</option>
-              <option value="MP">Manual de Procesos</option>
-              <option value="INS">Instructivo</option>
-              <option value="INSO">Informe de Socialización</option>
-              <option value="ACT">Acta de Reunión</option>
-              <option value="INF">Informe de cualquier índole</option>
-              <option value="PROG">Programa</option>
-              <option value="OFI">Oficio</option>
-              <option value="MEM">Memorando</option>
-              <option value="COM">Comunicado</option>
-              <option value="CERT">Certificado</option>
-              <option value="RGI">Formato / Registro</option>
-            </select>
-          </div>
-
-          <div class="form-row two-columns">
-            <div class="form-group">
-              <label for="unitName">Unidad o coordinación</label>
-              <input id="unitName" name="unitName" type="text" value="Titulación y Eficiencia Terminal" />
-            </div>
-            <div class="form-group small">
-              <label for="unitCode">Sigla</label>
-              <input id="unitCode" name="unitCode" type="text" value="UTET" />
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="documentTitle">Nombre del documento</label>
-            <input id="documentTitle" name="documentTitle" type="text" placeholder="Ejemplo: Reglamento de Titulación" />
-          </div>
-
-          <div class="form-row three-columns">
-            <div class="form-group small">
-              <label for="version">Versión</label>
-              <input id="version" name="version" type="text" value="1.0" />
-            </div>
-            <div class="form-group small">
-              <label for="documentNumber">N°</label>
-              <input id="documentNumber" name="documentNumber" type="text" value="01" />
-            </div>
-            <div class="form-group small">
-              <label for="processNumber">Proceso</label>
-              <input id="processNumber" name="processNumber" type="text" value="0X" />
-            </div>
-          </div>
-
-          <div class="form-row three-columns">
-            <div class="form-group small">
-              <label for="year">Año</label>
-              <input id="year" name="year" type="text" value="2026" />
-            </div>
-            <div class="form-group small">
-              <label for="month">Mes</label>
-              <input id="month" name="month" type="text" value="07" />
-            </div>
-            <div class="form-group small">
-              <label for="outputType">Salida</label>
-              <select id="outputType" name="outputType">
-                <option value="docx">Word</option>
-                <option value="pdf">PDF</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-row two-columns">
-            <div class="form-group">
-              <label for="documentDate">Fecha de portada</label>
-              <input id="documentDate" name="documentDate" type="date" />
-            </div>
-            <div class="form-group small">
-              <label for="totalPages">Páginas</label>
-              <input id="totalPages" name="totalPages" type="number" min="1" value="1" />
-            </div>
-          </div>
-
-          <button class="primary-button" type="submit">Generar portada</button>
-        </form>
-
-        <div class="right-column">
-          <section class="card preview-card">
-            <div class="preview-header">
-              <h3>Vista previa lógica</h3>
-              <span id="docBadge">Sin seleccionar</span>
-            </div>
-
-            <div class="preview-box">
-              <div class="mini-header">
-                <div class="mini-logo">ITSQMET</div>
-                <div class="mini-center">
-                  <p id="previewUnit">Unidad / Coordinación</p>
-                  <strong id="previewHeaderTitle">Nombre del documento</strong>
-                </div>
-                <div class="mini-code">
-                  <p>Código:</p>
-                  <strong id="previewCode">----</strong>
-                  <p>Versión: <span id="previewVersion">1.0</span></p>
-                  <p>Página 1 de <span id="previewTotalPages">1</span></p>
-                </div>
-              </div>
-
-              <div class="mini-title" id="previewMainTitle">Portada del documento</div>
-
-              <div class="signatures">
-                <div>
-                  <h4>ELABORADO POR:</h4>
-                  <p><strong>NOMBRE:</strong> <span id="previewElaboradoNombre">Mgs. Jefferson Villarreal</span></p>
-                  <p><strong>CARGO:</strong> <span id="previewElaboradoCargo">Coordinador de Titulación y Eficiencia Terminal</span></p>
-                </div>
-                <div>
-                  <h4>REVISADO POR:</h4>
-                  <p><strong>NOMBRE:</strong> <span id="previewRevisadoNombre">Mgs Martha Tomalá</span></p>
-                  <p><strong>CARGO:</strong> <span id="previewRevisadoCargo">Coordinadora General de Carreras</span></p>
-                </div>
-                <div>
-                  <h4>APROBADO POR:</h4>
-                  <p><strong>NOMBRE:</strong> <span id="previewAprobadoNombre">Dr. Alex León</span></p>
-                  <p><strong>CARGO:</strong> <span id="previewAprobadoCargo">Vicerrector</span></p>
-                </div>
-              </div>
-            </div>
-            <div class="notice" id="noticeBox">Completa los datos y presiona Generar portada.</div>
-          </section>
-
-          <section class="card history-card">
-            <div class="history-header">
-              <h3>Historial reciente</h3>
-              <button class="small-button" type="button" id="refreshHistoryButton">Actualizar</button>
-            </div>
-            <div id="historyList" class="history-list"></div>
-            <div id="historyEmpty" class="history-empty">Aún no hay documentos generados.</div>
-          </section>
-
-          <section class="card settings-card">
-            <div class="settings-header">
-              <h3>Ajustes rápidos</h3>
-              <button class="small-button" type="button" id="saveSettingsButton">Guardar</button>
-            </div>
-            <div class="settings-help">Estos datos quedarán guardados para las siguientes portadas.</div>
-
-            <div class="settings-block-title">Unidad por defecto</div>
-            <div class="form-row two-even-columns">
-              <div class="form-group">
-                <label for="settingsUnitName">Unidad</label>
-                <input id="settingsUnitName" type="text" />
-              </div>
-              <div class="form-group">
-                <label for="settingsUnitCode">Sigla</label>
-                <input id="settingsUnitCode" type="text" />
-              </div>
-            </div>
-
-            <div class="settings-block-title">Elaborado por</div>
-            <div class="form-row two-even-columns">
-              <div class="form-group">
-                <label for="settingsElaboradoNombre">Nombre</label>
-                <input id="settingsElaboradoNombre" type="text" />
-              </div>
-              <div class="form-group">
-                <label for="settingsElaboradoCargo">Cargo</label>
-                <input id="settingsElaboradoCargo" type="text" />
-              </div>
-            </div>
-
-            <div class="settings-block-title">Revisado por</div>
-            <div class="form-row two-even-columns">
-              <div class="form-group">
-                <label for="settingsRevisadoNombre">Nombre</label>
-                <input id="settingsRevisadoNombre" type="text" />
-              </div>
-              <div class="form-group">
-                <label for="settingsRevisadoCargo">Cargo</label>
-                <input id="settingsRevisadoCargo" type="text" />
-              </div>
-            </div>
-
-            <div class="settings-block-title">Aprobado por</div>
-            <div class="form-row two-even-columns">
-              <div class="form-group">
-                <label for="settingsAprobadoNombre">Nombre</label>
-                <input id="settingsAprobadoNombre" type="text" />
-              </div>
-              <div class="form-group">
-                <label for="settingsAprobadoCargo">Cargo</label>
-                <input id="settingsAprobadoCargo" type="text" />
-              </div>
-            </div>
-            <div class="notice" id="settingsNotice">Ajustes cargados.</div>
-          </section>
-        </div>
-      </section>
+      <section id="view" class="view" aria-live="polite"></section>
     </main>
   </div>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="./src/renderer/catalog.js"></script>
   <script src="./src/renderer/app.js"></script>
 </body>
 </html>

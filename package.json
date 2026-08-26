@@ -1,7 +1,7 @@
 {
   "name": "documentos",
-  "version": "1.4.0",
-  "description": "App Electron para generar documentos institucionales ITSQMET",
+  "version": "2.0.0",
+  "description": "Gestor documental inteligente ITSQMET para UTET y UGPA",
   "main": "main.cjs",
   "author": "Jefferson Villarreal",
   "license": "MIT",
@@ -12,7 +12,11 @@
     "check": "node scripts/check-project.cjs"
   },
   "dependencies": {
-    "docx": "^9.5.1"
+    "docx": "^9.5.1",
+    "docxtemplater": "^3.62.2",
+    "pdf-parse": "^1.1.1",
+    "pizzip": "^3.2.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "electron": "^33.0.0"
