@@ -3,33 +3,16 @@ const path = require("path");
 const PizZip = require("pizzip");
 const catalog = require("../renderer/catalog.js");
 const { root, copyUnique } = require("./workspace-service.cjs");
+const { openDatabase, queueSync } = require("./database-service.cjs");
 const { parseMarkersFromText, validateMarkers } = require("./template-markers.cjs");
 
-const INDEX = "templates.json";
+const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
+const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
 
 function templatesDir(userDataPath) {
   const dir = path.join(root(userDataPath), "templates");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return dir;
-}
-
-function indexPath(userDataPath) {
-  return path.join(templatesDir(userDataPath), INDEX);
-}
-
-function readIndex(userDataPath) {
-  const file = indexPath(userDataPath);
-  if (!fs.existsSync(file)) return [];
-  try {
-    const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    return Array.isArray(data) ? data : [];
-  } catch (_error) {
-    return [];
-  }
-}
-
-function saveIndex(userDataPath, items) {
-  fs.writeFileSync(indexPath(userDataPath), JSON.stringify(items, null, 2), "utf8");
 }
 
 function xmlParts(filePath) {
@@ -87,10 +70,12 @@ function inferAssociation(fileName, text) {
     let score = 0;
     normalizeSearch(document.name).split(" ").filter((word) => word.length >= 5)
       .forEach((word) => { if (haystack.includes(word)) score += 2; });
+
     staticCodeParts(document.code).forEach((part) => {
       const token = normalizeSearch(part);
       if (token && haystack.includes(token)) score += token.length >= 4 ? 4 : 1;
     });
+
     if (haystack.includes(normalizeSearch(process.code))) score += 12;
     if (haystack.includes(unit.id)) score += 3;
     return { unit, process, document, score };
@@ -98,6 +83,7 @@ function inferAssociation(fileName, text) {
 
   const best = ranked[0];
   if (!best || best.score < 10) return null;
+
   return {
     unitId: best.unit.id,
     processId: best.process.id,
@@ -119,41 +105,83 @@ function findStandaloneBlockWarnings(parts, markers) {
   return warnings;
 }
 
-function versionFor(items, documentId) {
+function parseJson(value, fallback) {
+  if (value == null || value === "") return fallback;
+  try { return JSON.parse(value); } catch (_error) { return fallback; }
+}
+
+function markerFromRow(row) {
+  const type = row.type;
+  return {
+    raw: row.raw,
+    token: row.raw,
+    valid: Boolean(row.valid),
+    type,
+    name: row.name,
+    label: row.label || row.name,
+    required: Boolean(row.required),
+    config: row.config || "",
+    columns: parseJson(row.columns_json, []),
+    isBlock: BLOCK_TYPES.has(type),
+    isUserInput: USER_TYPES.has(type),
+    isAi: type === "IA",
+    isSystem: type === "SISTEMA"
+  };
+}
+
+function hydrateTemplate(db, row) {
+  if (!row) return null;
+  const markers = db.prepare("SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id")
+    .all(row.id)
+    .map(markerFromRow);
+
+  return {
+    id: row.id,
+    name: row.name,
+    localPath: row.local_path,
+    importedAt: row.imported_at,
+    active: Boolean(row.active),
+    version: row.version,
+    unitId: row.unit_id || "",
+    processId: row.process_id || "",
+    documentId: row.document_id || "",
+    confidence: row.confidence || 0,
+    markers,
+    fields: markers.filter((marker) => marker.valid && marker.isUserInput),
+    aiFields: markers.filter((marker) => marker.valid && marker.isAi),
+    systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
+    validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true })
+  };
+}
+
+function versionFor(db, documentId) {
   if (!documentId) return 1;
-  const versions = items
-    .filter((item) => item.documentId === documentId)
-    .map((item) => Number(item.version || 0))
-    .filter(Number.isFinite);
-  return versions.length ? Math.max(...versions) + 1 : 1;
+  const row = db.prepare("SELECT MAX(version) AS max_version FROM templates WHERE document_id = ?").get(documentId);
+  return Number(row && row.max_version || 0) + 1;
 }
 
-function enrich(item) {
-  if (!item || !item.localPath || !fs.existsSync(item.localPath)) return item;
-  if (Array.isArray(item.markers) && item.validation) return item;
+function saveMarkers(db, templateId, markers) {
+  db.prepare("DELETE FROM template_fields WHERE template_id = ?").run(templateId);
+  const insert = db.prepare(`
+    INSERT INTO template_fields
+      (template_id, type, name, label, required, config, columns_json, raw, valid, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
-  const inspected = inspectTemplate(item.localPath);
-  return Object.assign({}, item, {
-    markers: inspected.markers,
-    fields: inspected.markers.filter((marker) => marker.valid && marker.isUserInput),
-    aiFields: inspected.markers.filter((marker) => marker.valid && marker.isAi),
-    systemFields: inspected.markers.filter((marker) => marker.valid && marker.isSystem),
-    validation: inspected.validation,
-    version: Number(item.version || 1),
-    active: item.active !== false
+  (markers || []).forEach((marker, index) => {
+    insert.run(
+      templateId,
+      marker.type,
+      marker.name,
+      marker.label || marker.name,
+      marker.required ? 1 : 0,
+      marker.config || "",
+      JSON.stringify(marker.columns || []),
+      marker.raw,
+      marker.valid === false ? 0 : 1,
+      index
+    );
   });
-}
-
-function migrateIndex(userDataPath) {
-  const raw = readIndex(userDataPath);
-  let changed = false;
-  const migrated = raw.map((item) => {
-    const next = enrich(item);
-    if (next !== item) changed = true;
-    return next;
-  });
-  if (changed) saveIndex(userDataPath, migrated);
-  return migrated;
 }
 
 function importTemplate(userDataPath, sourcePath, association) {
@@ -161,78 +189,114 @@ function importTemplate(userDataPath, sourcePath, association) {
     throw new Error("La plantilla debe ser un archivo Word .docx.");
   }
 
+  const db = openDatabase(userDataPath);
   const stored = copyUnique(sourcePath, templatesDir(userDataPath));
   const inspected = inspectTemplate(stored);
   const inferred = association && association.documentId
     ? Object.assign({ confidence: 100 }, association)
     : inferAssociation(path.basename(stored), inspected.text);
 
-  const items = migrateIndex(userDataPath);
-  const documentId = inferred && inferred.documentId ? inferred.documentId : "";
-  const version = versionFor(items, documentId);
+  const documentId = inferred && inferred.documentId ? inferred.documentId : null;
+  const unitId = inferred && inferred.unitId ? inferred.unitId : null;
+  const processId = inferred && inferred.processId ? inferred.processId : null;
+  const version = versionFor(db, documentId);
+  const id = `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const now = new Date().toISOString();
 
-  if (documentId) {
-    items.forEach((item) => {
-      if (item.documentId === documentId) item.active = false;
-    });
-  }
+  const tx = db.transaction(() => {
+    if (documentId) db.prepare("UPDATE templates SET active = 0, updated_at = ? WHERE document_id = ?").run(now, documentId);
 
-  const item = {
-    id: `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    name: path.basename(stored),
-    localPath: stored,
-    importedAt: new Date().toISOString(),
-    active: true,
-    version,
-    unitId: inferred && inferred.unitId ? inferred.unitId : "",
-    processId: inferred && inferred.processId ? inferred.processId : "",
-    documentId,
-    confidence: inferred && inferred.confidence ? inferred.confidence : 0,
-    markers: inspected.markers,
-    fields: inspected.markers.filter((marker) => marker.valid && marker.isUserInput),
-    aiFields: inspected.markers.filter((marker) => marker.valid && marker.isAi),
-    systemFields: inspected.markers.filter((marker) => marker.valid && marker.isSystem),
-    validation: inspected.validation
-  };
+    db.prepare(`
+      INSERT INTO templates
+        (id, document_id, unit_id, process_id, name, version, local_path, active, confidence, imported_at, validation_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+    `).run(
+      id,
+      documentId,
+      unitId,
+      processId,
+      path.basename(stored),
+      version,
+      stored,
+      inferred && inferred.confidence ? inferred.confidence : 0,
+      now,
+      JSON.stringify(inspected.validation),
+      now
+    );
 
-  items.unshift(item);
-  saveIndex(userDataPath, items.slice(0, 200));
-  return item;
+    saveMarkers(db, id, inspected.markers);
+  });
+
+  tx();
+  queueSync(db, "template", id, "create", { documentId, version, name: path.basename(stored) });
+  return hydrateTemplate(db, db.prepare("SELECT * FROM templates WHERE id = ?").get(id));
 }
 
 function listTemplates(userDataPath) {
-  return migrateIndex(userDataPath)
-    .filter((item) => item.localPath && fs.existsSync(item.localPath));
+  const db = openDatabase(userDataPath);
+  return db.prepare("SELECT * FROM templates ORDER BY imported_at DESC").all().map((row) => hydrateTemplate(db, row));
 }
 
 function activeTemplateForDocument(userDataPath, documentId) {
-  return listTemplates(userDataPath).find((item) => item.documentId === documentId && item.active) || null;
+  const db = openDatabase(userDataPath);
+  const row = db.prepare("SELECT * FROM templates WHERE document_id = ? AND active = 1 ORDER BY version DESC LIMIT 1").get(documentId);
+  return hydrateTemplate(db, row);
 }
 
 function updateTemplate(userDataPath, templateId, patch) {
-  const items = migrateIndex(userDataPath);
-  const item = items.find((entry) => entry.id === templateId);
-  if (!item) throw new Error("No se encontró la plantilla.");
+  const db = openDatabase(userDataPath);
+  const current = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
+  if (!current) throw new Error("No se encontró la plantilla.");
 
-  if (patch && patch.documentId && patch.documentId !== item.documentId) {
-    items.forEach((entry) => {
-      if (entry.documentId === patch.documentId) entry.active = false;
-    });
-    item.version = versionFor(items, patch.documentId);
+  const nextDocumentId = patch && Object.prototype.hasOwnProperty.call(patch, "documentId")
+    ? (patch.documentId || null)
+    : current.document_id;
+  const nextUnitId = patch && Object.prototype.hasOwnProperty.call(patch, "unitId")
+    ? (patch.unitId || null)
+    : current.unit_id;
+  const nextProcessId = patch && Object.prototype.hasOwnProperty.call(patch, "processId")
+    ? (patch.processId || null)
+    : current.process_id;
+  const nextActive = patch && Object.prototype.hasOwnProperty.call(patch, "active")
+    ? Boolean(patch.active)
+    : Boolean(current.active);
+  let nextVersion = current.version;
+
+  if (nextDocumentId && nextDocumentId !== current.document_id) {
+    nextVersion = versionFor(db, nextDocumentId);
   }
 
-  ["unitId", "processId", "documentId", "active"].forEach((key) => {
-    if (patch && Object.prototype.hasOwnProperty.call(patch, key)) item[key] = patch[key];
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    if (nextActive && nextDocumentId) {
+      db.prepare("UPDATE templates SET active = 0, updated_at = ? WHERE document_id = ? AND id <> ?")
+        .run(now, nextDocumentId, templateId);
+    }
+
+    db.prepare(`
+      UPDATE templates SET
+        document_id = ?, unit_id = ?, process_id = ?, active = ?, version = ?, confidence = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      nextDocumentId,
+      nextUnitId,
+      nextProcessId,
+      nextActive ? 1 : 0,
+      nextVersion,
+      patch && patch.documentId ? 100 : current.confidence,
+      now,
+      templateId
+    );
   });
 
-  if (item.active && item.documentId) {
-    items.forEach((entry) => {
-      if (entry.id !== item.id && entry.documentId === item.documentId) entry.active = false;
-    });
-  }
+  tx();
+  queueSync(db, "template", templateId, "update", {
+    documentId: nextDocumentId,
+    active: nextActive,
+    version: nextVersion
+  });
 
-  saveIndex(userDataPath, items);
-  return item;
+  return hydrateTemplate(db, db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId));
 }
 
 module.exports = {
