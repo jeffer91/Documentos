@@ -1,0 +1,29 @@
+name: Validar app
+
+on:
+  push:
+    branches:
+      - main
+      - documentos-v2-inteligente
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar
+        run: npm install --no-audit --no-fund
+
+      - name: Validar estructura y catálogo
+        run: npm run check
