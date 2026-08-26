@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { workspaceRoot, openDatabase, queueSync } = require("./database-service.cjs");
+const { sha256 } = require("./file-integrity-service.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
@@ -83,6 +84,7 @@ function templateById(db, templateId) {
     active: Boolean(row.active),
     confidence: row.confidence || 0,
     importedAt: row.imported_at,
+    sha256: row.sha256 || "",
     markers,
     fields: markers.filter((marker) => marker.valid && marker.isUserInput),
     aiFields: markers.filter((marker) => marker.valid && marker.isAi),
@@ -107,6 +109,8 @@ function attachmentsForProject(db, projectId) {
     extension: row.extension || "",
     size: row.size || 0,
     localPath: row.local_path,
+    sha256: row.sha256 || "",
+    integrityCheckedAt: row.integrity_checked_at || "",
     addedAt: row.added_at
   }));
 }
@@ -136,6 +140,7 @@ function normalizeProject(input) {
     documentId: p.documentId || "",
     documentName: p.documentName || "",
     documentType: p.documentType || "",
+    documentVersion: p.documentVersion || "1.0",
     codePattern: p.codePattern || "",
     mode: p.mode || "template",
     formData: p.formData && typeof p.formData === "object" ? p.formData : {},
@@ -163,6 +168,7 @@ function hydrateProject(db, row) {
     documentId: row.document_id || "",
     documentName: row.document_name || "",
     documentType: row.document_type || "",
+    documentVersion: row.document_version || "1.0",
     codePattern: row.code_pattern || "",
     mode: row.mode || "template",
     formData: formDataForProject(db, row.id),
@@ -183,8 +189,8 @@ function createProject(userDataPath, metadata) {
   db.prepare(`
     INSERT INTO projects
       (id, document_id, template_id, status, unit_id, unit_name, process_id, process_code, process_name,
-       document_name, document_type, code_pattern, mode, ai_mode, generated_code, analysis_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       document_name, document_type, document_version, code_pattern, mode, ai_mode, generated_code, analysis_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.documentId || null,
@@ -197,6 +203,7 @@ function createProject(userDataPath, metadata) {
     project.processName,
     project.documentName,
     project.documentType,
+    project.documentVersion,
     project.codePattern,
     project.mode,
     project.aiMode,
@@ -223,7 +230,7 @@ function saveProject(userDataPath, input) {
     db.prepare(`
       UPDATE projects SET
         document_id = ?, template_id = ?, status = ?, unit_id = ?, unit_name = ?, process_id = ?,
-        process_code = ?, process_name = ?, document_name = ?, document_type = ?, code_pattern = ?,
+        process_code = ?, process_name = ?, document_name = ?, document_type = ?, document_version = ?, code_pattern = ?,
         mode = ?, ai_mode = ?, generated_code = ?, analysis_json = ?, updated_at = ?
       WHERE id = ?
     `).run(
@@ -237,6 +244,7 @@ function saveProject(userDataPath, input) {
       project.processName,
       project.documentName,
       project.documentType,
+      project.documentVersion,
       project.codePattern,
       project.mode,
       project.aiMode,
@@ -305,8 +313,8 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
   const destination = path.join(projectDir(userDataPath, projectId), folder);
   const added = [];
   const insert = db.prepare(`
-    INSERT INTO files(id, project_id, kind, marker_name, name, extension, size, local_path, added_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO files(id, project_id, kind, marker_name, name, extension, size, local_path, sha256, integrity_checked_at, added_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const tx = db.transaction(() => {
@@ -322,9 +330,11 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
         extension: path.extname(localPath).toLowerCase(),
         size: stat.size,
         localPath,
+        sha256: sha256(localPath),
+        integrityCheckedAt: new Date().toISOString(),
         addedAt: new Date().toISOString()
       };
-      insert.run(item.id, projectId, item.kind, item.markerName, item.name, item.extension, item.size, item.localPath, item.addedAt);
+      insert.run(item.id, projectId, item.kind, item.markerName, item.name, item.extension, item.size, item.localPath, item.sha256, item.integrityCheckedAt, item.addedAt);
       added.push(item);
       queueSync(db, "file", item.id, "create", { projectId, kind: item.kind, markerName: item.markerName, name: item.name });
     });
@@ -368,19 +378,27 @@ function recordAnalysis(userDataPath, projectId, analysis, status) {
   return getProject(userDataPath, projectId);
 }
 
-function addGeneration(userDataPath, projectId, generationResult) {
+function nextGenerationVersion(userDataPath, projectId) {
   const db = openDatabase(userDataPath);
   const latest = db.prepare("SELECT MAX(version) AS max_version FROM generations WHERE project_id = ?").get(projectId);
-  const version = Number(latest && latest.max_version || 0) + 1;
+  return Number(latest && latest.max_version || 0) + 1;
+}
+
+function addGeneration(userDataPath, projectId, generationResult) {
+  const db = openDatabase(userDataPath);
+  const version = Number(generationResult && generationResult.version || nextGenerationVersion(userDataPath, projectId));
   const outputs = generationResult && Array.isArray(generationResult.outputs) ? generationResult.outputs : [];
   const pdf = outputs.find((item) => item.type === "pdf");
   const docx = outputs.find((item) => item.type === "docx");
   const now = new Date().toISOString();
   const id = newId("gen");
 
+  const pdfHash = pdf && pdf.path && fs.existsSync(pdf.path) ? sha256(pdf.path) : null;
+  const docxHash = docx && docx.path && fs.existsSync(docx.path) ? sha256(docx.path) : null;
+
   db.prepare(`
-    INSERT INTO generations(id, project_id, version, generated_code, pdf_path, docx_path, engine, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO generations(id, project_id, version, generated_code, pdf_path, docx_path, engine, pdf_sha256, docx_sha256, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     projectId,
@@ -389,6 +407,8 @@ function addGeneration(userDataPath, projectId, generationResult) {
     pdf && pdf.path ? pdf.path : null,
     docx && docx.path ? docx.path : null,
     generationResult && generationResult.engine ? generationResult.engine : "",
+    pdfHash,
+    docxHash,
     now
   );
 
@@ -415,6 +435,7 @@ module.exports = {
   addAttachments,
   removeAttachment,
   recordAnalysis,
+  nextGenerationVersion,
   addGeneration,
   safeName,
   copyUnique

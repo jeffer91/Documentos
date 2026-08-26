@@ -3,6 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 
 const connections = new Map();
+const CURRENT_SCHEMA_VERSION = 2;
 
 function workspaceRoot(userDataPath) {
   const dir = path.join(userDataPath, "documentos-workspace");
@@ -14,7 +15,7 @@ function databasePath(userDataPath) {
   return path.join(workspaceRoot(userDataPath), "documentos.db");
 }
 
-function schema(db) {
+function baseSchema(db) {
   db.exec(`
     PRAGMA foreign_keys = ON;
 
@@ -169,7 +170,7 @@ function schema(db) {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_generations_project
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_generations_project_version
       ON generations(project_id, version);
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -224,8 +225,67 @@ function schema(db) {
       (id, enabled, provider, endpoint, remote_workspace_id, last_sync_at, created_at, updated_at)
     VALUES (1, 0, '', '', '', NULL, ?, ?)
   `).run(now, now);
+}
 
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '1')").run();
+function tableHasColumn(db, table, column) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
+}
+
+function addColumnIfMissing(db, table, column, sqlType) {
+  if (!tableHasColumn(db, table, column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${sqlType}`);
+  }
+}
+
+function metaGet(db, key) {
+  const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key);
+  return row ? row.value : null;
+}
+
+function metaSet(db, key, value) {
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)").run(key, String(value));
+}
+
+function schemaVersion(db) {
+  const pragma = Number(db.pragma("user_version", { simple: true }) || 0);
+  if (pragma > 0) return pragma;
+  const legacy = Number(metaGet(db, "schema_version") || 0);
+  return Number.isFinite(legacy) ? legacy : 0;
+}
+
+function setSchemaVersion(db, version) {
+  db.pragma(`user_version = ${Number(version)}`);
+  metaSet(db, "schema_version", String(version));
+}
+
+function migrateToV2(db) {
+  addColumnIfMissing(db, "projects", "document_version", "TEXT NOT NULL DEFAULT '1.0'");
+  addColumnIfMissing(db, "files", "sha256", "TEXT");
+  addColumnIfMissing(db, "files", "integrity_checked_at", "TEXT");
+  addColumnIfMissing(db, "templates", "sha256", "TEXT");
+  addColumnIfMissing(db, "generations", "pdf_sha256", "TEXT");
+  addColumnIfMissing(db, "generations", "docx_sha256", "TEXT");
+}
+
+function applyMigrations(db) {
+  baseSchema(db);
+  let version = schemaVersion(db);
+
+  if (version < 1) {
+    version = 1;
+    setSchemaVersion(db, version);
+  }
+
+  if (version < 2) {
+    const tx = db.transaction(() => migrateToV2(db));
+    tx();
+    version = 2;
+    setSchemaVersion(db, version);
+  }
+
+  if (version !== CURRENT_SCHEMA_VERSION) {
+    throw new Error(`Versión de base no compatible: ${version}. Esperada: ${CURRENT_SCHEMA_VERSION}.`);
+  }
 }
 
 function openDatabase(userDataPath) {
@@ -236,7 +296,7 @@ function openDatabase(userDataPath) {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
-  schema(db);
+  applyMigrations(db);
   connections.set(key, db);
   return db;
 }
@@ -246,15 +306,6 @@ function closeAll() {
     try { db.close(); } catch (_error) { /* ignore */ }
   }
   connections.clear();
-}
-
-function metaGet(db, key) {
-  const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key);
-  return row ? row.value : null;
-}
-
-function metaSet(db, key, value) {
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)").run(key, String(value));
 }
 
 function queueSync(db, entityType, entityId, operation, payload) {
@@ -277,39 +328,19 @@ function seedCatalog(db, catalog) {
   const insertUnit = db.prepare(`
     INSERT INTO units(id, short_name, name, full_name, icon, sort_order, updated_at)
     VALUES(@id, @short_name, @name, @full_name, @icon, @sort_order, @updated_at)
-    ON CONFLICT(id) DO UPDATE SET
-      short_name=excluded.short_name,
-      name=excluded.name,
-      full_name=excluded.full_name,
-      icon=excluded.icon,
-      sort_order=excluded.sort_order,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   const insertProcess = db.prepare(`
     INSERT INTO processes(id, unit_id, code, name, full_name, manual_note, sort_order, updated_at)
     VALUES(@id, @unit_id, @code, @name, @full_name, @manual_note, @sort_order, @updated_at)
-    ON CONFLICT(id) DO UPDATE SET
-      unit_id=excluded.unit_id,
-      code=excluded.code,
-      name=excluded.name,
-      full_name=excluded.full_name,
-      manual_note=excluded.manual_note,
-      sort_order=excluded.sort_order,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   const insertDocument = db.prepare(`
     INSERT INTO documents(id, process_id, name, type, code_pattern, mode, sort_order, updated_at)
     VALUES(@id, @process_id, @name, @type, @code_pattern, @mode, @sort_order, @updated_at)
-    ON CONFLICT(id) DO UPDATE SET
-      process_id=excluded.process_id,
-      name=excluded.name,
-      type=excluded.type,
-      code_pattern=excluded.code_pattern,
-      mode=excluded.mode,
-      sort_order=excluded.sort_order,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   const tx = db.transaction(() => {
@@ -355,6 +386,11 @@ function seedCatalog(db, catalog) {
   tx();
 }
 
+function seedCatalogIfEmpty(db, catalog) {
+  const row = db.prepare("SELECT COUNT(*) AS total FROM units").get();
+  if (!row || Number(row.total || 0) === 0) seedCatalog(db, catalog);
+}
+
 function getCatalog(db) {
   const units = db.prepare("SELECT * FROM units ORDER BY sort_order, name").all();
   const processes = db.prepare("SELECT * FROM processes ORDER BY unit_id, sort_order, name").all();
@@ -390,6 +426,7 @@ function getCatalog(db) {
 }
 
 module.exports = {
+  CURRENT_SCHEMA_VERSION,
   workspaceRoot,
   databasePath,
   openDatabase,
@@ -398,5 +435,6 @@ module.exports = {
   metaSet,
   queueSync,
   seedCatalog,
+  seedCatalogIfEmpty,
   getCatalog
 };

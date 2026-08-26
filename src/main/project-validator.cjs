@@ -1,3 +1,5 @@
+const { inspect } = require("./file-integrity-service.cjs");
+
 function hasText(value) {
   return String(value == null ? "" : value).trim().length > 0;
 }
@@ -8,14 +10,42 @@ function attachmentCount(project, kind, markerName) {
   ).length;
 }
 
+function validateFileIntegrity(project, errors, warnings) {
+  const template = project && project.template;
+  if (template && template.localPath) {
+    const check = inspect(template.localPath, template.sha256 || "");
+    if (!check.exists) errors.push("La plantilla Word ya no existe en el almacenamiento local.");
+    else if (!check.ok) errors.push("La plantilla Word fue modificada fuera de la app. Vuelve a importarla.");
+    else if (!template.sha256) warnings.push("La plantilla proviene de una versión antigua y aún no tiene huella de integridad.");
+  }
+
+  (project.attachments || []).forEach((item) => {
+    const check = inspect(item.localPath, item.sha256 || "");
+    if (!check.exists) {
+      errors.push(`No se encontró el archivo: ${item.name}.`);
+      return;
+    }
+    if (!check.ok) {
+      errors.push(`El archivo cambió fuera de la app: ${item.name}.`);
+      return;
+    }
+    if (!item.sha256) warnings.push(`${item.name}: archivo antiguo sin huella de integridad.`);
+  });
+}
+
 function validateProject(project) {
   const errors = [];
   const warnings = [];
   const template = project && project.template;
 
   if (!project) return { ok: false, errors: ["No se encontró el documento."], warnings };
-  if (project.mode === "upload") return { ok: true, errors, warnings };
-  if (!template || !template.localPath) return { ok: false, errors: ["Primero carga la plantilla Word de este documento."], warnings };
+  if (project.mode === "upload") {
+    validateFileIntegrity(project, errors, warnings);
+    return { ok: errors.length === 0, errors, warnings };
+  }
+  if (!template || !template.localPath) {
+    return { ok: false, errors: ["Primero carga la plantilla Word de este documento."], warnings };
+  }
 
   if (template.validation && Array.isArray(template.validation.errors) && template.validation.errors.length) {
     errors.push(...template.validation.errors);
@@ -44,7 +74,12 @@ function validateProject(project) {
     }
   });
 
-  if (template.validation && Array.isArray(template.validation.warnings)) warnings.push(...template.validation.warnings);
+  validateFileIntegrity(project, errors, warnings);
+
+  if (template.validation && Array.isArray(template.validation.warnings)) {
+    warnings.push(...template.validation.warnings);
+  }
+
   return { ok: errors.length === 0, errors, warnings };
 }
 
@@ -53,7 +88,9 @@ function validateAiFields(project, analysis) {
   const generated = analysis && analysis.generatedFields ? analysis.generatedFields : {};
 
   ((project.template && project.template.aiFields) || []).forEach((field) => {
-    if (field.required && !hasText(generated[field.name])) errors.push(`La IA no pudo completar: ${field.label}.`);
+    if (field.required && !hasText(generated[field.name])) {
+      errors.push(`La IA no pudo completar: ${field.label}.`);
+    }
   });
 
   return { ok: errors.length === 0, errors };
