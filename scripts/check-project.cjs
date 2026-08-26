@@ -13,6 +13,7 @@ const REQUIRED_FILES = [
   "src/renderer/catalog.js",
   "src/renderer/app.js",
   "src/main/database-service.cjs",
+  "src/main/backup-service.cjs",
   "src/main/file-integrity-service.cjs",
   "src/main/legacy-migration-service.cjs",
   "src/main/sync-service.cjs",

@@ -5,6 +5,7 @@ const assert = require("assert");
 const { app } = require("electron");
 const database = require("../src/main/database-service.cjs");
 const workspace = require("../src/main/workspace-service.cjs");
+const backupService = require("../src/main/backup-service.cjs");
 const catalog = require("../src/renderer/catalog.js");
 
 async function run() {
@@ -74,7 +75,12 @@ async function run() {
     assert.ok(project.outputs.some((item) => item.path === pdf));
     assert.strictEqual(fs.readFileSync(pdf, "utf8"), "pdf-v1");
 
-    console.log("SMOKE OK: SQLite, catálogo, persistencia, integridad y versionado.");
+    const backupRoot = path.join(temp, "backups");
+    fs.mkdirSync(backupRoot, { recursive: true });
+    const backup = await backupService.createBackup(temp, backupRoot);
+    assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
+
+    console.log("SMOKE OK: SQLite, catálogo, persistencia, integridad, versionado y respaldo.");
   } finally {
     database.closeAll();
     try { fs.rmSync(temp, { recursive: true, force: true }); } catch (_error) { /* ignore */ }

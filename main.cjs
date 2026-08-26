@@ -13,6 +13,7 @@ const { generateDocument } = require("./src/main/document-composer.cjs");
 const { validateProject, validateAiFields } = require("./src/main/project-validator.cjs");
 const { readSettings, saveSettings } = require("./src/main/settings-service.cjs");
 const syncService = require("./src/main/sync-service.cjs");
+const backupService = require("./src/main/backup-service.cjs");
 
 let mainWindow = null;
 
@@ -222,6 +223,39 @@ function registerIpc() {
   ipcMain.handle("ai:save", (_event, providers) => ({ ok: true, providers: aiProviders.saveProviders(userData(), providers) }));
 
   ipcMain.handle("sync:get-status", () => ({ ok: true, sync: syncService.getSyncStatus(userData()) }));
+
+  ipcMain.handle("backup:create", async () => {
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "Guardar respaldo",
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+
+    try {
+      return { ok: true, backup: await backupService.createBackup(userData(), selected.filePaths[0]) };
+    } catch (error) {
+      return { ok: false, error: error.message || String(error) };
+    }
+  });
+
+  ipcMain.handle("backup:restore", async () => {
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "Restaurar respaldo",
+      properties: ["openDirectory"]
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+
+    try {
+      const result = backupService.restoreBackup(userData(), selected.filePaths[0]);
+      setTimeout(() => {
+        app.relaunch();
+        app.exit(0);
+      }, 500);
+      return { ok: true, restore: result };
+    } catch (error) {
+      return { ok: false, error: error.message || String(error) };
+    }
+  });
 }
 
 app.whenReady().then(() => {

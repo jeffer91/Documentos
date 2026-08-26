@@ -681,6 +681,10 @@
         <div class="panel-title"><h3>Datos</h3><span class="status ${state.sync && state.sync.enabled ? "good" : "warn"}">${state.sync && state.sync.enabled ? "Sincronización activa" : "Externa pendiente"}</span></div>
         <div class="quick-line"><span>Base local</span><b>SQLite</b></div>
         <div class="quick-line"><span>Base externa</span><b>${state.sync && state.sync.provider ? escapeHtml(state.sync.provider) : "Pendiente"}</b></div>
+        <div class="button-row" style="margin-top:12px">
+          <button class="ghost" type="button" data-action="create-backup">Respaldar</button>
+          <button class="ghost" type="button" data-action="restore-backup">Restaurar</button>
+        </div>
       </section>
     `;
   }
@@ -911,6 +915,16 @@
     if (action === "save-settings") return saveSettingsFromScreen();
     if (action === "open-output") return api.openFile(button.dataset.path);
     if (action === "show-output") return api.showFile(button.dataset.path);
+    if (action === "create-backup") {
+      const response = await api.createBackup();
+      if (!response || response.canceled) return;
+      return showToast(response.ok ? "Respaldo creado." : (response.error || "No se pudo crear el respaldo."));
+    }
+    if (action === "restore-backup") {
+      const response = await api.restoreBackup();
+      if (!response || response.canceled) return;
+      return showToast(response.ok ? "Respaldo restaurado. Reiniciando..." : (response.error || "No se pudo restaurar."));
+    }
   });
 
   backButton.addEventListener("click", goBack);

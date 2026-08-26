@@ -21,5 +21,7 @@ contextBridge.exposeInMainWorld("documentosApp", {
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   getAiProviders: () => ipcRenderer.invoke("ai:get"),
   saveAiProviders: (providers) => ipcRenderer.invoke("ai:save", providers),
-  getSyncStatus: () => ipcRenderer.invoke("sync:get-status")
+  getSyncStatus: () => ipcRenderer.invoke("sync:get-status"),
+  createBackup: () => ipcRenderer.invoke("backup:create"),
+  restoreBackup: () => ipcRenderer.invoke("backup:restore")
 });
