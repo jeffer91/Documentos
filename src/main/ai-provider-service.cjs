@@ -1,9 +1,5 @@
-const fs = require("fs");
-const path = require("path");
 const { safeStorage } = require("electron");
-const { root } = require("./workspace-service.cjs");
-
-const FILE = "ai-providers.json";
+const { openDatabase, queueSync } = require("./database-service.cjs");
 
 const DEFAULT_PROVIDERS = [
   {
@@ -44,53 +40,47 @@ const DEFAULT_PROVIDERS = [
   }
 ];
 
-function filePath(userDataPath) {
-  return path.join(root(userDataPath), FILE);
-}
-
 function encrypt(value) {
   const text = String(value || "");
-  if (!text) return "";
-  if (!safeStorage.isEncryptionAvailable()) return "";
+  if (!text || !safeStorage.isEncryptionAvailable()) return "";
   return safeStorage.encryptString(text).toString("base64");
 }
 
 function decrypt(value) {
   if (!value || !safeStorage.isEncryptionAvailable()) return "";
-  try {
-    return safeStorage.decryptString(Buffer.from(value, "base64"));
-  } catch (_error) {
-    return "";
-  }
+  try { return safeStorage.decryptString(Buffer.from(value, "base64")); } catch (_error) { return ""; }
 }
 
-function mergeProvider(base, saved) {
-  const data = saved && typeof saved === "object" ? saved : {};
-  return {
-    id: base.id,
-    name: data.name || base.name,
-    kind: data.kind || base.kind,
-    enabled: Boolean(data.enabled),
-    priority: Number.isFinite(Number(data.priority)) ? Number(data.priority) : base.priority,
-    model: data.model || "",
-    endpoint: data.endpoint || base.endpoint,
-    encryptedKey: data.encryptedKey || ""
-  };
+function ensureDefaults(db) {
+  const now = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO ai_providers
+      (id, name, kind, enabled, priority, model, endpoint, encrypted_key, updated_at)
+    VALUES (?, ?, ?, 0, ?, ?, ?, '', ?)
+  `);
+
+  DEFAULT_PROVIDERS.forEach((provider) => {
+    insert.run(provider.id, provider.name, provider.kind, provider.priority, provider.model, provider.endpoint, now);
+  });
 }
 
-function readRaw(userDataPath) {
-  const target = filePath(userDataPath);
-  if (!fs.existsSync(target)) return DEFAULT_PROVIDERS.map((item) => mergeProvider(item, {}));
-  try {
-    const saved = JSON.parse(fs.readFileSync(target, "utf8"));
-    return DEFAULT_PROVIDERS.map((base) => mergeProvider(base, Array.isArray(saved) ? saved.find((item) => item.id === base.id) : null));
-  } catch (_error) {
-    return DEFAULT_PROVIDERS.map((item) => mergeProvider(item, {}));
-  }
+function rawProviders(userDataPath) {
+  const db = openDatabase(userDataPath);
+  ensureDefaults(db);
+  return db.prepare("SELECT * FROM ai_providers ORDER BY priority, name").all().map((row) => ({
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    enabled: Boolean(row.enabled),
+    priority: row.priority,
+    model: row.model || "",
+    endpoint: row.endpoint || "",
+    encryptedKey: row.encrypted_key || ""
+  }));
 }
 
 function publicProviders(userDataPath) {
-  return readRaw(userDataPath).map((item) => ({
+  return rawProviders(userDataPath).map((item) => ({
     id: item.id,
     name: item.name,
     kind: item.kind,
@@ -103,39 +93,57 @@ function publicProviders(userDataPath) {
 }
 
 function saveProviders(userDataPath, incoming) {
-  const current = readRaw(userDataPath);
-  const list = current.map((existing) => {
-    const update = Array.isArray(incoming) ? incoming.find((item) => item.id === existing.id) : null;
-    if (!update) return existing;
-    const next = Object.assign({}, existing, {
-      name: update.name || existing.name,
-      kind: update.kind || existing.kind,
-      enabled: Boolean(update.enabled),
-      priority: Number.isFinite(Number(update.priority)) ? Number(update.priority) : existing.priority,
-      model: String(update.model || "").trim(),
-      endpoint: String(update.endpoint || "").trim()
+  const db = openDatabase(userDataPath);
+  ensureDefaults(db);
+  const current = rawProviders(userDataPath);
+  const now = new Date().toISOString();
+
+  const update = db.prepare(`
+    UPDATE ai_providers
+    SET enabled = ?, priority = ?, model = ?, endpoint = ?, encrypted_key = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const tx = db.transaction(() => {
+    current.forEach((existing) => {
+      const change = Array.isArray(incoming) ? incoming.find((item) => item.id === existing.id) : null;
+      if (!change) return;
+
+      let encryptedKey = existing.encryptedKey;
+      if (Object.prototype.hasOwnProperty.call(change, "apiKey") && String(change.apiKey || "").trim()) {
+        const encrypted = encrypt(String(change.apiKey).trim());
+        if (encrypted) encryptedKey = encrypted;
+      }
+      if (change.clearKey === true) encryptedKey = "";
+
+      update.run(
+        change.enabled ? 1 : 0,
+        Number.isFinite(Number(change.priority)) ? Number(change.priority) : existing.priority,
+        String(change.model || "").trim(),
+        String(change.endpoint || "").trim(),
+        encryptedKey,
+        now,
+        existing.id
+      );
+
+      queueSync(db, "ai_provider", existing.id, "update", {
+        enabled: Boolean(change.enabled),
+        priority: Number(change.priority || existing.priority),
+        model: String(change.model || "").trim(),
+        endpoint: String(change.endpoint || "").trim()
+      });
     });
-    if (Object.prototype.hasOwnProperty.call(update, "apiKey") && String(update.apiKey || "").trim()) {
-      const encryptedKey = encrypt(String(update.apiKey).trim());
-      if (encryptedKey) next.encryptedKey = encryptedKey;
-    }
-    if (update.clearKey === true) next.encryptedKey = "";
-    return next;
   });
-  fs.writeFileSync(filePath(userDataPath), JSON.stringify(list, null, 2), "utf8");
+
+  tx();
   return publicProviders(userDataPath);
 }
 
 function runtimeProviders(userDataPath) {
-  return readRaw(userDataPath)
+  return rawProviders(userDataPath)
     .map((item) => Object.assign({}, item, { apiKey: decrypt(item.encryptedKey) }))
     .filter((item) => item.enabled && item.apiKey && item.model && item.endpoint)
     .sort((a, b) => a.priority - b.priority);
 }
 
-module.exports = {
-  DEFAULT_PROVIDERS,
-  publicProviders,
-  saveProviders,
-  runtimeProviders
-};
+module.exports = { DEFAULT_PROVIDERS, publicProviders, saveProviders, runtimeProviders };

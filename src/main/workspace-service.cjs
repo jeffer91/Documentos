@@ -1,13 +1,16 @@
 const fs = require("fs");
 const path = require("path");
+const { workspaceRoot, openDatabase, queueSync } = require("./database-service.cjs");
+
+const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
+const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 function root(userDataPath) {
-  const dir = path.join(userDataPath, "documentos-workspace");
-  ensureDir(dir);
+  const dir = workspaceRoot(userDataPath);
   ensureDir(path.join(dir, "projects"));
   ensureDir(path.join(dir, "templates"));
   return dir;
@@ -24,6 +27,10 @@ function projectDir(userDataPath, projectId) {
   return dir;
 }
 
+function generatedDir(userDataPath, projectId) {
+  return path.join(projectDir(userDataPath, projectId), "generated");
+}
+
 function safeName(name) {
   return String(name || "archivo")
     .replace(/[\\/:*?"<>|]/g, "-")
@@ -35,8 +42,83 @@ function newId(prefix) {
   return `${prefix || "item"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function projectJsonPath(userDataPath, projectId) {
-  return path.join(projectDir(userDataPath, projectId), "project.json");
+function parseJson(value, fallback) {
+  if (value == null || value === "") return fallback;
+  try { return JSON.parse(value); } catch (_error) { return fallback; }
+}
+
+function markerFromRow(row) {
+  const type = row.type;
+  return {
+    raw: row.raw,
+    token: row.raw,
+    valid: Boolean(row.valid),
+    type,
+    name: row.name,
+    label: row.label || row.name,
+    required: Boolean(row.required),
+    config: row.config || "",
+    columns: parseJson(row.columns_json, []),
+    isBlock: BLOCK_TYPES.has(type),
+    isUserInput: USER_TYPES.has(type),
+    isAi: type === "IA",
+    isSystem: type === "SISTEMA"
+  };
+}
+
+function templateById(db, templateId) {
+  if (!templateId) return null;
+  const row = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
+  if (!row) return null;
+
+  const markers = db.prepare("SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id").all(templateId).map(markerFromRow);
+  return {
+    id: row.id,
+    documentId: row.document_id || "",
+    unitId: row.unit_id || "",
+    processId: row.process_id || "",
+    name: row.name,
+    version: row.version,
+    localPath: row.local_path,
+    active: Boolean(row.active),
+    confidence: row.confidence || 0,
+    importedAt: row.imported_at,
+    markers,
+    fields: markers.filter((marker) => marker.valid && marker.isUserInput),
+    aiFields: markers.filter((marker) => marker.valid && marker.isAi),
+    systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
+    validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true })
+  };
+}
+
+function formDataForProject(db, projectId) {
+  const rows = db.prepare("SELECT field_name, value_json FROM project_fields WHERE project_id = ?").all(projectId);
+  const formData = {};
+  rows.forEach((row) => { formData[row.field_name] = parseJson(row.value_json, ""); });
+  return formData;
+}
+
+function attachmentsForProject(db, projectId) {
+  return db.prepare("SELECT * FROM files WHERE project_id = ? ORDER BY added_at").all(projectId).map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    markerName: row.marker_name || "",
+    name: row.name,
+    extension: row.extension || "",
+    size: row.size || 0,
+    localPath: row.local_path,
+    addedAt: row.added_at
+  }));
+}
+
+function outputsForProject(db, projectId) {
+  const rows = db.prepare("SELECT * FROM generations WHERE project_id = ? ORDER BY version DESC, created_at DESC").all(projectId);
+  const outputs = [];
+  rows.forEach((row) => {
+    if (row.pdf_path) outputs.push({ type: "pdf", label: `PDF final v${row.version}`, path: row.pdf_path, primary: true, generationId: row.id });
+    if (row.docx_path) outputs.push({ type: "docx", label: `Word de respaldo v${row.version}`, path: row.docx_path, primary: false, generationId: row.id });
+  });
+  return outputs;
 }
 
 function normalizeProject(input) {
@@ -66,36 +148,135 @@ function normalizeProject(input) {
   };
 }
 
+function hydrateProject(db, row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    status: row.status,
+    unitId: row.unit_id || "",
+    unitName: row.unit_name || "",
+    processId: row.process_id || "",
+    processCode: row.process_code || "",
+    processName: row.process_name || "",
+    documentId: row.document_id || "",
+    documentName: row.document_name || "",
+    documentType: row.document_type || "",
+    codePattern: row.code_pattern || "",
+    mode: row.mode || "template",
+    formData: formDataForProject(db, row.id),
+    aiMode: row.ai_mode || "fallback",
+    template: templateById(db, row.template_id),
+    attachments: attachmentsForProject(db, row.id),
+    analysis: parseJson(row.analysis_json, null),
+    outputs: outputsForProject(db, row.id),
+    generatedCode: row.generated_code || ""
+  };
+}
+
 function createProject(userDataPath, metadata) {
+  const db = openDatabase(userDataPath);
   const project = normalizeProject(metadata || {});
   projectDir(userDataPath, project.id);
-  return saveProject(userDataPath, project);
+
+  db.prepare(`
+    INSERT INTO projects
+      (id, document_id, template_id, status, unit_id, unit_name, process_id, process_code, process_name,
+       document_name, document_type, code_pattern, mode, ai_mode, generated_code, analysis_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    project.id,
+    project.documentId || null,
+    project.template && project.template.id ? project.template.id : null,
+    project.status,
+    project.unitId,
+    project.unitName,
+    project.processId,
+    project.processCode,
+    project.processName,
+    project.documentName,
+    project.documentType,
+    project.codePattern,
+    project.mode,
+    project.aiMode,
+    project.generatedCode,
+    project.analysis ? JSON.stringify(project.analysis) : null,
+    project.createdAt,
+    project.updatedAt
+  );
+
+  queueSync(db, "project", project.id, "create", { documentId: project.documentId, status: project.status });
+  return getProject(userDataPath, project.id);
 }
 
 function saveProject(userDataPath, input) {
+  const db = openDatabase(userDataPath);
   const project = normalizeProject(input);
-  fs.writeFileSync(projectJsonPath(userDataPath, project.id), JSON.stringify(project, null, 2), "utf8");
-  return project;
+  const existing = db.prepare("SELECT created_at FROM projects WHERE id = ?").get(project.id);
+  if (!existing) return createProject(userDataPath, project);
+
+  const now = new Date().toISOString();
+  const templateId = project.template && project.template.id ? project.template.id : null;
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      UPDATE projects SET
+        document_id = ?, template_id = ?, status = ?, unit_id = ?, unit_name = ?, process_id = ?,
+        process_code = ?, process_name = ?, document_name = ?, document_type = ?, code_pattern = ?,
+        mode = ?, ai_mode = ?, generated_code = ?, analysis_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      project.documentId || null,
+      templateId,
+      project.status,
+      project.unitId,
+      project.unitName,
+      project.processId,
+      project.processCode,
+      project.processName,
+      project.documentName,
+      project.documentType,
+      project.codePattern,
+      project.mode,
+      project.aiMode,
+      project.generatedCode,
+      project.analysis ? JSON.stringify(project.analysis) : null,
+      now,
+      project.id
+    );
+
+    const upsert = db.prepare(`
+      INSERT INTO project_fields(project_id, field_name, value_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id, field_name)
+      DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+    `);
+
+    const keep = new Set(Object.keys(project.formData || {}));
+    db.prepare("SELECT field_name FROM project_fields WHERE project_id = ?").all(project.id).forEach((row) => {
+      if (!keep.has(row.field_name)) db.prepare("DELETE FROM project_fields WHERE project_id = ? AND field_name = ?").run(project.id, row.field_name);
+    });
+
+    Object.entries(project.formData || {}).forEach(([key, value]) => {
+      upsert.run(project.id, key, JSON.stringify(value), now);
+    });
+  });
+
+  tx();
+  queueSync(db, "project", project.id, "update", { status: project.status, generatedCode: project.generatedCode });
+  return getProject(userDataPath, project.id);
 }
 
 function getProject(userDataPath, projectId) {
-  const file = projectJsonPath(userDataPath, projectId);
-  if (!fs.existsSync(file)) return null;
-  try {
-    return normalizeProject(JSON.parse(fs.readFileSync(file, "utf8")));
-  } catch (_error) {
-    return null;
-  }
+  const db = openDatabase(userDataPath);
+  const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  return hydrateProject(db, row);
 }
 
 function listProjects(userDataPath) {
-  const dir = projectsDir(userDataPath);
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => getProject(userDataPath, entry.name))
-    .filter(Boolean)
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  const db = openDatabase(userDataPath);
+  return db.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all().map((row) => hydrateProject(db, row));
 }
 
 function copyUnique(sourcePath, destinationDir) {
@@ -105,60 +286,122 @@ function copyUnique(sourcePath, destinationDir) {
   const stem = path.basename(original, ext);
   let target = path.join(destinationDir, original);
   let n = 2;
+
   while (fs.existsSync(target)) {
     target = path.join(destinationDir, `${stem} (${n})${ext}`);
     n += 1;
   }
+
   fs.copyFileSync(sourcePath, target);
   return target;
 }
 
 function addAttachments(userDataPath, projectId, kind, paths, markerName) {
+  const db = openDatabase(userDataPath);
   const project = getProject(userDataPath, projectId);
   if (!project) throw new Error("No se encontró el documento local.");
+
   const folder = kind === "evidence" ? "evidence" : kind === "data" ? "data" : "sources";
   const destination = path.join(projectDir(userDataPath, projectId), folder);
   const added = [];
+  const insert = db.prepare(`
+    INSERT INTO files(id, project_id, kind, marker_name, name, extension, size, local_path, added_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
-  (paths || []).forEach((sourcePath) => {
-    if (!sourcePath || !fs.existsSync(sourcePath)) return;
-    const localPath = copyUnique(sourcePath, destination);
-    const stat = fs.statSync(localPath);
-    const item = {
-      id: newId("file"),
-      kind,
-      markerName: markerName || "",
-      name: path.basename(localPath),
-      extension: path.extname(localPath).toLowerCase(),
-      size: stat.size,
-      localPath,
-      addedAt: new Date().toISOString()
-    };
-    project.attachments.push(item);
-    added.push(item);
+  const tx = db.transaction(() => {
+    (paths || []).forEach((sourcePath) => {
+      if (!sourcePath || !fs.existsSync(sourcePath)) return;
+      const localPath = copyUnique(sourcePath, destination);
+      const stat = fs.statSync(localPath);
+      const item = {
+        id: newId("file"),
+        kind,
+        markerName: markerName || "",
+        name: path.basename(localPath),
+        extension: path.extname(localPath).toLowerCase(),
+        size: stat.size,
+        localPath,
+        addedAt: new Date().toISOString()
+      };
+      insert.run(item.id, projectId, item.kind, item.markerName, item.name, item.extension, item.size, item.localPath, item.addedAt);
+      added.push(item);
+      queueSync(db, "file", item.id, "create", { projectId, kind: item.kind, markerName: item.markerName, name: item.name });
+    });
+
+    db.prepare("UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), projectId);
   });
 
-  project.analysis = null;
-  project.status = "draft";
-  saveProject(userDataPath, project);
-  return { project, added };
+  tx();
+  return { project: getProject(userDataPath, projectId), added };
 }
 
 function removeAttachment(userDataPath, projectId, attachmentId) {
-  const project = getProject(userDataPath, projectId);
-  if (!project) throw new Error("No se encontró el documento local.");
-  const item = project.attachments.find((attachment) => attachment.id === attachmentId);
-  project.attachments = project.attachments.filter((attachment) => attachment.id !== attachmentId);
-  if (item && item.localPath && fs.existsSync(item.localPath)) {
-    try { fs.unlinkSync(item.localPath); } catch (_error) { /* ignore */ }
+  const db = openDatabase(userDataPath);
+  const row = db.prepare("SELECT * FROM files WHERE id = ? AND project_id = ?").get(attachmentId, projectId);
+  if (row && row.local_path && fs.existsSync(row.local_path)) {
+    try { fs.unlinkSync(row.local_path); } catch (_error) { /* ignore */ }
   }
-  project.analysis = null;
-  project.status = "draft";
-  return saveProject(userDataPath, project);
+
+  db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").run(attachmentId, projectId);
+  db.prepare("UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?")
+    .run(new Date().toISOString(), projectId);
+  queueSync(db, "file", attachmentId, "delete", { projectId });
+  return getProject(userDataPath, projectId);
 }
 
-function generatedDir(userDataPath, projectId) {
-  return path.join(projectDir(userDataPath, projectId), "generated");
+function recordAnalysis(userDataPath, projectId, analysis, status) {
+  const db = openDatabase(userDataPath);
+  const now = new Date().toISOString();
+  const id = newId("analysis");
+
+  db.prepare(`
+    INSERT INTO ai_analyses(id, project_id, provider, content_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, projectId, analysis && analysis.provider ? analysis.provider : "", JSON.stringify(analysis || {}), now);
+
+  db.prepare("UPDATE projects SET analysis_json = ?, status = ?, updated_at = ? WHERE id = ?")
+    .run(JSON.stringify(analysis || {}), status || "analyzed", now, projectId);
+
+  queueSync(db, "analysis", id, "create", { projectId, provider: analysis && analysis.provider ? analysis.provider : "" });
+  return getProject(userDataPath, projectId);
+}
+
+function addGeneration(userDataPath, projectId, generationResult) {
+  const db = openDatabase(userDataPath);
+  const latest = db.prepare("SELECT MAX(version) AS max_version FROM generations WHERE project_id = ?").get(projectId);
+  const version = Number(latest && latest.max_version || 0) + 1;
+  const outputs = generationResult && Array.isArray(generationResult.outputs) ? generationResult.outputs : [];
+  const pdf = outputs.find((item) => item.type === "pdf");
+  const docx = outputs.find((item) => item.type === "docx");
+  const now = new Date().toISOString();
+  const id = newId("gen");
+
+  db.prepare(`
+    INSERT INTO generations(id, project_id, version, generated_code, pdf_path, docx_path, engine, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    projectId,
+    version,
+    generationResult && generationResult.code ? generationResult.code : "",
+    pdf && pdf.path ? pdf.path : null,
+    docx && docx.path ? docx.path : null,
+    generationResult && generationResult.engine ? generationResult.engine : "",
+    now
+  );
+
+  db.prepare("UPDATE projects SET status = 'generated', generated_code = ?, updated_at = ? WHERE id = ?")
+    .run(generationResult && generationResult.code ? generationResult.code : "", now, projectId);
+
+  queueSync(db, "generation", id, "create", {
+    projectId,
+    version,
+    generatedCode: generationResult && generationResult.code ? generationResult.code : ""
+  });
+
+  return getProject(userDataPath, projectId);
 }
 
 module.exports = {
@@ -171,6 +414,8 @@ module.exports = {
   listProjects,
   addAttachments,
   removeAttachment,
+  recordAnalysis,
+  addGeneration,
   safeName,
   copyUnique
 };

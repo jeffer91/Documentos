@@ -1,8 +1,5 @@
-const fs = require("fs");
-const path = require("path");
-const { root } = require("./workspace-service.cjs");
+const { openDatabase, queueSync } = require("./database-service.cjs");
 
-const SETTINGS_FILE = "settings.json";
 const DEFAULT_SETTINGS = {
   signers: {
     elaboradoPor: { nombre: "Mgs. Jefferson Villarreal", cargo: "Coordinador de Titulación y Eficiencia Terminal" },
@@ -15,10 +12,6 @@ const DEFAULT_SETTINGS = {
     openAfterGenerate: true
   }
 };
-
-function filePath(userDataPath) {
-  return path.join(root(userDataPath), SETTINGS_FILE);
-}
 
 function text(value, fallback) {
   return String(value || fallback || "").trim();
@@ -53,23 +46,25 @@ function merge(input) {
 }
 
 function readSettings(userDataPath) {
-  const target = filePath(userDataPath);
-  if (!fs.existsSync(target)) return merge(DEFAULT_SETTINGS);
-  try {
-    return merge(JSON.parse(fs.readFileSync(target, "utf8")));
-  } catch (_error) {
-    return merge(DEFAULT_SETTINGS);
-  }
+  const db = openDatabase(userDataPath);
+  const row = db.prepare("SELECT value_json FROM settings WHERE key = 'app_settings'").get();
+  if (!row) return merge(DEFAULT_SETTINGS);
+  try { return merge(JSON.parse(row.value_json)); } catch (_error) { return merge(DEFAULT_SETTINGS); }
 }
 
 function saveSettings(userDataPath, settings) {
+  const db = openDatabase(userDataPath);
   const next = merge(settings);
-  fs.writeFileSync(filePath(userDataPath), JSON.stringify(next, null, 2), "utf8");
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO settings(key, value_json, updated_at)
+    VALUES('app_settings', ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+  `).run(JSON.stringify(next), now);
+
+  queueSync(db, "settings", "app_settings", "update", next);
   return next;
 }
 
-module.exports = {
-  DEFAULT_SETTINGS,
-  readSettings,
-  saveSettings
-};
+module.exports = { DEFAULT_SETTINGS, readSettings, saveSettings };
