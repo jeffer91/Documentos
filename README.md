@@ -18,7 +18,7 @@ Word completado
 PDF final
 ```
 
-## Datos: arquitectura v2.2
+## Datos: arquitectura v2.4
 
 La app utiliza **SQLite como base local principal**.
 
@@ -153,3 +153,51 @@ npm start
 ```bash
 npm run check
 ```
+
+
+## Versiones de información
+
+La app no conserva una copia física distinta del PDF/Word por cada generación.
+
+Cada vez que se genera un documento se guarda en SQLite una versión de información con:
+
+- campos ingresados;
+- análisis de IA;
+- plantilla y versión de plantilla;
+- código y versión documental;
+- metadatos de fuentes, datos y evidencias;
+- proveedor/mode de IA;
+- fecha de generación.
+
+Los archivos físicos generados se mantienen únicamente como salida actual en:
+
+```text
+projects/<project-id>/generated/current/
+```
+
+El historial vive en la tabla `document_versions` y puede cargarse nuevamente como borrador desde la app.
+
+## Visualizador de errores
+
+La navegación incluye **Sistema**.
+
+La app registra errores de:
+
+- proceso principal de Electron;
+- interfaz;
+- generación PDF;
+- plantillas;
+- archivos;
+- análisis;
+- respaldo/restauración.
+
+Los registros viven en SQLite (`app_errors`) y pueden marcarse como resueltos desde la interfaz.
+
+## Inicio en Electron
+
+```bash
+npm install
+npm start
+```
+
+`npm start` ejecuta `electron .` y abre la aplicación de escritorio.

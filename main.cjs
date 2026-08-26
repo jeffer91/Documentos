@@ -115,7 +115,7 @@ function registerIpc() {
         workspace.addAttachments(userData(), projectId, kind, result.filePaths, markerName || "")
       );
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("files", "add", error);
     }
   });
 
@@ -139,7 +139,7 @@ function registerIpc() {
         template: templates.importTemplate(userData(), result.filePaths[0], association || null)
       };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("templates", "import", error);
     }
   });
 
@@ -166,7 +166,7 @@ function registerIpc() {
 
       return { ok: true, analysis, project, validation };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("analysis", "run", error);
     }
   });
 
@@ -199,7 +199,7 @@ function registerIpc() {
 
       return { ok: true, result, project };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("documents", "generate", error);
     }
   });
 
@@ -214,7 +214,7 @@ function registerIpc() {
       project.status = "archived";
       return { ok: true, project: workspace.saveProject(userData(), project) };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("documents", "archive", error);
     }
   });
 
@@ -227,27 +227,47 @@ function registerIpc() {
 
   ipcMain.handle("files:open", async (_event, filePath) => {
     if (!workspaceFileAllowed(filePath) || !fs.existsSync(filePath)) {
-      return { ok: false, error: "Archivo no disponible o fuera del espacio de trabajo." };
+      return failure("files", "open", new Error("Archivo no disponible o fuera del espacio de trabajo."));
     }
     const error = await shell.openPath(filePath);
-    return error ? { ok: false, error } : { ok: true };
+    return error ? failure("files", "open", new Error(error)) : { ok: true };
   });
 
   ipcMain.handle("files:show", async (_event, filePath) => {
     if (!workspaceFileAllowed(filePath) || !fs.existsSync(filePath)) {
-      return { ok: false, error: "Archivo no disponible o fuera del espacio de trabajo." };
+      return failure("files", "show", new Error("Archivo no disponible o fuera del espacio de trabajo."));
     }
     shell.showItemInFolder(filePath);
     return { ok: true };
   });
 
-  ipcMain.handle("settings:get", () => ({ ok: true, settings: readSettings(userData()) }));
-  ipcMain.handle("settings:save", (_event, settings) => ({ ok: true, settings: saveSettings(userData(), settings) }));
+  ipcMain.handle("settings:get", () => safeResponse(
+    () => ({ ok: true, settings: readSettings(userData()) }),
+    "settings",
+    "get"
+  ));
+  ipcMain.handle("settings:save", (_event, settings) => safeResponse(
+    () => ({ ok: true, settings: saveSettings(userData(), settings) }),
+    "settings",
+    "save"
+  ));
 
-  ipcMain.handle("ai:get", () => ({ ok: true, providers: aiProviders.publicProviders(userData()) }));
-  ipcMain.handle("ai:save", (_event, providers) => ({ ok: true, providers: aiProviders.saveProviders(userData(), providers) }));
+  ipcMain.handle("ai:get", () => safeResponse(
+    () => ({ ok: true, providers: aiProviders.publicProviders(userData()) }),
+    "ai",
+    "get"
+  ));
+  ipcMain.handle("ai:save", (_event, providers) => safeResponse(
+    () => ({ ok: true, providers: aiProviders.saveProviders(userData(), providers) }),
+    "ai",
+    "save"
+  ));
 
-  ipcMain.handle("sync:get-status", () => ({ ok: true, sync: syncService.getSyncStatus(userData()) }));
+  ipcMain.handle("sync:get-status", () => safeResponse(
+    () => ({ ok: true, sync: syncService.getSyncStatus(userData()) }),
+    "sync",
+    "status"
+  ));
 
   ipcMain.handle("versions:list", (_event, projectId) => safeResponse(
     () => ({ ok: true, versions: workspace.listDocumentVersions(userData(), projectId) }),
@@ -307,7 +327,7 @@ function registerIpc() {
     try {
       return { ok: true, backup: await backupService.createBackup(userData(), selected.filePaths[0]) };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("backup", "create", error);
     }
   });
 
@@ -326,7 +346,7 @@ function registerIpc() {
       }, 500);
       return { ok: true, restore: result };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return failure("backup", "restore", error);
     }
   });
 }
@@ -337,7 +357,7 @@ app.whenReady().then(() => {
   try {
     migrateLegacy(db, database.workspaceRoot(userData()));
   } catch (error) {
-    console.error("Migración legacy omitida:", error);
+    reportError("database", "legacy-migration", error);
   }
 
   registerIpc();

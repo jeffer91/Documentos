@@ -15,6 +15,7 @@ const REQUIRED_FILES = [
   "src/main/database-service.cjs",
   "src/main/backup-service.cjs",
   "src/main/file-integrity-service.cjs",
+  "src/main/error-service.cjs",
   "src/main/legacy-migration-service.cjs",
   "src/main/sync-service.cjs",
   "src/main/workspace-service.cjs",
@@ -116,7 +117,7 @@ function main() {
     errors.push(`No se pudo validar marcadores: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.3");
+  console.log("Documentos ITSQMET · diagnóstico v2.4");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));

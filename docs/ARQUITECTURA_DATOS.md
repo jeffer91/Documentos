@@ -53,11 +53,25 @@ La tabla registra metadatos y rutas. Los binarios permanecen en:
 
 Se conserva historial de análisis, proveedor y contenido estructurado.
 
-### Generaciones
+### Versiones documentales como información
+
+`projects → document_versions`
+
+Cada generación exitosa crea un snapshot informativo en SQLite. No se crea un PDF/Word histórico por cada versión.
+
+El snapshot conserva campos, análisis, plantilla utilizada, código, versión documental, referencias de archivos y fecha.
+
+### Salida física actual
 
 `projects → generations`
 
-Cada generación tiene versión, código, ruta PDF, ruta DOCX, motor y fecha.
+`generations` mantiene únicamente la salida física actual (PDF y Word de respaldo). Al generar nuevamente, se reemplaza la salida física y se conserva el historial en `document_versions`.
+
+### Errores
+
+`app_errors`
+
+Registra errores técnicos y funcionales para el visualizador **Sistema**.
 
 ## Base externa pendiente
 
