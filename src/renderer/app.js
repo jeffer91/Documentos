@@ -512,6 +512,7 @@
   }
 
   function outputsHtml() {
+    if (!state.project || state.project.status !== "generated") return "";
     const outputs = (state.project.outputs || []).filter((item) => item.path);
     if (!outputs.length) return "";
 
@@ -797,6 +798,7 @@
 
   async function persistEditor() {
     if (!state.project) return;
+    if (state.project.status === "generated") state.project.status = "draft";
     state.project.formData = collectFormData();
     const mode = document.querySelector('input[name="aiMode"]:checked');
     if (mode) state.project.aiMode = mode.value;
