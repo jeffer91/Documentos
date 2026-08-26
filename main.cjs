@@ -14,6 +14,7 @@ const { validateProject, validateAiFields } = require("./src/main/project-valida
 const { readSettings, saveSettings } = require("./src/main/settings-service.cjs");
 const syncService = require("./src/main/sync-service.cjs");
 const backupService = require("./src/main/backup-service.cjs");
+const errorService = require("./src/main/error-service.cjs");
 
 let mainWindow = null;
 
@@ -34,6 +35,17 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    try {
+      errorService.record(userData(), {
+        severity: "error",
+        module: "renderer",
+        action: "render-process-gone",
+        message: "La interfaz se cerró inesperadamente.",
+        detail: JSON.stringify(details || {})
+      });
+    } catch (_error) { /* ignore */ }
+  });
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
@@ -48,11 +60,24 @@ function filtersFor(kind) {
   return [{ name: "Fuentes", extensions: ["docx", "pdf", "xlsx", "xls", "csv", "txt", "md", "json"] }];
 }
 
-function safeResponse(action) {
+function reportError(moduleName, actionName, error, userMessage) {
+  try {
+    errorService.recordError(userData(), moduleName || "app", actionName || "", error, userMessage);
+  } catch (_error) {
+    // El registro de errores nunca debe bloquear la app.
+  }
+}
+
+function failure(moduleName, actionName, error, userMessage) {
+  reportError(moduleName, actionName, error, userMessage);
+  return { ok: false, error: userMessage || (error && error.message ? error.message : String(error)) };
+}
+
+function safeResponse(action, moduleName, actionName) {
   try {
     return action();
   } catch (error) {
-    return { ok: false, error: error.message || String(error) };
+    return failure(moduleName || "app", actionName || "operation", error);
   }
 }
 
@@ -163,7 +188,7 @@ function registerIpc() {
       }
 
       const settings = readSettings(userData());
-      const generationVersion = workspace.nextGenerationVersion(userData(), projectId);
+      const generationVersion = workspace.nextDocumentVersion(userData(), projectId);
       const result = await generateDocument(userData(), project, analysis, settings.signers, __dirname, generationVersion);
       project = workspace.addGeneration(userData(), projectId, result);
 
@@ -224,6 +249,54 @@ function registerIpc() {
 
   ipcMain.handle("sync:get-status", () => ({ ok: true, sync: syncService.getSyncStatus(userData()) }));
 
+  ipcMain.handle("versions:list", (_event, projectId) => safeResponse(
+    () => ({ ok: true, versions: workspace.listDocumentVersions(userData(), projectId) }),
+    "versions",
+    "list"
+  ));
+
+  ipcMain.handle("versions:get", (_event, projectId, version) => safeResponse(
+    () => ({ ok: true, version: workspace.getDocumentVersion(userData(), projectId, version) }),
+    "versions",
+    "get"
+  ));
+
+  ipcMain.handle("versions:restore", (_event, projectId, version) => safeResponse(
+    () => ({ ok: true, project: workspace.restoreDocumentVersion(userData(), projectId, version) }),
+    "versions",
+    "restore"
+  ));
+
+  ipcMain.handle("errors:list", (_event, options) => safeResponse(
+    () => ({ ok: true, errors: errorService.list(userData(), options || {}), count: errorService.countOpen(userData()) }),
+    "errors",
+    "list"
+  ));
+
+  ipcMain.handle("errors:count", () => safeResponse(
+    () => ({ ok: true, count: errorService.countOpen(userData()) }),
+    "errors",
+    "count"
+  ));
+
+  ipcMain.handle("errors:resolve-all", () => safeResponse(
+    () => ({ ok: true, result: errorService.resolveAll(userData()) }),
+    "errors",
+    "resolve-all"
+  ));
+
+  ipcMain.handle("errors:clear-resolved", () => safeResponse(
+    () => ({ ok: true, result: errorService.clearResolved(userData()) }),
+    "errors",
+    "clear-resolved"
+  ));
+
+  ipcMain.handle("errors:report", (_event, payload) => safeResponse(
+    () => ({ ok: true, error: errorService.record(userData(), payload || {}) }),
+    "errors",
+    "report"
+  ));
+
   ipcMain.handle("backup:create", async () => {
     const selected = await dialog.showOpenDialog(mainWindow, {
       title: "Guardar respaldo",
@@ -268,6 +341,15 @@ app.whenReady().then(() => {
   }
 
   registerIpc();
+
+  process.on("uncaughtException", (error) => {
+    reportError("main", "uncaughtException", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    const error = reason instanceof Error ? reason : new Error(String(reason || "Promesa rechazada"));
+    reportError("main", "unhandledRejection", error);
+  });
+
   createWindow();
 
   app.on("activate", () => {

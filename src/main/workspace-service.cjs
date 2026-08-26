@@ -72,7 +72,10 @@ function templateById(db, templateId) {
   const row = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
   if (!row) return null;
 
-  const markers = db.prepare("SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id").all(templateId).map(markerFromRow);
+  const markers = db.prepare(
+    "SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id"
+  ).all(templateId).map(markerFromRow);
+
   return {
     id: row.id,
     documentId: row.document_id || "",
@@ -94,14 +97,20 @@ function templateById(db, templateId) {
 }
 
 function formDataForProject(db, projectId) {
-  const rows = db.prepare("SELECT field_name, value_json FROM project_fields WHERE project_id = ?").all(projectId);
+  const rows = db.prepare(
+    "SELECT field_name, value_json FROM project_fields WHERE project_id = ?"
+  ).all(projectId);
   const formData = {};
-  rows.forEach((row) => { formData[row.field_name] = parseJson(row.value_json, ""); });
+  rows.forEach((row) => {
+    formData[row.field_name] = parseJson(row.value_json, "");
+  });
   return formData;
 }
 
 function attachmentsForProject(db, projectId) {
-  return db.prepare("SELECT * FROM files WHERE project_id = ? ORDER BY added_at").all(projectId).map((row) => ({
+  return db.prepare(
+    "SELECT * FROM files WHERE project_id = ? ORDER BY added_at"
+  ).all(projectId).map((row) => ({
     id: row.id,
     kind: row.kind,
     markerName: row.marker_name || "",
@@ -116,13 +125,42 @@ function attachmentsForProject(db, projectId) {
 }
 
 function outputsForProject(db, projectId) {
-  const rows = db.prepare("SELECT * FROM generations WHERE project_id = ? ORDER BY version DESC, created_at DESC").all(projectId);
+  const row = db.prepare(
+    "SELECT * FROM generations WHERE project_id = ? ORDER BY created_at DESC LIMIT 1"
+  ).get(projectId);
+
+  if (!row) return [];
+
   const outputs = [];
-  rows.forEach((row) => {
-    if (row.pdf_path) outputs.push({ type: "pdf", label: `PDF final v${row.version}`, path: row.pdf_path, primary: true, generationId: row.id });
-    if (row.docx_path) outputs.push({ type: "docx", label: `Word de respaldo v${row.version}`, path: row.docx_path, primary: false, generationId: row.id });
-  });
+  if (row.pdf_path) {
+    outputs.push({
+      type: "pdf",
+      label: "PDF actual",
+      path: row.pdf_path,
+      primary: true,
+      generationId: row.id
+    });
+  }
+  if (row.docx_path) {
+    outputs.push({
+      type: "docx",
+      label: "Word de respaldo",
+      path: row.docx_path,
+      primary: false,
+      generationId: row.id
+    });
+  }
   return outputs;
+}
+
+function versionStats(db, projectId) {
+  const row = db.prepare(
+    "SELECT COUNT(*) AS total, MAX(version) AS current_version FROM document_versions WHERE project_id = ?"
+  ).get(projectId);
+  return {
+    total: Number(row && row.total || 0),
+    current: Number(row && row.current_version || 0)
+  };
 }
 
 function normalizeProject(input) {
@@ -149,12 +187,16 @@ function normalizeProject(input) {
     attachments: Array.isArray(p.attachments) ? p.attachments : [],
     analysis: p.analysis || null,
     outputs: Array.isArray(p.outputs) ? p.outputs : [],
-    generatedCode: p.generatedCode || ""
+    generatedCode: p.generatedCode || "",
+    informationVersionCount: Number(p.informationVersionCount || 0),
+    currentInformationVersion: Number(p.currentInformationVersion || 0)
   };
 }
 
 function hydrateProject(db, row) {
   if (!row) return null;
+  const stats = versionStats(db, row.id);
+
   return {
     id: row.id,
     createdAt: row.created_at,
@@ -177,7 +219,9 @@ function hydrateProject(db, row) {
     attachments: attachmentsForProject(db, row.id),
     analysis: parseJson(row.analysis_json, null),
     outputs: outputsForProject(db, row.id),
-    generatedCode: row.generated_code || ""
+    generatedCode: row.generated_code || "",
+    informationVersionCount: stats.total,
+    currentInformationVersion: stats.current
   };
 }
 
@@ -213,7 +257,10 @@ function createProject(userDataPath, metadata) {
     project.updatedAt
   );
 
-  queueSync(db, "project", project.id, "create", { documentId: project.documentId, status: project.status });
+  queueSync(db, "project", project.id, "create", {
+    documentId: project.documentId,
+    status: project.status
+  });
   return getProject(userDataPath, project.id);
 }
 
@@ -263,7 +310,11 @@ function saveProject(userDataPath, input) {
 
     const keep = new Set(Object.keys(project.formData || {}));
     db.prepare("SELECT field_name FROM project_fields WHERE project_id = ?").all(project.id).forEach((row) => {
-      if (!keep.has(row.field_name)) db.prepare("DELETE FROM project_fields WHERE project_id = ? AND field_name = ?").run(project.id, row.field_name);
+      if (!keep.has(row.field_name)) {
+        db.prepare(
+          "DELETE FROM project_fields WHERE project_id = ? AND field_name = ?"
+        ).run(project.id, row.field_name);
+      }
     });
 
     Object.entries(project.formData || {}).forEach(([key, value]) => {
@@ -272,7 +323,10 @@ function saveProject(userDataPath, input) {
   });
 
   tx();
-  queueSync(db, "project", project.id, "update", { status: project.status, generatedCode: project.generatedCode });
+  queueSync(db, "project", project.id, "update", {
+    status: project.status,
+    generatedCode: project.generatedCode
+  });
   return getProject(userDataPath, project.id);
 }
 
@@ -284,7 +338,9 @@ function getProject(userDataPath, projectId) {
 
 function listProjects(userDataPath) {
   const db = openDatabase(userDataPath);
-  return db.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all().map((row) => hydrateProject(db, row));
+  return db.prepare(
+    "SELECT * FROM projects ORDER BY updated_at DESC"
+  ).all().map((row) => hydrateProject(db, row));
 }
 
 function copyUnique(sourcePath, destinationDir) {
@@ -334,13 +390,31 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
         integrityCheckedAt: new Date().toISOString(),
         addedAt: new Date().toISOString()
       };
-      insert.run(item.id, projectId, item.kind, item.markerName, item.name, item.extension, item.size, item.localPath, item.sha256, item.integrityCheckedAt, item.addedAt);
+      insert.run(
+        item.id,
+        projectId,
+        item.kind,
+        item.markerName,
+        item.name,
+        item.extension,
+        item.size,
+        item.localPath,
+        item.sha256,
+        item.integrityCheckedAt,
+        item.addedAt
+      );
       added.push(item);
-      queueSync(db, "file", item.id, "create", { projectId, kind: item.kind, markerName: item.markerName, name: item.name });
+      queueSync(db, "file", item.id, "create", {
+        projectId,
+        kind: item.kind,
+        markerName: item.markerName,
+        name: item.name
+      });
     });
 
-    db.prepare("UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), projectId);
+    db.prepare(
+      "UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?"
+    ).run(new Date().toISOString(), projectId);
   });
 
   tx();
@@ -349,14 +423,19 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
 
 function removeAttachment(userDataPath, projectId, attachmentId) {
   const db = openDatabase(userDataPath);
-  const row = db.prepare("SELECT * FROM files WHERE id = ? AND project_id = ?").get(attachmentId, projectId);
+  const row = db.prepare(
+    "SELECT * FROM files WHERE id = ? AND project_id = ?"
+  ).get(attachmentId, projectId);
+
   if (row && row.local_path && fs.existsSync(row.local_path)) {
     try { fs.unlinkSync(row.local_path); } catch (_error) { /* ignore */ }
   }
 
   db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").run(attachmentId, projectId);
-  db.prepare("UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?")
-    .run(new Date().toISOString(), projectId);
+  db.prepare(
+    "UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?"
+  ).run(new Date().toISOString(), projectId);
+
   queueSync(db, "file", attachmentId, "delete", { projectId });
   return getProject(userDataPath, projectId);
 }
@@ -369,58 +448,224 @@ function recordAnalysis(userDataPath, projectId, analysis, status) {
   db.prepare(`
     INSERT INTO ai_analyses(id, project_id, provider, content_json, created_at)
     VALUES (?, ?, ?, ?, ?)
-  `).run(id, projectId, analysis && analysis.provider ? analysis.provider : "", JSON.stringify(analysis || {}), now);
+  `).run(
+    id,
+    projectId,
+    analysis && analysis.provider ? analysis.provider : "",
+    JSON.stringify(analysis || {}),
+    now
+  );
 
-  db.prepare("UPDATE projects SET analysis_json = ?, status = ?, updated_at = ? WHERE id = ?")
-    .run(JSON.stringify(analysis || {}), status || "analyzed", now, projectId);
+  db.prepare(
+    "UPDATE projects SET analysis_json = ?, status = ?, updated_at = ? WHERE id = ?"
+  ).run(JSON.stringify(analysis || {}), status || "analyzed", now, projectId);
 
-  queueSync(db, "analysis", id, "create", { projectId, provider: analysis && analysis.provider ? analysis.provider : "" });
+  queueSync(db, "analysis", id, "create", {
+    projectId,
+    provider: analysis && analysis.provider ? analysis.provider : ""
+  });
+
   return getProject(userDataPath, projectId);
 }
 
-function nextGenerationVersion(userDataPath, projectId) {
+function nextDocumentVersion(userDataPath, projectId) {
   const db = openDatabase(userDataPath);
-  const latest = db.prepare("SELECT MAX(version) AS max_version FROM generations WHERE project_id = ?").get(projectId);
+  const latest = db.prepare(
+    "SELECT MAX(version) AS max_version FROM document_versions WHERE project_id = ?"
+  ).get(projectId);
   return Number(latest && latest.max_version || 0) + 1;
+}
+
+function snapshotFiles(project) {
+  return (project.attachments || []).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    markerName: item.markerName || "",
+    name: item.name,
+    extension: item.extension || "",
+    size: item.size || 0,
+    sha256: item.sha256 || "",
+    addedAt: item.addedAt || ""
+  }));
+}
+
+function saveDocumentVersion(db, project, version, generationResult, now) {
+  const id = newId("ver");
+  db.prepare(`
+    INSERT INTO document_versions
+      (id, project_id, version, template_id, template_version, document_code, document_version,
+       form_data_json, analysis_json, files_json, ai_mode, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    project.id,
+    version,
+    project.template && project.template.id ? project.template.id : null,
+    project.template && project.template.version ? Number(project.template.version) : null,
+    generationResult && generationResult.code ? generationResult.code : project.generatedCode || "",
+    project.documentVersion || "1.0",
+    JSON.stringify(project.formData || {}),
+    project.analysis ? JSON.stringify(project.analysis) : null,
+    JSON.stringify(snapshotFiles(project)),
+    project.aiMode || "fallback",
+    now
+  );
+  return id;
 }
 
 function addGeneration(userDataPath, projectId, generationResult) {
   const db = openDatabase(userDataPath);
-  const version = Number(generationResult && generationResult.version || nextGenerationVersion(userDataPath, projectId));
-  const outputs = generationResult && Array.isArray(generationResult.outputs) ? generationResult.outputs : [];
+  const project = getProject(userDataPath, projectId);
+  if (!project) throw new Error("No se encontró el documento.");
+
+  const version = Number(
+    generationResult && generationResult.version || nextDocumentVersion(userDataPath, projectId)
+  );
+  const outputs = generationResult && Array.isArray(generationResult.outputs)
+    ? generationResult.outputs
+    : [];
   const pdf = outputs.find((item) => item.type === "pdf");
   const docx = outputs.find((item) => item.type === "docx");
   const now = new Date().toISOString();
-  const id = newId("gen");
+  const generationId = newId("gen");
 
   const pdfHash = pdf && pdf.path && fs.existsSync(pdf.path) ? sha256(pdf.path) : null;
   const docxHash = docx && docx.path && fs.existsSync(docx.path) ? sha256(docx.path) : null;
 
-  db.prepare(`
-    INSERT INTO generations(id, project_id, version, generated_code, pdf_path, docx_path, engine, pdf_sha256, docx_sha256, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    projectId,
-    version,
-    generationResult && generationResult.code ? generationResult.code : "",
-    pdf && pdf.path ? pdf.path : null,
-    docx && docx.path ? docx.path : null,
-    generationResult && generationResult.engine ? generationResult.engine : "",
-    pdfHash,
-    docxHash,
-    now
-  );
+  const tx = db.transaction(() => {
+    const versionId = saveDocumentVersion(db, project, version, generationResult, now);
 
-  db.prepare("UPDATE projects SET status = 'generated', generated_code = ?, updated_at = ? WHERE id = ?")
-    .run(generationResult && generationResult.code ? generationResult.code : "", now, projectId);
+    // Los archivos generados son solo la salida actual. El historial vive en document_versions.
+    db.prepare("DELETE FROM generations WHERE project_id = ?").run(projectId);
 
-  queueSync(db, "generation", id, "create", {
-    projectId,
-    version,
-    generatedCode: generationResult && generationResult.code ? generationResult.code : ""
+    db.prepare(`
+      INSERT INTO generations
+        (id, project_id, version, generated_code, pdf_path, docx_path, engine, pdf_sha256, docx_sha256, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      generationId,
+      projectId,
+      version,
+      generationResult && generationResult.code ? generationResult.code : "",
+      pdf && pdf.path ? pdf.path : null,
+      docx && docx.path ? docx.path : null,
+      generationResult && generationResult.engine ? generationResult.engine : "",
+      pdfHash,
+      docxHash,
+      now
+    );
+
+    db.prepare(
+      "UPDATE projects SET status = 'generated', generated_code = ?, updated_at = ? WHERE id = ?"
+    ).run(
+      generationResult && generationResult.code ? generationResult.code : "",
+      now,
+      projectId
+    );
+
+    queueSync(db, "document_version", versionId, "create", {
+      projectId,
+      version,
+      generatedCode: generationResult && generationResult.code ? generationResult.code : ""
+    });
   });
 
+  tx();
+  return getProject(userDataPath, projectId);
+}
+
+function listDocumentVersions(userDataPath, projectId) {
+  const db = openDatabase(userDataPath);
+  return db.prepare(`
+    SELECT id, project_id, version, template_id, template_version, document_code,
+           document_version, ai_mode, created_at, form_data_json, analysis_json, files_json
+    FROM document_versions
+    WHERE project_id = ?
+    ORDER BY version DESC
+  `).all(projectId).map((row) => {
+    const formData = parseJson(row.form_data_json, {});
+    const analysis = parseJson(row.analysis_json, null);
+    const files = parseJson(row.files_json, []);
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      version: row.version,
+      templateId: row.template_id || "",
+      templateVersion: row.template_version || null,
+      documentCode: row.document_code || "",
+      documentVersion: row.document_version || "1.0",
+      aiMode: row.ai_mode || "fallback",
+      createdAt: row.created_at,
+      fieldCount: Object.keys(formData).length,
+      fileCount: Array.isArray(files) ? files.length : 0,
+      provider: analysis && analysis.provider ? analysis.provider : ""
+    };
+  });
+}
+
+function getDocumentVersion(userDataPath, projectId, version) {
+  const db = openDatabase(userDataPath);
+  const row = db.prepare(
+    "SELECT * FROM document_versions WHERE project_id = ? AND version = ?"
+  ).get(projectId, Number(version));
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    version: row.version,
+    templateId: row.template_id || "",
+    templateVersion: row.template_version || null,
+    documentCode: row.document_code || "",
+    documentVersion: row.document_version || "1.0",
+    formData: parseJson(row.form_data_json, {}),
+    analysis: parseJson(row.analysis_json, null),
+    files: parseJson(row.files_json, []),
+    aiMode: row.ai_mode || "fallback",
+    createdAt: row.created_at
+  };
+}
+
+function restoreDocumentVersion(userDataPath, projectId, version) {
+  const db = openDatabase(userDataPath);
+  const snapshot = getDocumentVersion(userDataPath, projectId, version);
+  if (!snapshot) throw new Error("No se encontró esa versión de información.");
+
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM project_fields WHERE project_id = ?").run(projectId);
+
+    const insertField = db.prepare(`
+      INSERT INTO project_fields(project_id, field_name, value_json, updated_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    Object.entries(snapshot.formData || {}).forEach(([key, value]) => {
+      insertField.run(projectId, key, JSON.stringify(value), now);
+    });
+
+    db.prepare(`
+      UPDATE projects SET
+        template_id = ?,
+        document_version = ?,
+        ai_mode = ?,
+        generated_code = ?,
+        analysis_json = ?,
+        status = 'draft',
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      snapshot.templateId || null,
+      snapshot.documentVersion || "1.0",
+      snapshot.aiMode || "fallback",
+      snapshot.documentCode || "",
+      snapshot.analysis ? JSON.stringify(snapshot.analysis) : null,
+      now,
+      projectId
+    );
+  });
+
+  tx();
+  queueSync(db, "project", projectId, "restore_version", { version: snapshot.version });
   return getProject(userDataPath, projectId);
 }
 
@@ -435,8 +680,11 @@ module.exports = {
   addAttachments,
   removeAttachment,
   recordAnalysis,
-  nextGenerationVersion,
+  nextDocumentVersion,
   addGeneration,
+  listDocumentVersions,
+  getDocumentVersion,
+  restoreDocumentVersion,
   safeName,
   copyUnique
 };

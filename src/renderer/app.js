@@ -21,6 +21,9 @@
     settings: null,
     aiProviders: [],
     sync: null,
+    errors: [],
+    errorCount: 0,
+    versions: [],
     busy: false
   };
 
@@ -150,6 +153,35 @@
     state.sync = response && response.ok ? response.sync : null;
   }
 
+  function updateErrorBadge() {
+    const badge = document.getElementById("errorBadge");
+    if (!badge) return;
+    badge.textContent = String(state.errorCount || 0);
+    badge.hidden = !state.errorCount;
+  }
+
+  async function refreshErrorCount() {
+    const response = await api.getErrorCount();
+    state.errorCount = response && response.ok ? Number(response.count || 0) : 0;
+    updateErrorBadge();
+  }
+
+  async function loadErrors() {
+    const response = await api.listErrors({ includeResolved: false, limit: 100 });
+    state.errors = response && response.ok ? response.errors || [] : [];
+    state.errorCount = response && response.ok ? Number(response.count || 0) : 0;
+    updateErrorBadge();
+  }
+
+  async function loadVersions() {
+    if (!state.project) {
+      state.versions = [];
+      return;
+    }
+    const response = await api.listVersions(state.project.id);
+    state.versions = response && response.ok ? response.versions || [] : [];
+  }
+
   function activeTemplate(documentId) {
     return state.templates.find((item) => item.documentId === documentId && item.active) || null;
   }
@@ -234,6 +266,7 @@
       }
 
       setNav("home");
+      await loadVersions();
       renderEditor();
       return;
     }
@@ -263,6 +296,13 @@
       setNav("settings");
       await Promise.all([loadSettings(), loadSync()]);
       renderSettings();
+      return;
+    }
+
+    if (route === "system") {
+      setNav("system");
+      await loadErrors();
+      renderSystem();
     }
   }
 
@@ -573,6 +613,7 @@
         </aside>
       </div>
       ${outputsHtml()}
+      ${versionsHtml()}
     `;
   }
 
@@ -656,6 +697,63 @@
         <div class="field"><label>Cargo</label><input data-setting="${key}.cargo" value="${escapeHtml(person.cargo)}" /></div>
       </div>
     </div>`;
+  }
+
+  function renderSystem() {
+    setHeader("Sistema", "Errores y estado", false);
+
+    const errors = state.errors || [];
+    const body = errors.length
+      ? `<div class="error-list">${errors.map((item) => `
+          <article class="error-item">
+            <div class="error-item-head">
+              <div>
+                <b>${escapeHtml(item.message)}</b>
+                <span>${escapeHtml(item.module)}${item.action ? " · " + escapeHtml(item.action) : ""}</span>
+              </div>
+              <time>${new Date(item.createdAt).toLocaleString()}</time>
+            </div>
+            ${item.detail ? `<details><summary>Detalle técnico</summary><pre>${escapeHtml(item.detail)}</pre></details>` : ""}
+          </article>
+        `).join("")}</div>`
+      : '<div class="system-ok"><span>✓</span><div><b>Todo correcto</b><small>No hay errores pendientes.</small></div></div>';
+
+    view.innerHTML = `
+      <section class="panel compact">
+        <div class="panel-title">
+          <div><h2>Sistema</h2><small>Errores registrados por la aplicación</small></div>
+          <span class="status ${state.errorCount ? "error" : "good"}">${state.errorCount ? state.errorCount + " pendientes" : "Sin errores"}</span>
+        </div>
+        ${body}
+        <div class="button-row end" style="margin-top:14px">
+          ${errors.length ? '<button class="ghost" type="button" data-action="resolve-errors">Marcar resueltos</button>' : ""}
+          <button class="ghost" type="button" data-action="clear-resolved-errors">Limpiar resueltos</button>
+        </div>
+      </section>
+    `;
+  }
+
+  function versionsHtml() {
+    if (!state.versions || !state.versions.length) return "";
+
+    return `<section class="panel compact history-panel">
+      <div class="panel-title">
+        <div><h3>Historial</h3><small>Versiones guardadas como información</small></div>
+        <span class="status good">${state.versions.length}</span>
+      </div>
+      <div class="version-list">
+        ${state.versions.map((item) => `
+          <div class="version-row">
+            <div>
+              <b>v${item.version}</b>
+              <span>${new Date(item.createdAt).toLocaleString()}</span>
+              <small>${item.fieldCount} campos · ${item.fileCount} archivos${item.provider ? " · " + escapeHtml(item.provider) : ""}</small>
+            </div>
+            <button class="ghost small-inline" type="button" data-action="restore-version" data-version="${item.version}">Cargar</button>
+          </div>
+        `).join("")}
+      </div>
+    </section>`;
   }
 
   function renderSettings() {
@@ -793,9 +891,23 @@
     }
 
     state.project = response.project;
+    await loadVersions();
     renderEditor();
     const warnings = state.project.analysis && Array.isArray(state.project.analysis.missingData) ? state.project.analysis.missingData.length : 0;
     showToast(warnings ? `PDF generado. ${warnings} aviso(s) de información.` : `PDF generado con ${response.result.engine}.`);
+  }
+
+  async function restoreVersion(version) {
+    if (!state.project) return;
+    const response = await api.restoreVersion(state.project.id, Number(version));
+    if (!response || !response.ok) {
+      await refreshErrorCount();
+      return showToast(response && response.error ? response.error : "No se pudo cargar la versión.");
+    }
+    state.project = response.project;
+    await loadVersions();
+    renderEditor();
+    showToast(`Versión ${version} cargada como borrador.`);
   }
 
   async function archiveUpload() {
@@ -915,6 +1027,25 @@
     if (action === "save-settings") return saveSettingsFromScreen();
     if (action === "open-output") return api.openFile(button.dataset.path);
     if (action === "show-output") return api.showFile(button.dataset.path);
+    if (action === "restore-version") return restoreVersion(button.dataset.version);
+    if (action === "resolve-errors") {
+      const response = await api.resolveAllErrors();
+      if (response && response.ok) {
+        await loadErrors();
+        renderSystem();
+        return showToast("Errores marcados como resueltos.");
+      }
+      return showToast("No se pudieron actualizar los errores.");
+    }
+    if (action === "clear-resolved-errors") {
+      const response = await api.clearResolvedErrors();
+      if (response && response.ok) {
+        await loadErrors();
+        renderSystem();
+        return showToast("Historial de errores resueltos limpiado.");
+      }
+      return showToast("No se pudo limpiar el historial.");
+    }
     if (action === "create-backup") {
       const response = await api.createBackup();
       if (!response || response.canceled) return;
@@ -936,9 +1067,32 @@
     }
 
     document.getElementById("appVersion").textContent = `v${api.version}`;
+
+    window.addEventListener("error", (event) => {
+      api.reportError({
+        severity: "error",
+        module: "renderer",
+        action: "window-error",
+        message: event.message || "Error de interfaz",
+        detail: event.error && event.error.stack ? event.error.stack : ""
+      });
+    });
+
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      api.reportError({
+        severity: "error",
+        module: "renderer",
+        action: "unhandledrejection",
+        message: reason && reason.message ? reason.message : "Promesa rechazada en la interfaz",
+        detail: reason && reason.stack ? reason.stack : String(reason || "")
+      });
+    });
+
     try {
       await loadCatalog();
-      await Promise.all([loadSettings(), loadTemplates(), loadProjects()]);
+      await Promise.all([loadSettings(), loadTemplates(), loadProjects(), refreshErrorCount()]);
+      setInterval(refreshErrorCount, 15000);
       renderHome();
     } catch (error) {
       view.innerHTML = `<div class="empty"><b>No se pudo iniciar</b>${escapeHtml(error.message || String(error))}</div>`;

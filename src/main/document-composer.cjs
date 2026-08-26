@@ -223,8 +223,11 @@ async function generateDocument(userDataPath, project, analysis, signers, appRoo
 
   const rootDir = generatedDir(userDataPath, project.id);
   const version = Number(generationVersion || 1);
-  const dir = path.join(rootDir, `v${version}`);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const dir = path.join(rootDir, "current");
+
+  // Solo se conserva la salida física actual. El historial se guarda como información en SQLite.
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
   const code = safeName(resolvedCode(project));
   const base = safeName(`${code}-${project.documentName}`);
   const filledDocx = path.join(dir, `${base}-contenido.docx`);
@@ -256,7 +259,7 @@ async function generateDocument(userDataPath, project, analysis, signers, appRoo
     version,
     engine: result.engine,
     outputs: [
-      { type: "pdf", label: "PDF final", path: result.pdfPath, primary: true },
+      { type: "pdf", label: "PDF actual", path: result.pdfPath, primary: true },
       { type: "docx", label: "Word de respaldo", path: result.docxPath, primary: false }
     ]
   };

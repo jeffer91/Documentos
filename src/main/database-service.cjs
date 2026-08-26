@@ -3,7 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 
 const connections = new Map();
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 function workspaceRoot(userDataPath) {
   const dir = path.join(userDataPath, "documentos-workspace");
@@ -173,6 +173,43 @@ function baseSchema(db) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_generations_project_version
       ON generations(project_id, version);
 
+    CREATE TABLE IF NOT EXISTS document_versions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      template_id TEXT,
+      template_version INTEGER,
+      document_code TEXT,
+      document_version TEXT,
+      form_data_json TEXT NOT NULL,
+      analysis_json TEXT,
+      files_json TEXT,
+      ai_mode TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (template_id) REFERENCES templates(id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_document_versions_project_version
+      ON document_versions(project_id, version);
+
+    CREATE INDEX IF NOT EXISTS idx_document_versions_project
+      ON document_versions(project_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS app_errors (
+      id TEXT PRIMARY KEY,
+      severity TEXT NOT NULL DEFAULT 'error',
+      module TEXT NOT NULL,
+      action TEXT,
+      message TEXT NOT NULL,
+      detail TEXT,
+      resolved INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_app_errors_state
+      ON app_errors(resolved, created_at);
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL,
@@ -267,6 +304,47 @@ function migrateToV2(db) {
   addColumnIfMissing(db, "generations", "docx_sha256", "TEXT");
 }
 
+function migrateToV3(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS document_versions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      template_id TEXT,
+      template_version INTEGER,
+      document_code TEXT,
+      document_version TEXT,
+      form_data_json TEXT NOT NULL,
+      analysis_json TEXT,
+      files_json TEXT,
+      ai_mode TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (template_id) REFERENCES templates(id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_document_versions_project_version
+      ON document_versions(project_id, version);
+
+    CREATE INDEX IF NOT EXISTS idx_document_versions_project
+      ON document_versions(project_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS app_errors (
+      id TEXT PRIMARY KEY,
+      severity TEXT NOT NULL DEFAULT 'error',
+      module TEXT NOT NULL,
+      action TEXT,
+      message TEXT NOT NULL,
+      detail TEXT,
+      resolved INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_app_errors_state
+      ON app_errors(resolved, created_at);
+  `);
+}
+
 function applyMigrations(db) {
   baseSchema(db);
   let version = schemaVersion(db);
@@ -280,6 +358,13 @@ function applyMigrations(db) {
     const tx = db.transaction(() => migrateToV2(db));
     tx();
     version = 2;
+    setSchemaVersion(db, version);
+  }
+
+  if (version < 3) {
+    const tx = db.transaction(() => migrateToV3(db));
+    tx();
+    version = 3;
     setSchemaVersion(db, version);
   }
 

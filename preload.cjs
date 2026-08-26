@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "2.3.0",
+  version: "2.4.0",
   getCatalog: () => ipcRenderer.invoke("catalog:get"),
   createProject: (meta) => ipcRenderer.invoke("projects:create", meta),
   listProjects: () => ipcRenderer.invoke("projects:list"),
@@ -22,6 +22,14 @@ contextBridge.exposeInMainWorld("documentosApp", {
   getAiProviders: () => ipcRenderer.invoke("ai:get"),
   saveAiProviders: (providers) => ipcRenderer.invoke("ai:save", providers),
   getSyncStatus: () => ipcRenderer.invoke("sync:get-status"),
+  listVersions: (projectId) => ipcRenderer.invoke("versions:list", projectId),
+  getVersion: (projectId, version) => ipcRenderer.invoke("versions:get", projectId, version),
+  restoreVersion: (projectId, version) => ipcRenderer.invoke("versions:restore", projectId, version),
+  listErrors: (options) => ipcRenderer.invoke("errors:list", options || {}),
+  getErrorCount: () => ipcRenderer.invoke("errors:count"),
+  resolveAllErrors: () => ipcRenderer.invoke("errors:resolve-all"),
+  clearResolvedErrors: () => ipcRenderer.invoke("errors:clear-resolved"),
+  reportError: (payload) => ipcRenderer.invoke("errors:report", payload || {}),
   createBackup: () => ipcRenderer.invoke("backup:create"),
   restoreBackup: () => ipcRenderer.invoke("backup:restore")
 });

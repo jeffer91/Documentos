@@ -220,3 +220,92 @@ button.doc-row:hover { border-color: var(--brand-line); background: #fcfffe; }
   .output-main { grid-template-columns: 48px 1fr; }
   .output-main .primary { grid-column: 1 / -1; }
 }
+
+
+.system-nav { position: relative; }
+.error-badge {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #b91c1c;
+  color: #fff;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+.error-badge[hidden] { display: none; }
+
+.system-ok {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--brand-line);
+  background: var(--brand-soft);
+  border-radius: 14px;
+}
+.system-ok > span {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+}
+.system-ok b { display: block; font-size: 13px; }
+.system-ok small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+.error-list { display: grid; gap: 10px; }
+.error-item {
+  border: 1px solid #fecaca;
+  background: #fffafa;
+  border-radius: 13px;
+  padding: 12px;
+}
+.error-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+.error-item-head b { display: block; font-size: 12px; color: #991b1b; }
+.error-item-head span { display: block; margin-top: 4px; font-size: 9px; color: var(--muted); }
+.error-item-head time { font-size: 9px; color: var(--muted); white-space: nowrap; }
+.error-item details { margin-top: 9px; }
+.error-item summary { cursor: pointer; color: #475569; font-size: 10px; }
+.error-item pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 9px;
+}
+
+.history-panel { margin-top: 14px; }
+.version-list { display: grid; gap: 8px; }
+.version-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.version-row b { display: block; font-size: 12px; }
+.version-row span { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+.version-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
