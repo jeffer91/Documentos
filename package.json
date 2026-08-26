@@ -1,6 +1,6 @@
 {
   "name": "documentos",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Generador documental ITSQMET con SQLite local, plantillas Word y salida PDF",
   "main": "main.cjs",
   "author": "Jefferson Villarreal",
@@ -10,7 +10,8 @@
     "start": "electron .",
     "dev": "electron .",
     "check": "node scripts/check-project.cjs",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "test:smoke": "electron scripts/smoke-electron.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",

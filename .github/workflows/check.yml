@@ -27,3 +27,6 @@ jobs:
 
       - name: Validar estructura y catálogo
         run: npm run check
+
+      - name: Smoke test SQLite
+        run: xvfb-run -a npm run test:smoke

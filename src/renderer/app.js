@@ -790,7 +790,8 @@
 
     state.project = response.project;
     renderEditor();
-    showToast(`PDF generado con ${response.result.engine}.`);
+    const warnings = state.project.analysis && Array.isArray(state.project.analysis.missingData) ? state.project.analysis.missingData.length : 0;
+    showToast(warnings ? `PDF generado. ${warnings} aviso(s) de información.` : `PDF generado con ${response.result.engine}.`);
   }
 
   async function archiveUpload() {
