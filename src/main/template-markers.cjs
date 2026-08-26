@@ -8,10 +8,12 @@ const ALLOWED_TYPES = new Set([
   "DATOS",
   "TABLA",
   "IMAGEN",
-  "IMAGENES"
+  "IMAGENES",
+  "GRAFICO",
+  "GRAFICOS"
 ]);
 
-const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
 
 function normalizeName(value) {
@@ -34,8 +36,8 @@ function parseMarkerInner(inner) {
 
   const parts = raw.split("|").map((part) => part.trim());
   const head = parts.shift() || "";
-  const config = parts.length > 1 ? parts.slice(1).join("|") : "";
-  const explicitLabel = parts[0] || "";
+  const explicitLabel = parts.shift() || "";
+  const config = parts.join("|");
   const colon = head.indexOf(":");
 
   let type = "CAMPO";
@@ -55,74 +57,52 @@ function parseMarkerInner(inner) {
     name = head.slice(0, -1);
   }
 
-  if (!ALLOWED_TYPES.has(type)) {
-    return {
-      raw,
-      valid: false,
-      error: `Tipo desconocido: ${type}`,
-      type,
-      name: normalizeName(name),
-      label: explicitLabel || humanize(name),
-      required,
-      config
-    };
-  }
-
   const normalized = normalizeName(name);
+  const base = {
+    raw,
+    token: raw,
+    type,
+    name: normalized,
+    label: explicitLabel || humanize(normalized || name),
+    required,
+    config
+  };
+
+  if (!ALLOWED_TYPES.has(type)) {
+    return Object.assign(base, { valid: false, error: `Tipo desconocido: ${type}` });
+  }
   if (!normalized) {
-    return {
-      raw,
-      valid: false,
-      error: "El marcador no tiene nombre.",
-      type,
-      name: "",
-      label: explicitLabel || "Campo",
-      required,
-      config
-    };
+    return Object.assign(base, { valid: false, error: "El marcador no tiene nombre." });
   }
 
   const columns = type === "TABLA" && config
     ? config.split(",").map((item) => item.trim()).filter(Boolean)
     : [];
 
-  return {
-    raw,
-    token: raw,
+  return Object.assign(base, {
     valid: true,
-    type,
-    name: normalized,
-    label: explicitLabel || humanize(normalized),
-    required,
-    config,
     columns,
     isBlock: BLOCK_TYPES.has(type),
     isUserInput: USER_TYPES.has(type),
     isAi: type === "IA",
     isSystem: type === "SISTEMA"
-  };
+  });
 }
 
 function parseMarkersFromText(text) {
   const source = String(text || "");
   const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
   const markers = [];
-  const seen = new Set();
+  const seenRaw = new Set();
   let match;
 
   while ((match = regex.exec(source))) {
     const marker = parseMarkerInner(match[1]);
-    if (!marker) continue;
-    const key = `${marker.type}:${marker.name}:${marker.raw}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (!marker || seenRaw.has(marker.raw)) continue;
+    seenRaw.add(marker.raw);
     markers.push(marker);
   }
   return markers;
-}
-
-function markerKey(marker) {
-  return marker && marker.raw ? marker.raw : "";
 }
 
 function validateMarkers(markers) {
@@ -132,18 +112,20 @@ function validateMarkers(markers) {
 
   list.forEach((marker) => {
     if (!marker.valid) errors.push(marker.error || `Marcador inválido: ${marker.raw}`);
-    if (marker.type === "TABLA" && !marker.columns.length) {
-      warnings.push(`${marker.raw}: la tabla no define columnas. Usa |Actividad,Responsable,Fecha al final.`);
+    if (marker.valid && marker.type === "TABLA" && !marker.columns.length) {
+      warnings.push(`{{${marker.raw}}}: agrega las columnas después de la etiqueta. Ejemplo: {{TABLA:CRONOGRAMA|Cronograma|Actividad,Responsable,Fecha}}`);
     }
   });
 
-  const repeated = new Map();
+  const byMeaning = new Map();
   list.filter((marker) => marker.valid).forEach((marker) => {
     const key = `${marker.type}:${marker.name}`;
-    repeated.set(key, (repeated.get(key) || 0) + 1);
+    const raws = byMeaning.get(key) || [];
+    raws.push(marker.raw);
+    byMeaning.set(key, raws);
   });
-  repeated.forEach((count, key) => {
-    if (count > 1) warnings.push(`${key} aparece ${count} veces; se rellenará con el mismo valor.`);
+  byMeaning.forEach((raws, key) => {
+    if (new Set(raws).size > 1) warnings.push(`${key} tiene variantes de marcador. Conviene usar una sola forma.`);
   });
 
   if (!list.length) warnings.push("No se detectaron marcadores {{...}}.");
@@ -158,6 +140,5 @@ module.exports = {
   humanize,
   parseMarkerInner,
   parseMarkersFromText,
-  markerKey,
   validateMarkers
 };

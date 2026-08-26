@@ -55,22 +55,21 @@ function normalizeProject(input) {
     documentName: p.documentName || "",
     documentType: p.documentType || "",
     codePattern: p.codePattern || "",
-    structure: Array.isArray(p.structure) ? p.structure : [],
-    mode: p.mode || "generate",
+    mode: p.mode || "template",
     formData: p.formData && typeof p.formData === "object" ? p.formData : {},
     aiMode: p.aiMode || "fallback",
     template: p.template || null,
     attachments: Array.isArray(p.attachments) ? p.attachments : [],
     analysis: p.analysis || null,
-    outputs: Array.isArray(p.outputs) ? p.outputs : []
+    outputs: Array.isArray(p.outputs) ? p.outputs : [],
+    generatedCode: p.generatedCode || ""
   };
 }
 
 function createProject(userDataPath, metadata) {
   const project = normalizeProject(metadata || {});
   projectDir(userDataPath, project.id);
-  saveProject(userDataPath, project);
-  return project;
+  return saveProject(userDataPath, project);
 }
 
 function saveProject(userDataPath, input) {
@@ -114,7 +113,7 @@ function copyUnique(sourcePath, destinationDir) {
   return target;
 }
 
-function addAttachments(userDataPath, projectId, kind, paths) {
+function addAttachments(userDataPath, projectId, kind, paths, markerName) {
   const project = getProject(userDataPath, projectId);
   if (!project) throw new Error("No se encontró el documento local.");
   const folder = kind === "evidence" ? "evidence" : kind === "data" ? "data" : "sources";
@@ -128,6 +127,7 @@ function addAttachments(userDataPath, projectId, kind, paths) {
     const item = {
       id: newId("file"),
       kind,
+      markerName: markerName || "",
       name: path.basename(localPath),
       extension: path.extname(localPath).toLowerCase(),
       size: stat.size,
@@ -138,6 +138,8 @@ function addAttachments(userDataPath, projectId, kind, paths) {
     added.push(item);
   });
 
+  project.analysis = null;
+  project.status = "draft";
   saveProject(userDataPath, project);
   return { project, added };
 }
@@ -150,6 +152,8 @@ function removeAttachment(userDataPath, projectId, attachmentId) {
   if (item && item.localPath && fs.existsSync(item.localPath)) {
     try { fs.unlinkSync(item.localPath); } catch (_error) { /* ignore */ }
   }
+  project.analysis = null;
+  project.status = "draft";
   return saveProject(userDataPath, project);
 }
 
