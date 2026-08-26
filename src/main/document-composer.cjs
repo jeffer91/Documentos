@@ -223,19 +223,21 @@ async function generateDocument(userDataPath, project, analysis, signers, appRoo
 
   const rootDir = generatedDir(userDataPath, project.id);
   const version = Number(generationVersion || 1);
-  const dir = path.join(rootDir, "current");
+  const currentDir = path.join(rootDir, "current");
+  const stagingDir = path.join(
+    rootDir,
+    `.staging-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  );
+  fs.mkdirSync(stagingDir, { recursive: true });
 
-  // Solo se conserva la salida física actual. El historial se guarda como información en SQLite.
-  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
   const code = safeName(resolvedCode(project));
   const base = safeName(`${code}-${project.documentName}`);
-  const filledDocx = path.join(dir, `${base}-contenido.docx`);
-  const finalDocx = path.join(dir, `${base}.docx`);
-  const pdfPath = path.join(dir, `${base}.pdf`);
+  const filledDocx = path.join(stagingDir, `${base}-contenido.docx`);
+  const finalDocx = path.join(stagingDir, `${base}.docx`);
+  const pdfPath = path.join(stagingDir, `${base}.pdf`);
 
   fillScalars(project.template.localPath, filledDocx, project, analysis || {}, signers || {});
-  const blocks = buildBlocks(project, analysis || {}, dir);
+  const blocks = buildBlocks(project, analysis || {}, stagingDir);
 
   const job = {
     inputDocx: filledDocx,
@@ -243,24 +245,55 @@ async function generateDocument(userDataPath, project, analysis, signers, appRoo
     outputPdf: pdfPath,
     blocks
   };
-  const jobPath = saveJob(dir, job);
+  const jobPath = saveJob(stagingDir, job);
   const scriptPath = path.join(appRoot, "scripts", "render-word.ps1");
-  const result = await exportPdf({
-    inputDocx: filledDocx,
-    outputDocx: finalDocx,
-    pdfPath,
-    blocks,
-    jobPath,
-    scriptPath
-  });
+  let result;
+  try {
+    result = await exportPdf({
+      inputDocx: filledDocx,
+      outputDocx: finalDocx,
+      pdfPath,
+      blocks,
+      jobPath,
+      scriptPath
+    });
+  } catch (error) {
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
+    throw error;
+  }
+
+  const previousDir = path.join(
+    rootDir,
+    `.previous-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  );
+
+  try {
+    if (fs.existsSync(currentDir)) fs.renameSync(currentDir, previousDir);
+    fs.renameSync(stagingDir, currentDir);
+  } catch (error) {
+    try {
+      if (!fs.existsSync(currentDir) && fs.existsSync(previousDir)) {
+        fs.renameSync(previousDir, currentDir);
+      }
+    } catch (_restoreError) {
+      // El error original es más útil; el visualizador lo registrará.
+    }
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
+    throw new Error(`El nuevo PDF se generó, pero no se pudo reemplazar la salida actual de forma segura: ${error.message}`);
+  }
+
+  try { fs.rmSync(previousDir, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
+
+  const currentPdf = path.join(currentDir, path.basename(result.pdfPath));
+  const currentDocx = path.join(currentDir, path.basename(result.docxPath));
 
   return {
     code: resolvedCode(project),
     version,
     engine: result.engine,
     outputs: [
-      { type: "pdf", label: "PDF actual", path: result.pdfPath, primary: true },
-      { type: "docx", label: "Word de respaldo", path: result.docxPath, primary: false }
+      { type: "pdf", label: "PDF actual", path: currentPdf, primary: true },
+      { type: "docx", label: "Word de respaldo", path: currentDocx, primary: false }
     ]
   };
 }

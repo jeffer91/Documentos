@@ -54,6 +54,10 @@ async function run() {
     const added = workspace.addAttachments(temp, project.id, "source", [source], "");
     assert.strictEqual(added.added.length, 1);
     assert.strictEqual(added.added[0].sha256.length, 64);
+    assert.ok(
+      fs.existsSync(workspace.objectPathForHash(temp, added.added[0].sha256)),
+      "El archivo debe preservarse en el almacén histórico por hash."
+    );
 
     assert.strictEqual(workspace.nextDocumentVersion(temp, project.id), 1);
 
@@ -103,9 +107,19 @@ async function run() {
     );
     assert.strictEqual(fs.readFileSync(pdf, "utf8"), "pdf-actual-v2");
 
+    const currentAttachment = project.attachments[0];
+    fs.unlinkSync(currentAttachment.localPath);
+    db.prepare("DELETE FROM files WHERE id = ?").run(currentAttachment.id);
+
     project = workspace.restoreDocumentVersion(temp, project.id, 1);
     assert.strictEqual(project.formData.PERIODO, "Prueba");
     assert.strictEqual(project.status, "draft");
+    assert.strictEqual(project.attachments.length, 1);
+    assert.ok(fs.existsSync(project.attachments[0].localPath));
+    assert.strictEqual(
+      fs.readFileSync(project.attachments[0].localPath, "utf8"),
+      "Fuente de prueba"
+    );
 
     errorService.record(temp, {
       module: "smoke",
@@ -122,7 +136,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, integridad, versiones informativas, errores y respaldo."
+      "SMOKE OK: Electron, SQLite, catálogo, integridad, objetos históricos, versiones informativas, errores y respaldo."
     );
   } finally {
     database.closeAll();

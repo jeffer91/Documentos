@@ -64,7 +64,7 @@ function list(userDataPath, options) {
 
 function countOpen(userDataPath) {
   const db = openDatabase(userDataPath);
-  const row = db.prepare("SELECT COUNT(*) AS total FROM app_errors WHERE resolved = 0 AND severity = 'error'").get();
+  const row = db.prepare("SELECT COUNT(*) AS total FROM app_errors WHERE resolved = 0").get();
   return Number(row && row.total || 0);
 }
 

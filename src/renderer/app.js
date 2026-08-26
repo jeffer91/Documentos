@@ -706,7 +706,7 @@
     const errors = state.errors || [];
     const body = errors.length
       ? `<div class="error-list">${errors.map((item) => `
-          <article class="error-item">
+          <article class="error-item ${item.severity === "warning" ? "warning" : item.severity === "info" ? "info" : ""}">
             <div class="error-item-head">
               <div>
                 <b>${escapeHtml(item.message)}</b>
@@ -929,6 +929,8 @@
     (marker.columns && marker.columns.length ? marker.columns : ["Dato"]).forEach((column) => { row[column] = ""; });
     rows.push(row);
     state.project.formData[markerName] = rows;
+    state.project.status = "draft";
+    state.project.analysis = null;
     api.saveProject(state.project).then((response) => {
       if (response && response.ok) state.project = response.project;
       renderEditor();
@@ -939,6 +941,8 @@
     const rows = Array.isArray(state.project.formData[markerName]) ? state.project.formData[markerName].slice() : [];
     rows.splice(Number(rowIndex), 1);
     state.project.formData[markerName] = rows;
+    state.project.status = "draft";
+    state.project.analysis = null;
     api.saveProject(state.project).then((response) => {
       if (response && response.ok) state.project = response.project;
       renderEditor();

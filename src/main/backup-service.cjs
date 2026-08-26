@@ -33,6 +33,7 @@ async function createBackup(userDataPath, destinationRoot) {
 
   copyDirIfExists(path.join(sourceRoot, "templates"), path.join(backupDir, "templates"));
   copyDirIfExists(path.join(sourceRoot, "projects"), path.join(backupDir, "projects"));
+  copyDirIfExists(path.join(sourceRoot, "objects"), path.join(backupDir, "objects"));
 
   fs.writeFileSync(
     path.join(backupDir, "backup-manifest.json"),
@@ -77,6 +78,7 @@ function restoreBackup(userDataPath, backupDir) {
     fs.copyFileSync(path.join(backupDir, "documentos.db"), path.join(currentRoot, "documentos.db"));
     copyDirIfExists(path.join(backupDir, "templates"), path.join(currentRoot, "templates"));
     copyDirIfExists(path.join(backupDir, "projects"), path.join(currentRoot, "projects"));
+    copyDirIfExists(path.join(backupDir, "objects"), path.join(currentRoot, "objects"));
   } catch (error) {
     try { fs.rmSync(currentRoot, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
     fs.renameSync(safetyDir, currentRoot);

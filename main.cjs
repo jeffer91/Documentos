@@ -356,6 +356,7 @@ app.whenReady().then(() => {
   database.seedCatalogIfEmpty(db, catalog);
   try {
     migrateLegacy(db, database.workspaceRoot(userData()));
+    workspace.backfillObjectStore(userData());
   } catch (error) {
     reportError("database", "legacy-migration", error);
   }

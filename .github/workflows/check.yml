@@ -25,6 +25,13 @@ jobs:
       - name: Instalar
         run: npm install --no-audit --no-fund
 
+      - name: Publicar package-lock temporal
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-lock-${{ github.sha }}
+          path: package-lock.json
+          retention-days: 1
+
       - name: Validar estructura y catálogo
         run: npm run check
 

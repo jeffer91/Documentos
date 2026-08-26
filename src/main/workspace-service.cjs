@@ -32,6 +32,53 @@ function generatedDir(userDataPath, projectId) {
   return path.join(projectDir(userDataPath, projectId), "generated");
 }
 
+function objectsDir(userDataPath) {
+  const dir = path.join(root(userDataPath), "objects", "sha256");
+  ensureDir(dir);
+  return dir;
+}
+
+function objectPathForHash(userDataPath, hashValue) {
+  const hash = String(hashValue || "").toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(hash)) {
+    throw new Error("Huella SHA-256 inválida.");
+  }
+  const dir = path.join(objectsDir(userDataPath), hash.slice(0, 2));
+  ensureDir(dir);
+  return path.join(dir, hash);
+}
+
+function ensureObjectCopy(userDataPath, sourcePath, hashValue) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    throw new Error("No se encontró el archivo que debe preservarse.");
+  }
+  const hash = hashValue || sha256(sourcePath);
+  const target = objectPathForHash(userDataPath, hash);
+  if (!fs.existsSync(target)) {
+    fs.copyFileSync(sourcePath, target);
+  } else if (sha256(target) !== hash) {
+    throw new Error("El almacén histórico contiene un archivo con huella inconsistente.");
+  }
+  return target;
+}
+
+function backfillObjectStore(userDataPath) {
+  const db = openDatabase(userDataPath);
+  const rows = db.prepare(
+    "SELECT local_path, sha256 FROM files WHERE sha256 IS NOT NULL AND sha256 <> ''"
+  ).all();
+  let copied = 0;
+  rows.forEach((row) => {
+    if (!row.local_path || !fs.existsSync(row.local_path)) return;
+    const target = objectPathForHash(userDataPath, row.sha256);
+    if (!fs.existsSync(target)) {
+      ensureObjectCopy(userDataPath, row.local_path, row.sha256);
+      copied += 1;
+    }
+  });
+  return copied;
+}
+
 function safeName(name) {
   return String(name || "archivo")
     .replace(/[\\/:*?"<>|]/g, "-")
@@ -378,6 +425,8 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
       if (!sourcePath || !fs.existsSync(sourcePath)) return;
       const localPath = copyUnique(sourcePath, destination);
       const stat = fs.statSync(localPath);
+      const fileHash = sha256(localPath);
+      ensureObjectCopy(userDataPath, localPath, fileHash);
       const item = {
         id: newId("file"),
         kind,
@@ -386,7 +435,7 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
         extension: path.extname(localPath).toLowerCase(),
         size: stat.size,
         localPath,
-        sha256: sha256(localPath),
+        sha256: fileHash,
         integrityCheckedAt: new Date().toISOString(),
         addedAt: new Date().toISOString()
       };
@@ -631,9 +680,53 @@ function restoreDocumentVersion(userDataPath, projectId, version) {
   const snapshot = getDocumentVersion(userDataPath, projectId, version);
   if (!snapshot) throw new Error("No se encontró esa versión de información.");
 
+  const historicalFiles = Array.isArray(snapshot.files) ? snapshot.files : [];
+  const preparedFiles = historicalFiles.map((item) => {
+    const hash = String(item.sha256 || "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(hash)) {
+      throw new Error(`${item.name || "Archivo"}: esta versión antigua no tiene una huella recuperable.`);
+    }
+
+    const objectPath = objectPathForHash(userDataPath, hash);
+    if (!fs.existsSync(objectPath) || sha256(objectPath) !== hash) {
+      throw new Error(`${item.name || "Archivo"}: no se encontró la copia histórica necesaria para reconstruir la versión.`);
+    }
+
+    const folder = item.kind === "evidence" ? "evidence" : item.kind === "data" ? "data" : "sources";
+    const destination = path.join(projectDir(userDataPath, projectId), folder);
+    const preferred = safeName(item.name || `archivo${item.extension || ""}`);
+    const ext = path.extname(preferred);
+    const stem = path.basename(preferred, ext);
+    let localPath = path.join(destination, preferred);
+    let n = 2;
+    while (fs.existsSync(localPath)) {
+      localPath = path.join(destination, `${stem} (restaurado ${n})${ext}`);
+      n += 1;
+    }
+    fs.copyFileSync(objectPath, localPath);
+
+    return {
+      id: newId("file"),
+      kind: item.kind || "source",
+      markerName: item.markerName || "",
+      name: path.basename(localPath),
+      extension: item.extension || path.extname(localPath).toLowerCase(),
+      size: Number(item.size || fs.statSync(localPath).size),
+      localPath,
+      sha256: hash,
+      integrityCheckedAt: new Date().toISOString(),
+      addedAt: item.addedAt || new Date().toISOString()
+    };
+  });
+
+  const previousFiles = db.prepare(
+    "SELECT local_path FROM files WHERE project_id = ?"
+  ).all(projectId).map((row) => row.local_path).filter(Boolean);
+
   const now = new Date().toISOString();
   const tx = db.transaction(() => {
     db.prepare("DELETE FROM project_fields WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM files WHERE project_id = ?").run(projectId);
 
     const insertField = db.prepare(`
       INSERT INTO project_fields(project_id, field_name, value_json, updated_at)
@@ -641,6 +734,27 @@ function restoreDocumentVersion(userDataPath, projectId, version) {
     `);
     Object.entries(snapshot.formData || {}).forEach(([key, value]) => {
       insertField.run(projectId, key, JSON.stringify(value), now);
+    });
+
+    const insertFile = db.prepare(`
+      INSERT INTO files
+        (id, project_id, kind, marker_name, name, extension, size, local_path, sha256, integrity_checked_at, added_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    preparedFiles.forEach((item) => {
+      insertFile.run(
+        item.id,
+        projectId,
+        item.kind,
+        item.markerName,
+        item.name,
+        item.extension,
+        item.size,
+        item.localPath,
+        item.sha256,
+        item.integrityCheckedAt,
+        item.addedAt
+      );
     });
 
     db.prepare(`
@@ -664,7 +778,24 @@ function restoreDocumentVersion(userDataPath, projectId, version) {
     );
   });
 
-  tx();
+  try {
+    tx();
+  } catch (error) {
+    preparedFiles.forEach((item) => {
+      try { if (fs.existsSync(item.localPath)) fs.unlinkSync(item.localPath); } catch (_error) { /* ignore */ }
+    });
+    throw error;
+  }
+
+  const restoredPaths = new Set(preparedFiles.map((item) => path.resolve(item.localPath)));
+  previousFiles.forEach((filePath) => {
+    try {
+      if (filePath && fs.existsSync(filePath) && !restoredPaths.has(path.resolve(filePath))) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (_error) { /* ignore */ }
+  });
+
   queueSync(db, "project", projectId, "restore_version", { version: snapshot.version });
   return getProject(userDataPath, projectId);
 }
@@ -673,6 +804,10 @@ module.exports = {
   root,
   projectDir,
   generatedDir,
+  objectsDir,
+  objectPathForHash,
+  ensureObjectCopy,
+  backfillObjectStore,
   createProject,
   saveProject,
   getProject,

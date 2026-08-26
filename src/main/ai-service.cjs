@@ -1,4 +1,5 @@
 const { runtimeProviders } = require("./ai-provider-service.cjs");
+const errorService = require("./error-service.cjs");
 
 function safeJsonParse(value) {
   if (!value) return null;
@@ -374,8 +375,14 @@ async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
       try {
         const parsed = safeJsonParse(await callProvider(provider, prompt));
         if (parsed) return hardenAnalysis(normalizeAnalysis(parsed, project, sourceBundle, provider.name), project, sourceBundle);
-      } catch (_error) {
-        // Fallback al siguiente proveedor.
+      } catch (error) {
+        errorService.record(userDataPath, {
+          severity: "warning",
+          module: "ai",
+          action: "fallback",
+          message: `${provider.name} no respondió. Se intentará el siguiente proveedor.`,
+          detail: error && error.stack ? error.stack : String(error || "")
+        });
       }
     }
     return localAnalysis(project, sourceBundle);
@@ -387,13 +394,32 @@ async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
     return hardenAnalysis(normalizeAnalysis(parsed, project, sourceBundle, provider.name), project, sourceBundle);
   }));
 
+  settled.forEach((item, index) => {
+    if (item.status !== "rejected") return;
+    const provider = providers[index];
+    errorService.record(userDataPath, {
+      severity: "warning",
+      module: "ai",
+      action: "deep-analysis",
+      message: `${provider ? provider.name : "Un proveedor"} falló durante el análisis profundo.`,
+      detail: item.reason && item.reason.stack ? item.reason.stack : String(item.reason || "")
+    });
+  });
+
   const valid = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
   if (!valid.length) return localAnalysis(project, sourceBundle);
   if (valid.length === 1) return valid[0];
 
   try {
     return await judgeAnalyses(providers[0], valid, project, sourceBundle);
-  } catch (_error) {
+  } catch (error) {
+    errorService.record(userDataPath, {
+      severity: "warning",
+      module: "ai",
+      action: "reviewer",
+      message: "El revisor multi-IA no respondió. Se utilizó consolidación local.",
+      detail: error && error.stack ? error.stack : String(error || "")
+    });
     return mergeAnalyses(valid, project, sourceBundle);
   }
 }
