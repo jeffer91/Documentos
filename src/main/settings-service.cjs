@@ -1,95 +1,66 @@
-/* =========================================================
-Archivo: settings-service.cjs
-Ruta: /src/main/settings-service.cjs
-Funciones principales:
-- Guardar ajustes locales de la app.
-- Leer unidad, sigla y firmantes por defecto.
-- Mantener valores seguros si el archivo de ajustes falla.
-========================================================= */
-
 const fs = require("fs");
 const path = require("path");
+const { root } = require("./workspace-service.cjs");
 
-const SETTINGS_FILE = "documentos-settings.json";
-
+const SETTINGS_FILE = "settings.json";
 const DEFAULT_SETTINGS = {
-  unitName: "Titulación y Eficiencia Terminal",
-  unitCode: "UTET",
   signers: {
-    elaboradoPor: {
-      nombre: "Mgs. Jefferson Villarreal",
-      cargo: "Coordinador de Titulación y Eficiencia Terminal"
-    },
-    revisadoPor: {
-      nombre: "Mgs Martha Tomalá",
-      cargo: "Coordinadora General de Carreras"
-    },
-    aprobadoPor: {
-      nombre: "Dr. Alex León",
-      cargo: "Vicerrector"
-    }
+    elaboradoPor: { nombre: "Mgs. Jefferson Villarreal", cargo: "Coordinador de Titulación y Eficiencia Terminal" },
+    revisadoPor: { nombre: "Mgs. Martha Tomalá", cargo: "Coordinadora General de Carreras" },
+    aprobadoPor: { nombre: "Dr. Alex León", cargo: "Vicerrector" }
+  },
+  generation: {
+    defaultAiMode: "fallback",
+    includeSourceTrace: true,
+    openAfterGenerate: false
   }
 };
 
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
+function filePath(userDataPath) {
+  return path.join(root(userDataPath), SETTINGS_FILE);
 }
 
-function getSettingsPath(userDataPath) {
-  ensureDir(userDataPath);
-  return path.join(userDataPath, SETTINGS_FILE);
+function text(value, fallback) {
+  return String(value || fallback || "").trim();
 }
 
-function mergeSettings(input) {
+function merge(input) {
   const data = input && typeof input === "object" ? input : {};
-  const signers = data.signers && typeof data.signers === "object" ? data.signers : {};
-
+  const signers = data.signers || {};
+  const generation = data.generation || {};
   return {
-    unitName: data.unitName || DEFAULT_SETTINGS.unitName,
-    unitCode: data.unitCode || DEFAULT_SETTINGS.unitCode,
     signers: {
       elaboradoPor: {
-        nombre: signers.elaboradoPor && signers.elaboradoPor.nombre ? signers.elaboradoPor.nombre : DEFAULT_SETTINGS.signers.elaboradoPor.nombre,
-        cargo: signers.elaboradoPor && signers.elaboradoPor.cargo ? signers.elaboradoPor.cargo : DEFAULT_SETTINGS.signers.elaboradoPor.cargo
+        nombre: text(signers.elaboradoPor && signers.elaboradoPor.nombre, DEFAULT_SETTINGS.signers.elaboradoPor.nombre),
+        cargo: text(signers.elaboradoPor && signers.elaboradoPor.cargo, DEFAULT_SETTINGS.signers.elaboradoPor.cargo)
       },
       revisadoPor: {
-        nombre: signers.revisadoPor && signers.revisadoPor.nombre ? signers.revisadoPor.nombre : DEFAULT_SETTINGS.signers.revisadoPor.nombre,
-        cargo: signers.revisadoPor && signers.revisadoPor.cargo ? signers.revisadoPor.cargo : DEFAULT_SETTINGS.signers.revisadoPor.cargo
+        nombre: text(signers.revisadoPor && signers.revisadoPor.nombre, DEFAULT_SETTINGS.signers.revisadoPor.nombre),
+        cargo: text(signers.revisadoPor && signers.revisadoPor.cargo, DEFAULT_SETTINGS.signers.revisadoPor.cargo)
       },
       aprobadoPor: {
-        nombre: signers.aprobadoPor && signers.aprobadoPor.nombre ? signers.aprobadoPor.nombre : DEFAULT_SETTINGS.signers.aprobadoPor.nombre,
-        cargo: signers.aprobadoPor && signers.aprobadoPor.cargo ? signers.aprobadoPor.cargo : DEFAULT_SETTINGS.signers.aprobadoPor.cargo
+        nombre: text(signers.aprobadoPor && signers.aprobadoPor.nombre, DEFAULT_SETTINGS.signers.aprobadoPor.nombre),
+        cargo: text(signers.aprobadoPor && signers.aprobadoPor.cargo, DEFAULT_SETTINGS.signers.aprobadoPor.cargo)
       }
+    },
+    generation: {
+      defaultAiMode: generation.defaultAiMode === "deep" ? "deep" : "fallback",
+      includeSourceTrace: generation.includeSourceTrace !== false,
+      openAfterGenerate: generation.openAfterGenerate === true
     }
   };
 }
 
 function readSettings(userDataPath) {
-  const filePath = getSettingsPath(userDataPath);
-
-  if (!fs.existsSync(filePath)) {
-    return mergeSettings(DEFAULT_SETTINGS);
-  }
-
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    return mergeSettings(JSON.parse(raw));
-  } catch (_error) {
-    return mergeSettings(DEFAULT_SETTINGS);
-  }
+  const target = filePath(userDataPath);
+  if (!fs.existsSync(target)) return merge(DEFAULT_SETTINGS);
+  try { return merge(JSON.parse(fs.readFileSync(target, "utf8"))); } catch (_error) { return merge(DEFAULT_SETTINGS); }
 }
 
 function saveSettings(userDataPath, settings) {
-  const filePath = getSettingsPath(userDataPath);
-  const next = mergeSettings(settings);
-  fs.writeFileSync(filePath, JSON.stringify(next, null, 2), "utf8");
+  const next = merge(settings);
+  fs.writeFileSync(filePath(userDataPath), JSON.stringify(next, null, 2), "utf8");
   return next;
 }
 
-module.exports = {
-  DEFAULT_SETTINGS,
-  readSettings,
-  saveSettings
-};
+module.exports = { DEFAULT_SETTINGS, readSettings, saveSettings };
