@@ -51,7 +51,9 @@ function systemValues(project, signers) {
     CODIGO: resolvedCode(project),
     CODIGO_DOCUMENTO: resolvedCode(project),
     FECHA_ACTUAL: today,
-    VERSION: project.template && project.template.version ? String(project.template.version) : "1",
+    VERSION: (project.formData || {}).VERSION_DOCUMENTO || project.documentVersion || "1.0",
+    VERSION_DOCUMENTO: (project.formData || {}).VERSION_DOCUMENTO || project.documentVersion || "1.0",
+    VERSION_PLANTILLA: project.template && project.template.version ? String(project.template.version) : "1",
     PERIODO: (project.formData || {}).PERIODO || "",
     ELABORADO_POR: elaborado.nombre || "",
     CARGO_ELABORADO: elaborado.cargo || "",
@@ -214,12 +216,15 @@ function saveJob(dir, job) {
   return file;
 }
 
-async function generateDocument(userDataPath, project, analysis, signers, appRoot) {
+async function generateDocument(userDataPath, project, analysis, signers, appRoot, generationVersion) {
   if (!project.template || !project.template.localPath) {
     throw new Error("Este documento no tiene una plantilla Word asociada.");
   }
 
-  const dir = generatedDir(userDataPath, project.id);
+  const rootDir = generatedDir(userDataPath, project.id);
+  const version = Number(generationVersion || 1);
+  const dir = path.join(rootDir, `v${version}`);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const code = safeName(resolvedCode(project));
   const base = safeName(`${code}-${project.documentName}`);
   const filledDocx = path.join(dir, `${base}-contenido.docx`);
@@ -237,7 +242,7 @@ async function generateDocument(userDataPath, project, analysis, signers, appRoo
   };
   const jobPath = saveJob(dir, job);
   const scriptPath = path.join(appRoot, "scripts", "render-word.ps1");
-  const result = exportPdf({
+  const result = await exportPdf({
     inputDocx: filledDocx,
     outputDocx: finalDocx,
     pdfPath,
@@ -248,6 +253,7 @@ async function generateDocument(userDataPath, project, analysis, signers, appRoo
 
   return {
     code: resolvedCode(project),
+    version,
     engine: result.engine,
     outputs: [
       { type: "pdf", label: "PDF final", path: result.pdfPath, primary: true },

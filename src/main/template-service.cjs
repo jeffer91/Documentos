@@ -1,9 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const PizZip = require("pizzip");
-const catalog = require("../renderer/catalog.js");
 const { root, copyUnique } = require("./workspace-service.cjs");
-const { openDatabase, queueSync } = require("./database-service.cjs");
+const { openDatabase, queueSync, getCatalog } = require("./database-service.cjs");
+const { sha256 } = require("./file-integrity-service.cjs");
 const { parseMarkersFromText, validateMarkers } = require("./template-markers.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
@@ -64,9 +64,19 @@ function staticCodeParts(code) {
     .filter((part) => part && !["0X", "XX", "AÑO", "MES", "20XX"].includes(part));
 }
 
-function inferAssociation(fileName, text) {
+function allDocumentsFromCatalog(catalog) {
+  return (catalog.units || []).flatMap((unit) =>
+    (unit.processes || []).flatMap((process) =>
+      (process.documents || []).map((document) => ({ unit, process, document }))
+    )
+  );
+}
+
+function inferAssociation(userDataPath, fileName, text) {
+  const db = openDatabase(userDataPath);
+  const catalog = getCatalog(db);
   const haystack = normalizeSearch(`${fileName} ${text.slice(0, 12000)}`);
-  const ranked = catalog.allDocuments().map(({ unit, process, document }) => {
+  const ranked = allDocumentsFromCatalog(catalog).map(({ unit, process, document }) => {
     let score = 0;
     normalizeSearch(document.name).split(" ").filter((word) => word.length >= 5)
       .forEach((word) => { if (haystack.includes(word)) score += 2; });
@@ -150,7 +160,8 @@ function hydrateTemplate(db, row) {
     fields: markers.filter((marker) => marker.valid && marker.isUserInput),
     aiFields: markers.filter((marker) => marker.valid && marker.isAi),
     systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
-    validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true })
+    validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true }),
+    sha256: row.sha256 || ""
   };
 }
 
@@ -194,7 +205,7 @@ function importTemplate(userDataPath, sourcePath, association) {
   const inspected = inspectTemplate(stored);
   const inferred = association && association.documentId
     ? Object.assign({ confidence: 100 }, association)
-    : inferAssociation(path.basename(stored), inspected.text);
+    : inferAssociation(userDataPath, path.basename(stored), inspected.text);
 
   const documentId = inferred && inferred.documentId ? inferred.documentId : null;
   const unitId = inferred && inferred.unitId ? inferred.unitId : null;
@@ -208,8 +219,8 @@ function importTemplate(userDataPath, sourcePath, association) {
 
     db.prepare(`
       INSERT INTO templates
-        (id, document_id, unit_id, process_id, name, version, local_path, active, confidence, imported_at, validation_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        (id, document_id, unit_id, process_id, name, version, local_path, active, confidence, imported_at, validation_json, sha256, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
     `).run(
       id,
       documentId,
@@ -221,6 +232,7 @@ function importTemplate(userDataPath, sourcePath, association) {
       inferred && inferred.confidence ? inferred.confidence : 0,
       now,
       JSON.stringify(inspected.validation),
+      sha256(stored),
       now
     );
 

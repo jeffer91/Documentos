@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const catalog = window.DOCUMENT_CATALOG;
+  let catalog = null;
   const api = window.documentosApp;
   const view = document.getElementById("view");
   const title = document.getElementById("screenTitle");
@@ -82,6 +82,47 @@
     title.textContent = screenTitle || "Documentos";
     breadcrumb.textContent = crumbs || "Inicio";
     backButton.hidden = !canBack;
+  }
+
+  function prepareCatalog(data) {
+    const units = data && Array.isArray(data.units) ? data.units : [];
+    return {
+      units,
+      findUnit(unitId) {
+        return units.find((unit) => unit.id === unitId) || null;
+      },
+      findProcess(processId) {
+        for (const unit of units) {
+          const process = (unit.processes || []).find((item) => item.id === processId);
+          if (process) return { unit, process };
+        }
+        return null;
+      },
+      findDocument(documentId) {
+        for (const unit of units) {
+          for (const process of unit.processes || []) {
+            const document = (process.documents || []).find((item) => item.id === documentId);
+            if (document) return { unit, process, document };
+          }
+        }
+        return null;
+      },
+      allDocuments() {
+        return units.flatMap((unit) =>
+          (unit.processes || []).flatMap((process) =>
+            (process.documents || []).map((document) => ({ unit, process, document }))
+          )
+        );
+      }
+    };
+  }
+
+  async function loadCatalog() {
+    const response = await api.getCatalog();
+    if (!response || !response.ok || !response.catalog) {
+      throw new Error("No se pudo cargar el catálogo local.");
+    }
+    catalog = prepareCatalog(response.catalog);
   }
 
   async function loadProjects() {
@@ -880,8 +921,13 @@
     }
 
     document.getElementById("appVersion").textContent = `v${api.version}`;
-    await Promise.all([loadSettings(), loadTemplates(), loadProjects()]);
-    renderHome();
+    try {
+      await loadCatalog();
+      await Promise.all([loadSettings(), loadTemplates(), loadProjects()]);
+      renderHome();
+    } catch (error) {
+      view.innerHTML = `<div class="empty"><b>No se pudo iniciar</b>${escapeHtml(error.message || String(error))}</div>`;
+    }
   }
 
   init();

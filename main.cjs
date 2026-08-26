@@ -28,7 +28,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -56,6 +56,8 @@ function safeResponse(action) {
 }
 
 function registerIpc() {
+  ipcMain.handle("catalog:get", () => ({ ok: true, catalog: database.getCatalog(database.openDatabase(userData())) }));
+
   ipcMain.handle("projects:create", (_event, meta) => safeResponse(() => {
     const input = Object.assign({}, meta || {});
     if (input.mode !== "upload") {
@@ -160,7 +162,8 @@ function registerIpc() {
       }
 
       const settings = readSettings(userData());
-      const result = await generateDocument(userData(), project, analysis, settings.signers, __dirname);
+      const generationVersion = workspace.nextGenerationVersion(userData(), projectId);
+      const result = await generateDocument(userData(), project, analysis, settings.signers, __dirname, generationVersion);
       project = workspace.addGeneration(userData(), projectId, result);
 
       const primary = project.outputs.find((item) => item.type === "pdf");
@@ -189,14 +192,25 @@ function registerIpc() {
     }
   });
 
+  function workspaceFileAllowed(filePath) {
+    if (!filePath) return false;
+    const rootPath = path.resolve(database.workspaceRoot(userData()));
+    const target = path.resolve(filePath);
+    return target === rootPath || target.startsWith(rootPath + path.sep);
+  }
+
   ipcMain.handle("files:open", async (_event, filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: "Archivo no disponible." };
+    if (!workspaceFileAllowed(filePath) || !fs.existsSync(filePath)) {
+      return { ok: false, error: "Archivo no disponible o fuera del espacio de trabajo." };
+    }
     const error = await shell.openPath(filePath);
     return error ? { ok: false, error } : { ok: true };
   });
 
   ipcMain.handle("files:show", async (_event, filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: "Archivo no disponible." };
+    if (!workspaceFileAllowed(filePath) || !fs.existsSync(filePath)) {
+      return { ok: false, error: "Archivo no disponible o fuera del espacio de trabajo." };
+    }
     shell.showItemInFolder(filePath);
     return { ok: true };
   });
@@ -212,7 +226,7 @@ function registerIpc() {
 
 app.whenReady().then(() => {
   const db = database.openDatabase(userData());
-  database.seedCatalog(db, catalog);
+  database.seedCatalogIfEmpty(db, catalog);
   migrateLegacy(db, database.workspaceRoot(userData()));
 
   registerIpc();
