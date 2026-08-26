@@ -20,6 +20,7 @@
     templates: [],
     settings: null,
     aiProviders: [],
+    sync: null,
     busy: false
   };
 
