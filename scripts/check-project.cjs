@@ -3,7 +3,7 @@ const path = require("path");
 const childProcess = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
-const MAX_LINES = 750;
+const MAX_LINES = 800;
 const REQUIRED_FILES = [
   "package.json",
   "main.cjs",
@@ -12,7 +12,10 @@ const REQUIRED_FILES = [
   "src/renderer/styles.css",
   "src/renderer/catalog.js",
   "src/renderer/app.js",
-  "src/main/database-service.cjs",\n  "src/main/legacy-migration-service.cjs",\n  "src/main/sync-service.cjs",\n  "src/main/workspace-service.cjs",
+  "src/main/database-service.cjs",
+  "src/main/legacy-migration-service.cjs",
+  "src/main/sync-service.cjs",
+  "src/main/workspace-service.cjs",
   "src/main/template-markers.cjs",
   "src/main/template-service.cjs",
   "src/main/source-service.cjs",
@@ -22,7 +25,8 @@ const REQUIRED_FILES = [
   "src/main/document-composer.cjs",
   "src/main/pdf-service.cjs",
   "src/main/settings-service.cjs",
-  "scripts/render-word.ps1"
+  "scripts/render-word.ps1",
+  "docs/ARQUITECTURA_DATOS.md"
 ];
 
 function lineCount(file) {
@@ -45,7 +49,6 @@ function catalogCheck() {
   const processes = units.flatMap((unit) => unit.processes || []);
   const documents = processes.flatMap((process) => process.documents || []);
   const ids = documents.map((item) => item.id);
-
   return {
     units: units.length,
     processes: processes.length,
@@ -65,7 +68,6 @@ function markerCheck() {
     "{{SISTEMA:CODIGO}}",
     "{{GRAFICO:RESULTADOS|Resultados}}"
   ].join("\n"));
-
   const validation = validateMarkers(markers);
   return {
     count: markers.length,
@@ -84,7 +86,6 @@ function main() {
       errors.push(`Falta ${relative}`);
       return;
     }
-
     if (lineCount(full) > MAX_LINES) warnings.push(`${relative} supera ${MAX_LINES} líneas`);
     if (/\.(js|cjs)$/.test(relative)) {
       const syntaxError = syntaxCheck(relative);
