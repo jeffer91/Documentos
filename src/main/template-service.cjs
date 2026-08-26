@@ -92,13 +92,15 @@ function inferAssociation(userDataPath, fileName, text) {
   }).sort((a, b) => b.score - a.score);
 
   const best = ranked[0];
-  if (!best || best.score < 10) return null;
+  const second = ranked[1];
+  const margin = best && second ? best.score - second.score : best ? best.score : 0;
+  if (!best || best.score < 18 || (second && margin < 5)) return null;
 
   return {
     unitId: best.unit.id,
     processId: best.process.id,
     documentId: best.document.id,
-    confidence: Math.min(100, Math.round(best.score * 4))
+    confidence: Math.min(100, Math.round(55 + best.score * 1.5 + margin * 2))
   };
 }
 

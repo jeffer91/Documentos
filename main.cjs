@@ -227,7 +227,11 @@ function registerIpc() {
 app.whenReady().then(() => {
   const db = database.openDatabase(userData());
   database.seedCatalogIfEmpty(db, catalog);
-  migrateLegacy(db, database.workspaceRoot(userData()));
+  try {
+    migrateLegacy(db, database.workspaceRoot(userData()));
+  } catch (error) {
+    console.error("Migración legacy omitida:", error);
+  }
 
   registerIpc();
   createWindow();
