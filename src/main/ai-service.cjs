@@ -59,12 +59,23 @@ function normalizeAnalysis(input, project, sourceBundle, providerName) {
     generatedFields[field.name] = String(incoming[field.name] || incoming[field.name.toLowerCase()] || "").trim();
   });
 
+  const fieldSources = {};
+  const incomingSources = data.fieldSources && typeof data.fieldSources === "object" ? data.fieldSources : {};
+  requested.forEach((field) => {
+    const sources = incomingSources[field.name] || incomingSources[field.name.toLowerCase()] || [];
+    fieldSources[field.name] = Array.isArray(sources) ? sources.map(String).filter(Boolean).slice(0, 10) : [];
+  });
+
   return {
     provider: providerName || data.provider || "Local",
     generatedAt: new Date().toISOString(),
     generatedFields,
+    fieldSources,
     keyFindings: Array.isArray(data.keyFindings) ? data.keyFindings.map(String).filter(Boolean).slice(0, 12) : [],
-    missingData: Array.isArray(data.missingData) ? data.missingData.map(String).filter(Boolean).slice(0, 12) : [],
+    missingData: Array.from(new Set([
+      ...(Array.isArray(data.missingData) ? data.missingData.map(String).filter(Boolean) : []),
+      ...((sourceBundle.extractionWarnings || []).map(String))
+    ])).slice(0, 20),
     tables: (sourceBundle.tables || []).slice(0, 12),
     charts: (sourceBundle.charts || []).slice(0, 10),
     sourceTrace: Array.isArray(data.sourceTrace) ? data.sourceTrace.slice(0, 40) : [],
@@ -145,6 +156,7 @@ function promptFor(project, sourceBundle) {
 
   const expected = {
     generatedFields: Object.fromEntries(requested.map((field) => [field.name, "texto"])),
+    fieldSources: Object.fromEntries(requested.map((field) => [field.name, ["archivo.ext"]])),
     keyFindings: ["hallazgo verificable"],
     missingData: ["dato que hace falta"],
     sourceTrace: [{ source: "archivo", use: "información utilizada" }]
@@ -174,7 +186,9 @@ ${data || "Sin archivos de datos."}
 
 REGLAS OBLIGATORIAS:
 - No inventes leyes, artículos, normas, cifras, nombres, fechas ni resultados.
-- Un campo relacionado con base legal o normativa solo puede usar normas visibles en las fuentes o escritas por el usuario.
+- Un campo relacionado con base legal o normativa solo puede usar normas visibles en FUENTES DOCUMENTALES.
+- En fieldSources indica, por cada campo, los nombres EXACTOS de los archivos que respaldan ese texto.
+- Si una afirmación no puede vincularse con una fuente o un dato ingresado, no la incluyas.
 - Si la información no alcanza para un campo, déjalo vacío y explica la carencia en missingData.
 - Conclusiones deben derivarse de resultados o hallazgos disponibles.
 - Recomendaciones deben derivarse de hallazgos o conclusiones disponibles.
@@ -251,13 +265,38 @@ function scoreAnalysis(analysis, project) {
   const fields = aiFields(project);
   let score = 0;
   fields.forEach((field) => {
-    const value = String(analysis.generatedFields && analysis.generatedFields[field.name] || "");
-    if (value.trim()) score += field.required ? 12 : 7;
-    score += Math.min(value.length / 300, 4);
+    const value = String(analysis.generatedFields && analysis.generatedFields[field.name] || "").trim();
+    const sources = analysis.fieldSources && Array.isArray(analysis.fieldSources[field.name])
+      ? analysis.fieldSources[field.name]
+      : [];
+    if (value) score += field.required ? 12 : 7;
+    if (value && sources.length) score += 5;
   });
   score += Math.min((analysis.keyFindings || []).length, 8) * 2;
-  score -= Math.min((analysis.missingData || []).length, 8);
+  score += Math.min((analysis.sourceTrace || []).length, 8);
+  score -= Math.min((analysis.missingData || []).length, 8) * 2;
   return score;
+}
+
+function hardenAnalysis(analysis, project, sourceBundle) {
+  const knownSources = new Set((sourceBundle.textSources || []).map((item) => item.name));
+  const next = normalizeAnalysis(analysis, project, sourceBundle, analysis && analysis.provider);
+  aiFields(project).forEach((field) => {
+    const name = String(field.name || "").toUpperCase();
+    const isLegal = name.includes("BASE_LEGAL") || name.includes("NORMAT") || name.includes("LEGAL");
+    if (!isLegal || !next.generatedFields[field.name]) return;
+
+    const validSources = (next.fieldSources[field.name] || []).filter((source) => knownSources.has(source));
+    if (!validSources.length) {
+      next.generatedFields[field.name] = "";
+      next.fieldSources[field.name] = [];
+      next.missingData.push(`${field.label}: no se encontró respaldo documental verificable para el contenido legal.`);
+    } else {
+      next.fieldSources[field.name] = validSources;
+    }
+  });
+  next.missingData = Array.from(new Set(next.missingData)).slice(0, 20);
+  return next;
 }
 
 function mergeAnalyses(analyses, project, sourceBundle) {
@@ -265,17 +304,60 @@ function mergeAnalyses(analyses, project, sourceBundle) {
   const merged = normalizeAnalysis(ranked[0], project, sourceBundle, ranked.map((item) => item.provider).join(" + "));
 
   aiFields(project).forEach((field) => {
-    const options = ranked
-      .map((analysis) => String(analysis.generatedFields && analysis.generatedFields[field.name] || "").trim())
-      .filter(Boolean)
-      .sort((a, b) => b.length - a.length);
-    merged.generatedFields[field.name] = options[0] || "";
+    for (const candidate of ranked) {
+      const value = String(candidate.generatedFields && candidate.generatedFields[field.name] || "").trim();
+      if (!value) continue;
+      merged.generatedFields[field.name] = value;
+      merged.fieldSources[field.name] = (candidate.fieldSources && candidate.fieldSources[field.name]) || [];
+      break;
+    }
   });
 
   merged.keyFindings = Array.from(new Set(ranked.flatMap((item) => item.keyFindings || []))).slice(0, 12);
-  merged.missingData = Array.from(new Set(ranked.flatMap((item) => item.missingData || []))).slice(0, 12);
+  merged.missingData = Array.from(new Set(ranked.flatMap((item) => item.missingData || []))).slice(0, 20);
   merged.sourceTrace = ranked[0].sourceTrace || [];
-  return merged;
+  return hardenAnalysis(merged, project, sourceBundle);
+}
+
+function judgePrompt(project, sourceBundle, analyses) {
+  const candidates = analyses.map((analysis) => ({
+    provider: analysis.provider,
+    generatedFields: analysis.generatedFields,
+    fieldSources: analysis.fieldSources,
+    missingData: analysis.missingData
+  }));
+
+  const sourceNames = (sourceBundle.textSources || []).map((item) => item.name);
+  return `Actúa como revisor final de un documento institucional. Evalúa varias respuestas de IA y consolida la mejor versión de cada campo.
+
+CRITERIOS, EN ESTE ORDEN:
+1. respaldo explícito en las fuentes disponibles;
+2. consistencia con datos ingresados y Excel/CSV;
+3. relevancia para el campo solicitado;
+4. ausencia de contradicciones;
+5. cobertura suficiente sin relleno;
+6. si no hay respaldo, dejar vacío.
+
+DOCUMENTO: ${project.documentName}
+FUENTES DISPONIBLES: ${JSON.stringify(sourceNames)}
+CANDIDATOS:
+${JSON.stringify(candidates)}
+
+Devuelve SOLO JSON válido con:
+{
+  "generatedFields": {"CAMPO":"texto"},
+  "fieldSources": {"CAMPO":["nombre-exacto.ext"]},
+  "keyFindings": [],
+  "missingData": [],
+  "sourceTrace": []
+}`;
+}
+
+async function judgeAnalyses(provider, analyses, project, sourceBundle) {
+  const parsed = safeJsonParse(await callProvider(provider, judgePrompt(project, sourceBundle, analyses)));
+  if (!parsed) throw new Error("El revisor multi-IA no devolvió JSON válido.");
+  const normalized = normalizeAnalysis(parsed, project, sourceBundle, `Revisor: ${provider.name}`);
+  return hardenAnalysis(normalized, project, sourceBundle);
 }
 
 async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
@@ -291,7 +373,7 @@ async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
     for (const provider of providers) {
       try {
         const parsed = safeJsonParse(await callProvider(provider, prompt));
-        if (parsed) return normalizeAnalysis(parsed, project, sourceBundle, provider.name);
+        if (parsed) return hardenAnalysis(normalizeAnalysis(parsed, project, sourceBundle, provider.name), project, sourceBundle);
       } catch (_error) {
         // Fallback al siguiente proveedor.
       }
@@ -302,12 +384,18 @@ async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
   const settled = await Promise.allSettled(providers.slice(0, 4).map(async (provider) => {
     const parsed = safeJsonParse(await callProvider(provider, prompt));
     if (!parsed) throw new Error("Respuesta no estructurada.");
-    return normalizeAnalysis(parsed, project, sourceBundle, provider.name);
+    return hardenAnalysis(normalizeAnalysis(parsed, project, sourceBundle, provider.name), project, sourceBundle);
   }));
 
   const valid = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
   if (!valid.length) return localAnalysis(project, sourceBundle);
-  return valid.length === 1 ? valid[0] : mergeAnalyses(valid, project, sourceBundle);
+  if (valid.length === 1) return valid[0];
+
+  try {
+    return await judgeAnalyses(providers[0], valid, project, sourceBundle);
+  } catch (_error) {
+    return mergeAnalyses(valid, project, sourceBundle);
+  }
 }
 
 module.exports = {

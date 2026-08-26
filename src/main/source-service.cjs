@@ -153,12 +153,19 @@ async function analyzeAttachments(attachments) {
     sheets: item.sheets
   }));
 
+  const extractionWarnings = extracted
+    .filter((item) => item.extractionWarning || item.type === "error")
+    .map((item) => item.extractionWarning
+      ? `${item.name}: ${item.extractionWarning}`
+      : `${item.name}: ${item.error || "No se pudo analizar el archivo."}`);
+
   return {
     extracted,
     textSources,
     dataSummary,
     tables: candidates.tables,
-    charts: candidates.charts
+    charts: candidates.charts,
+    extractionWarnings
   };
 }
 
