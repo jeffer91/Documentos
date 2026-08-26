@@ -3,126 +3,186 @@ const { runtimeProviders } = require("./ai-provider-service.cjs");
 function safeJsonParse(value) {
   if (!value) return null;
   const text = String(value).trim()
-    .replace(/^\`\`\`json\s*/i, "")
-    .replace(/^\`\`\`\s*/i, "")
-    .replace(/\`\`\`$/i, "")
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
     .trim();
   try { return JSON.parse(text); } catch (_error) { return null; }
 }
 
+function scalarFields(project) {
+  const fields = ((project.template && project.template.fields) || [])
+    .filter((field) => ["CAMPO", "TEXTO", "FECHA", "NUMERO"].includes(field.type));
+  return fields.map((field) => ({
+    name: field.name,
+    label: field.label,
+    value: project.formData && project.formData[field.name] != null ? project.formData[field.name] : ""
+  }));
+}
+
+function tableFields(project) {
+  return ((project.template && project.template.fields) || [])
+    .filter((field) => field.type === "TABLA")
+    .map((field) => ({
+      name: field.name,
+      label: field.label,
+      columns: field.columns || [],
+      rows: Array.isArray(project.formData && project.formData[field.name]) ? project.formData[field.name] : []
+    }));
+}
+
+function aiFields(project) {
+  return ((project.template && project.template.aiFields) || []).filter((field) => field.valid);
+}
+
+function formText(project) {
+  return scalarFields(project)
+    .filter((item) => String(item.value || "").trim())
+    .map((item) => `${item.label}: ${String(item.value).trim()}`)
+    .join("\n");
+}
+
+function rowCount(sourceBundle) {
+  return (sourceBundle.dataSummary || []).reduce(
+    (total, source) => total + (source.sheets || []).reduce((sum, sheet) => sum + Number(sheet.rowCount || 0), 0),
+    0
+  );
+}
+
 function normalizeAnalysis(input, project, sourceBundle, providerName) {
   const data = input && typeof input === "object" ? input : {};
-  const sectionTitles = Array.isArray(project.structure) ? project.structure : [];
-  const rawSections = Array.isArray(data.sections) ? data.sections : [];
-  const sections = sectionTitles.map((title) => {
-    const found = rawSections.find((section) => String(section.title || "").toLowerCase() === String(title).toLowerCase());
-    return { title, content: found && found.content ? String(found.content) : "" };
+  const requested = aiFields(project);
+  const incoming = data.generatedFields && typeof data.generatedFields === "object" ? data.generatedFields : {};
+  const generatedFields = {};
+
+  requested.forEach((field) => {
+    generatedFields[field.name] = String(incoming[field.name] || incoming[field.name.toLowerCase()] || "").trim();
   });
+
   return {
     provider: providerName || data.provider || "Local",
     generatedAt: new Date().toISOString(),
-    executiveSummary: String(data.executiveSummary || ""),
+    generatedFields,
     keyFindings: Array.isArray(data.keyFindings) ? data.keyFindings.map(String).filter(Boolean).slice(0, 12) : [],
     missingData: Array.isArray(data.missingData) ? data.missingData.map(String).filter(Boolean).slice(0, 12) : [],
-    sections,
-    tables: Array.isArray(data.tables) && data.tables.length ? data.tables.slice(0, 8) : (sourceBundle.tables || []).slice(0, 8),
-    charts: Array.isArray(data.charts) && data.charts.length ? data.charts.slice(0, 6) : (sourceBundle.charts || []).slice(0, 6),
-    sourceTrace: Array.isArray(data.sourceTrace) ? data.sourceTrace.slice(0, 30) : [],
+    tables: (sourceBundle.tables || []).slice(0, 12),
+    charts: (sourceBundle.charts || []).slice(0, 10),
+    sourceTrace: Array.isArray(data.sourceTrace) ? data.sourceTrace.slice(0, 40) : [],
     notes: String(data.notes || "")
   };
 }
 
-function fieldText(project) {
-  return Object.entries(project.formData || {})
-    .filter(([, value]) => String(value || "").trim())
-    .map(([key, value]) => `${key}: ${String(value).trim()}`)
-    .join("\n");
+function localField(field, project, sourceBundle) {
+  const fields = scalarFields(project).filter((item) => String(item.value || "").trim());
+  const userText = fields.map((item) => `${item.label}: ${item.value}`).join(". ");
+  const rows = rowCount(sourceBundle);
+  const sourceNames = (sourceBundle.extracted || []).map((item) => item.name).filter(Boolean);
+  const name = field.name.toUpperCase();
+
+  if (name.includes("BASE_LEGAL") || name.includes("NORMAT")) {
+    return "";
+  }
+  if (name.includes("RESUMEN")) {
+    return [userText, rows ? `Se analizaron ${rows} registros.` : "", sourceNames.length ? `Se consideraron ${sourceNames.length} fuentes de respaldo.` : ""]
+      .filter(Boolean).join(" ");
+  }
+  if (name.includes("RESULT") || name.includes("ANALISIS") || name.includes("HALLAZ")) {
+    return [userText, rows ? `Los archivos de datos contienen ${rows} registros para el análisis.` : ""].filter(Boolean).join(" ");
+  }
+  if (name.includes("CONCLUS")) {
+    return userText ? `Con base en la información registrada, se concluye que ${userText.charAt(0).toLowerCase() + userText.slice(1)}.` : "";
+  }
+  if (name.includes("RECOMEND")) {
+    return userText ? "Se recomienda dar seguimiento a los resultados registrados y documentar las acciones de mejora que correspondan." : "";
+  }
+  if (name.includes("INTRO") || name.includes("ANTECED")) {
+    return userText
+      ? `El presente documento corresponde a ${project.documentName}, dentro del proceso ${project.processName}. La información registrada para su elaboración comprende: ${userText}.`
+      : "";
+  }
+  if (name.includes("METODO")) {
+    return userText ? `La elaboración se realizó a partir de la información registrada por el usuario y de las fuentes adjuntas. ${userText}.` : "";
+  }
+  return userText;
 }
 
 function localAnalysis(project, sourceBundle) {
-  const form = project.formData || {};
-  const notes = fieldText(project);
-  const sourceNames = (sourceBundle.extracted || []).map((item) => item.name).filter(Boolean);
-  const spreadsheetRows = (sourceBundle.dataSummary || []).reduce((total, item) => total + (item.sheets || []).reduce((sum, sheet) => sum + Number(sheet.rowCount || 0), 0), 0);
-  const findings = [];
-  if (form.resultados) findings.push(String(form.resultados).trim());
-  if (form.necesidades) findings.push(String(form.necesidades).trim());
-  if (form.priorizacion) findings.push(String(form.priorizacion).trim());
-  if (spreadsheetRows) findings.push(`Se analizaron ${spreadsheetRows} registros provenientes de archivos de datos.`);
-  if (sourceNames.length) findings.push(`Se consideraron ${sourceNames.length} archivos de soporte.`);
-
-  const missing = [];
-  if (!Object.values(form).some((value) => String(value || "").trim())) missing.push("Falta información básica del documento.");
-  if (!sourceNames.length && project.mode !== "upload") missing.push("No se adjuntaron fuentes de respaldo; el contenido se limitará a lo escrito en la app.");
-
-  const sections = (project.structure || []).map((title) => {
-    const lower = title.toLowerCase();
-    let content = "";
-    if (lower.includes("objetivo")) content = form.objetivo || form.tema || "";
-    else if (lower.includes("metodolog")) content = form.metodologia || form.contexto || "";
-    else if (lower.includes("resultado")) content = form.resultados || form.necesidades || form.contexto || "";
-    else if (lower.includes("cronograma")) content = form.cronograma || "";
-    else if (lower.includes("responsable")) content = form.responsables || form.capacitador || "";
-    else if (lower.includes("particip")) content = form.participantes || form.poblacion || "";
-    else if (lower.includes("conclus")) content = findings.length ? `Los principales hallazgos registrados fueron: ${findings.join(" ")}` : "";
-    else if (lower.includes("recomend")) content = form.observaciones || "";
-    else if (lower.includes("resumen ejecutivo")) content = findings.join(" ");
-    else content = form.contexto || notes;
-    return { title, content: String(content || "").trim() };
+  const generatedFields = {};
+  const missingData = [];
+  aiFields(project).forEach((field) => {
+    generatedFields[field.name] = localField(field, project, sourceBundle);
+    if (field.required && !generatedFields[field.name]) {
+      missingData.push(`Configura una IA o agrega información suficiente para completar ${field.label}.`);
+    }
   });
 
+  const findings = [];
+  const rows = rowCount(sourceBundle);
+  if (rows) findings.push(`Se identificaron ${rows} registros en los archivos de datos.`);
+  if ((sourceBundle.textSources || []).length) findings.push(`Se analizaron ${sourceBundle.textSources.length} fuentes documentales.`);
+
   return normalizeAnalysis({
-    provider: "Local",
-    executiveSummary: findings.join(" "),
+    generatedFields,
     keyFindings: findings,
-    missingData: missing,
-    sections,
-    tables: sourceBundle.tables,
-    charts: sourceBundle.charts,
-    sourceTrace: sourceNames.map((name) => ({ source: name, use: "Fuente adjunta" }))
+    missingData,
+    sourceTrace: (sourceBundle.extracted || []).map((item) => ({ source: item.name, use: item.kind || "Fuente" }))
   }, project, sourceBundle, "Local");
 }
 
 function promptFor(project, sourceBundle) {
-  const sourceText = (sourceBundle.textSources || []).map((source) => `FUENTE: ${source.name}\n${String(source.text || "").slice(0, 12000)}`).join("\n\n");
-  const dataText = JSON.stringify((sourceBundle.dataSummary || []).slice(0, 5)).slice(0, 25000);
-  const expected = JSON.stringify({
-    executiveSummary: "texto",
-    keyFindings: ["hallazgo"],
-    missingData: ["dato faltante"],
-    sections: (project.structure || []).map((title) => ({ title, content: "texto amplio y verificable" })),
-    tables: [{ title: "Tabla", headers: ["Columna"], rows: [["Dato"]] }],
-    charts: [{ title: "Gráfico", type: "bar", data: [{ label: "A", value: 1 }] }],
-    sourceTrace: [{ source: "archivo", use: "dato utilizado" }]
-  });
+  const requested = aiFields(project).map((field) => ({
+    name: field.name,
+    label: field.label,
+    required: field.required
+  }));
 
-  return `Eres un analista documental institucional. Redacta en español formal y claro.
+  const sources = (sourceBundle.textSources || [])
+    .map((source) => `FUENTE: ${source.name}\n${String(source.text || "").slice(0, 14000)}`)
+    .join("\n\n");
+
+  const data = JSON.stringify((sourceBundle.dataSummary || []).slice(0, 6)).slice(0, 30000);
+  const manualTables = JSON.stringify(tableFields(project)).slice(0, 16000);
+
+  const expected = {
+    generatedFields: Object.fromEntries(requested.map((field) => [field.name, "texto"])),
+    keyFindings: ["hallazgo verificable"],
+    missingData: ["dato que hace falta"],
+    sourceTrace: [{ source: "archivo", use: "información utilizada" }]
+  };
+
+  return `Eres un analista documental institucional. Tu tarea es completar SOLO los campos de IA solicitados por una plantilla Word.
 
 DOCUMENTO: ${project.documentName}
 UNIDAD: ${project.unitName}
 PROCESO: ${project.processName} (${project.processCode})
 CÓDIGO PATRÓN: ${project.codePattern}
-ESTRUCTURA OBLIGATORIA: ${(project.structure || []).join(" | ")}
 
-DATOS DEL USUARIO:
-${fieldText(project) || "Sin datos adicionales."}
+CAMPOS DE IA SOLICITADOS:
+${JSON.stringify(requested)}
 
-FUENTES:
-${sourceText || "Sin texto extraído."}
+DATOS INGRESADOS:
+${formText(project) || "Sin texto ingresado."}
 
-DATOS TABULARES:
-${dataText || "Sin datos tabulares."}
+TABLAS INGRESADAS:
+${manualTables || "Sin tablas manuales."}
 
-REGLAS:
-- No inventes normas, artículos, cifras, nombres, fechas ni resultados.
-- La base legal solo puede usar normativa visible en las fuentes o escrita por el usuario.
-- Si falta algo, colócalo en missingData, no lo inventes.
-- Usa tablas y gráficos solo cuando existan datos que los sustenten.
-- Conclusiones y recomendaciones deben derivarse de los resultados.
-- Respeta exactamente los títulos de la estructura obligatoria.
-- Redacta secciones amplias, útiles y sin relleno repetitivo.
+FUENTES DOCUMENTALES:
+${sources || "Sin fuentes documentales."}
+
+DATOS DE EXCEL/CSV:
+${data || "Sin archivos de datos."}
+
+REGLAS OBLIGATORIAS:
+- No inventes leyes, artículos, normas, cifras, nombres, fechas ni resultados.
+- Un campo relacionado con base legal o normativa solo puede usar normas visibles en las fuentes o escritas por el usuario.
+- Si la información no alcanza para un campo, déjalo vacío y explica la carencia en missingData.
+- Conclusiones deben derivarse de resultados o hallazgos disponibles.
+- Recomendaciones deben derivarse de hallazgos o conclusiones disponibles.
+- Resúmenes deben condensar la información existente, no agregar hechos.
+- Redacta de forma amplia cuando haya suficiente información, pero sin relleno repetitivo.
+- No alteres números provenientes de archivos de datos.
 - Devuelve exclusivamente JSON válido con esta forma:
-${expected}`;
+${JSON.stringify(expected)}`;
 }
 
 async function callOpenAiCompatible(provider, prompt) {
@@ -135,7 +195,7 @@ async function callOpenAiCompatible(provider, prompt) {
         { role: "system", content: "Responde únicamente con JSON válido." },
         { role: "user", content: prompt }
       ],
-      temperature: 0.15
+      temperature: 0.1
     })
   });
   if (!response.ok) throw new Error(`${provider.name}: HTTP ${response.status}`);
@@ -151,7 +211,12 @@ async function callAnthropic(provider, prompt) {
       "x-api-key": provider.apiKey,
       "anthropic-version": "2023-06-01"
     },
-    body: JSON.stringify({ model: provider.model, max_tokens: 7000, temperature: 0.15, messages: [{ role: "user", content: prompt }] })
+    body: JSON.stringify({
+      model: provider.model,
+      max_tokens: 8000,
+      temperature: 0.1,
+      messages: [{ role: "user", content: prompt }]
+    })
   });
   if (!response.ok) throw new Error(`${provider.name}: HTTP ${response.status}`);
   const data = await response.json();
@@ -164,7 +229,10 @@ async function callGemini(provider, prompt) {
   const response = await fetch(`${endpoint}${joiner}key=${encodeURIComponent(provider.apiKey)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.15, responseMimeType: "application/json" } })
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+    })
   });
   if (!response.ok) throw new Error(`${provider.name}: HTTP ${response.status}`);
   const data = await response.json();
@@ -180,37 +248,41 @@ async function callProvider(provider, prompt) {
 
 function scoreAnalysis(analysis, project) {
   if (!analysis) return 0;
+  const fields = aiFields(project);
   let score = 0;
-  const required = project.structure || [];
-  score += analysis.sections.filter((section) => String(section.content || "").trim().length >= 80).length * 6;
-  score += Math.min(analysis.keyFindings.length, 8) * 3;
-  score += Math.min(analysis.tables.length, 5) * 2;
-  score += Math.min(analysis.charts.length, 4) * 2;
-  score += Math.min(String(analysis.executiveSummary || "").length / 150, 6);
-  score -= Math.max(0, required.length - analysis.sections.length) * 5;
+  fields.forEach((field) => {
+    const value = String(analysis.generatedFields && analysis.generatedFields[field.name] || "");
+    if (value.trim()) score += field.required ? 12 : 7;
+    score += Math.min(value.length / 300, 4);
+  });
+  score += Math.min((analysis.keyFindings || []).length, 8) * 2;
+  score -= Math.min((analysis.missingData || []).length, 8);
   return score;
 }
 
 function mergeAnalyses(analyses, project, sourceBundle) {
   const ranked = analyses.slice().sort((a, b) => scoreAnalysis(b, project) - scoreAnalysis(a, project));
-  const best = ranked[0];
-  const merged = JSON.parse(JSON.stringify(best));
-  merged.provider = ranked.map((item) => item.provider).join(" + ");
+  const merged = normalizeAnalysis(ranked[0], project, sourceBundle, ranked.map((item) => item.provider).join(" + "));
+
+  aiFields(project).forEach((field) => {
+    const options = ranked
+      .map((analysis) => String(analysis.generatedFields && analysis.generatedFields[field.name] || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    merged.generatedFields[field.name] = options[0] || "";
+  });
+
   merged.keyFindings = Array.from(new Set(ranked.flatMap((item) => item.keyFindings || []))).slice(0, 12);
   merged.missingData = Array.from(new Set(ranked.flatMap((item) => item.missingData || []))).slice(0, 12);
-  merged.sections = (project.structure || []).map((title) => {
-    const options = ranked
-      .map((item) => (item.sections || []).find((section) => section.title === title))
-      .filter(Boolean)
-      .sort((a, b) => String(b.content || "").length - String(a.content || "").length);
-    return options[0] || { title, content: "" };
-  });
-  merged.tables = (sourceBundle.tables || []).length ? sourceBundle.tables.slice(0, 8) : best.tables;
-  merged.charts = (sourceBundle.charts || []).length ? sourceBundle.charts.slice(0, 6) : best.charts;
-  return normalizeAnalysis(merged, project, sourceBundle, merged.provider);
+  merged.sourceTrace = ranked[0].sourceTrace || [];
+  return merged;
 }
 
 async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
+  if (!aiFields(project).length) {
+    return normalizeAnalysis({ generatedFields: {}, keyFindings: [], missingData: [], sourceTrace: [] }, project, sourceBundle, "Sin IA requerida");
+  }
+
   const providers = runtimeProviders(userDataPath);
   if (!providers.length) return localAnalysis(project, sourceBundle);
   const prompt = promptFor(project, sourceBundle);
@@ -221,22 +293,21 @@ async function analyzeWithAi(userDataPath, project, sourceBundle, mode) {
         const parsed = safeJsonParse(await callProvider(provider, prompt));
         if (parsed) return normalizeAnalysis(parsed, project, sourceBundle, provider.name);
       } catch (_error) {
-        // Fallback automático al siguiente proveedor.
+        // Fallback al siguiente proveedor.
       }
     }
     return localAnalysis(project, sourceBundle);
   }
 
-  const selected = providers.slice(0, 4);
-  const settled = await Promise.allSettled(selected.map(async (provider) => {
+  const settled = await Promise.allSettled(providers.slice(0, 4).map(async (provider) => {
     const parsed = safeJsonParse(await callProvider(provider, prompt));
-    if (!parsed) throw new Error("Respuesta no estructurada");
+    if (!parsed) throw new Error("Respuesta no estructurada.");
     return normalizeAnalysis(parsed, project, sourceBundle, provider.name);
   }));
+
   const valid = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
   if (!valid.length) return localAnalysis(project, sourceBundle);
-  if (valid.length === 1) return valid[0];
-  return mergeAnalyses(valid, project, sourceBundle);
+  return valid.length === 1 ? valid[0] : mergeAnalyses(valid, project, sourceBundle);
 }
 
 module.exports = {
