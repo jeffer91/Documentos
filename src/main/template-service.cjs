@@ -59,8 +59,13 @@ function plainTextFromXml(xml) {
     .trim();
 }
 
-function plainText(filePath) {
-  return xmlParts(filePath).map((part) => plainTextFromXml(part.xml)).join("\n");
+function inspectTemplate(filePath) {
+  const parts = xmlParts(filePath);
+  const text = parts.map((part) => plainTextFromXml(part.xml)).join("\n");
+  const markers = parseMarkersFromText(text);
+  const validation = validateMarkers(markers);
+  validation.warnings.push(...findStandaloneBlockWarnings(parts, markers));
+  return { parts, text, markers, validation };
 }
 
 function normalizeSearch(value) {
@@ -80,8 +85,8 @@ function inferAssociation(fileName, text) {
   const haystack = normalizeSearch(`${fileName} ${text.slice(0, 12000)}`);
   const ranked = catalog.allDocuments().map(({ unit, process, document }) => {
     let score = 0;
-    const nameWords = normalizeSearch(document.name).split(" ").filter((word) => word.length >= 5);
-    nameWords.forEach((word) => { if (haystack.includes(word)) score += 2; });
+    normalizeSearch(document.name).split(" ").filter((word) => word.length >= 5)
+      .forEach((word) => { if (haystack.includes(word)) score += 2; });
     staticCodeParts(document.code).forEach((part) => {
       const token = normalizeSearch(part);
       if (token && haystack.includes(token)) score += token.length >= 4 ? 4 : 1;
@@ -107,19 +112,48 @@ function findStandaloneBlockWarnings(parts, markers) {
     const literal = `{{${marker.raw}}}`;
     const found = parts.some((part) => {
       const paragraphs = part.xml.match(/<w:p\b[\s\S]*?<\/w:p>/g) || [];
-      return paragraphs.some((paragraph) => {
-        const text = plainTextFromXml(paragraph).trim();
-        return text === literal;
-      });
+      return paragraphs.some((paragraph) => plainTextFromXml(paragraph).trim() === literal);
     });
-    if (!found) warnings.push(`${literal}: pon este marcador solo en su propio párrafo para insertar tablas o imágenes.`);
+    if (!found) warnings.push(`${literal}: colócalo solo en su propio párrafo para insertar tablas, gráficos o imágenes.`);
   });
   return warnings;
 }
 
 function versionFor(items, documentId) {
-  const versions = items.filter((item) => item.documentId === documentId).map((item) => Number(item.version || 0)).filter(Number.isFinite);
+  if (!documentId) return 1;
+  const versions = items
+    .filter((item) => item.documentId === documentId)
+    .map((item) => Number(item.version || 0))
+    .filter(Number.isFinite);
   return versions.length ? Math.max(...versions) + 1 : 1;
+}
+
+function enrich(item) {
+  if (!item || !item.localPath || !fs.existsSync(item.localPath)) return item;
+  if (Array.isArray(item.markers) && item.validation) return item;
+
+  const inspected = inspectTemplate(item.localPath);
+  return Object.assign({}, item, {
+    markers: inspected.markers,
+    fields: inspected.markers.filter((marker) => marker.valid && marker.isUserInput),
+    aiFields: inspected.markers.filter((marker) => marker.valid && marker.isAi),
+    systemFields: inspected.markers.filter((marker) => marker.valid && marker.isSystem),
+    validation: inspected.validation,
+    version: Number(item.version || 1),
+    active: item.active !== false
+  });
+}
+
+function migrateIndex(userDataPath) {
+  const raw = readIndex(userDataPath);
+  let changed = false;
+  const migrated = raw.map((item) => {
+    const next = enrich(item);
+    if (next !== item) changed = true;
+    return next;
+  });
+  if (changed) saveIndex(userDataPath, migrated);
+  return migrated;
 }
 
 function importTemplate(userDataPath, sourcePath, association) {
@@ -128,16 +162,14 @@ function importTemplate(userDataPath, sourcePath, association) {
   }
 
   const stored = copyUnique(sourcePath, templatesDir(userDataPath));
-  const parts = xmlParts(stored);
-  const text = parts.map((part) => plainTextFromXml(part.xml)).join("\n");
-  const markers = parseMarkersFromText(text);
-  const validation = validateMarkers(markers);
-  validation.warnings.push(...findStandaloneBlockWarnings(parts, markers));
+  const inspected = inspectTemplate(stored);
+  const inferred = association && association.documentId
+    ? Object.assign({ confidence: 100 }, association)
+    : inferAssociation(path.basename(stored), inspected.text);
 
-  const inferred = association && association.documentId ? association : inferAssociation(path.basename(stored), text);
-  const items = readIndex(userDataPath);
+  const items = migrateIndex(userDataPath);
   const documentId = inferred && inferred.documentId ? inferred.documentId : "";
-  const version = versionFor(items, documentId || `unassigned:${path.basename(stored)}`);
+  const version = versionFor(items, documentId);
 
   if (documentId) {
     items.forEach((item) => {
@@ -155,12 +187,12 @@ function importTemplate(userDataPath, sourcePath, association) {
     unitId: inferred && inferred.unitId ? inferred.unitId : "",
     processId: inferred && inferred.processId ? inferred.processId : "",
     documentId,
-    confidence: inferred && inferred.confidence ? inferred.confidence : (association && association.documentId ? 100 : 0),
-    markers,
-    fields: markers.filter((marker) => marker.valid && marker.isUserInput),
-    aiFields: markers.filter((marker) => marker.valid && marker.isAi),
-    systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
-    validation
+    confidence: inferred && inferred.confidence ? inferred.confidence : 0,
+    markers: inspected.markers,
+    fields: inspected.markers.filter((marker) => marker.valid && marker.isUserInput),
+    aiFields: inspected.markers.filter((marker) => marker.valid && marker.isAi),
+    systemFields: inspected.markers.filter((marker) => marker.valid && marker.isSystem),
+    validation: inspected.validation
   };
 
   items.unshift(item);
@@ -169,7 +201,8 @@ function importTemplate(userDataPath, sourcePath, association) {
 }
 
 function listTemplates(userDataPath) {
-  return readIndex(userDataPath).filter((item) => item.localPath && fs.existsSync(item.localPath));
+  return migrateIndex(userDataPath)
+    .filter((item) => item.localPath && fs.existsSync(item.localPath));
 }
 
 function activeTemplateForDocument(userDataPath, documentId) {
@@ -177,7 +210,7 @@ function activeTemplateForDocument(userDataPath, documentId) {
 }
 
 function updateTemplate(userDataPath, templateId, patch) {
-  const items = readIndex(userDataPath);
+  const items = migrateIndex(userDataPath);
   const item = items.find((entry) => entry.id === templateId);
   if (!item) throw new Error("No se encontró la plantilla.");
 
@@ -185,6 +218,7 @@ function updateTemplate(userDataPath, templateId, patch) {
     items.forEach((entry) => {
       if (entry.documentId === patch.documentId) entry.active = false;
     });
+    item.version = versionFor(items, patch.documentId);
   }
 
   ["unitId", "processId", "documentId", "active"].forEach((key) => {
@@ -206,7 +240,6 @@ module.exports = {
   listTemplates,
   activeTemplateForDocument,
   updateTemplate,
-  plainText,
   plainTextFromXml,
   inferAssociation
 };

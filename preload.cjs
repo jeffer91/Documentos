@@ -1,15 +1,16 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "2.0.0",
+  version: "2.1.0",
   createProject: (meta) => ipcRenderer.invoke("projects:create", meta),
   listProjects: () => ipcRenderer.invoke("projects:list"),
   getProject: (id) => ipcRenderer.invoke("projects:get", id),
   saveProject: (project) => ipcRenderer.invoke("projects:save", project),
-  addFiles: (projectId, kind) => ipcRenderer.invoke("projects:add-files", projectId, kind),
+  addFiles: (projectId, kind, markerName, multiple) => ipcRenderer.invoke("projects:add-files", projectId, kind, markerName, multiple),
   removeFile: (projectId, attachmentId) => ipcRenderer.invoke("projects:remove-file", projectId, attachmentId),
-  importTemplate: () => ipcRenderer.invoke("templates:import"),
+  importTemplate: (association) => ipcRenderer.invoke("templates:import", association || null),
   listTemplates: () => ipcRenderer.invoke("templates:list"),
+  updateTemplate: (templateId, patch) => ipcRenderer.invoke("templates:update", templateId, patch),
   analyze: (projectId, mode) => ipcRenderer.invoke("analysis:run", projectId, mode),
   generate: (projectId) => ipcRenderer.invoke("documents:generate", projectId),
   archiveUpload: (projectId) => ipcRenderer.invoke("documents:archive-upload", projectId),
