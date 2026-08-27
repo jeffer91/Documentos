@@ -234,23 +234,28 @@ function findFormValue(formData, requested) {
 }
 
 function dataReference(sourceBundle, markerName, rest) {
-  const datasets = (sourceBundle && sourceBundle.calculationData) || [];
-  const dataset = datasets.find((item) => normalizeKey(item.markerName) === normalizeKey(markerName));
-  if (!dataset) return undefined;
+  const datasets = ((sourceBundle && sourceBundle.calculationData) || [])
+    .filter((item) => normalizeKey(item.markerName) === normalizeKey(markerName));
+  if (!datasets.length) return undefined;
 
   if (rest.length === 1) {
     const column = rest[0];
-    return (dataset.sheets || []).flatMap((sheet) =>
-      (sheet.rows || []).map((row) => findObjectValue(row, column)).filter((value) => value !== undefined)
+    return datasets.flatMap((dataset) =>
+      (dataset.sheets || []).flatMap((sheet) =>
+        (sheet.rows || []).map((row) => findObjectValue(row, column)).filter((value) => value !== undefined)
+      )
     );
   }
 
   if (rest.length >= 2) {
     const sheetName = rest[0];
     const column = rest.slice(1).join(".");
-    const sheet = (dataset.sheets || []).find((item) => normalizeKey(item.name) === normalizeKey(sheetName));
-    if (!sheet) return undefined;
-    return (sheet.rows || []).map((row) => findObjectValue(row, column)).filter((value) => value !== undefined);
+    const values = datasets.flatMap((dataset) => {
+      const sheet = (dataset.sheets || []).find((item) => normalizeKey(item.name) === normalizeKey(sheetName));
+      if (!sheet) return [];
+      return (sheet.rows || []).map((row) => findObjectValue(row, column)).filter((value) => value !== undefined);
+    });
+    return values.length ? values : undefined;
   }
 
   return undefined;
@@ -434,9 +439,26 @@ function applyCalculations(project, sourceBundle) {
   };
 }
 
+function validateAstFunctions(ast) {
+  const allowed = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT", "ROUND", "PERCENT", "ABS", "IF"]);
+  if (!ast || typeof ast !== "object") return;
+  if (ast.type === "call") {
+    if (!allowed.has(ast.name)) throw new Error(`Función no permitida: ${ast.name}`);
+    ast.args.forEach(validateAstFunctions);
+    return;
+  }
+  if (ast.type === "binary") {
+    validateAstFunctions(ast.left);
+    validateAstFunctions(ast.right);
+    return;
+  }
+  if (ast.type === "unary") validateAstFunctions(ast.value);
+}
+
 function validateFormulaSyntax(formula) {
   try {
-    parseFormula(formula);
+    const ast = parseFormula(formula);
+    validateAstFunctions(ast);
     return { ok: true, error: "" };
   } catch (error) {
     return { ok: false, error: error.message || String(error) };

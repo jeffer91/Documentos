@@ -55,7 +55,7 @@ function extractSpreadsheet(filePath) {
       rowCount: rows.length,
       headers: summary.headers,
       sampleRows: summary.rows,
-      calculationRows: rows.slice(0, 10000),
+      calculationRows: rows,
       numeric: summary.numeric
     };
   });

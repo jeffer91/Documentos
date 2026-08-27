@@ -134,3 +134,14 @@ La app bloquea la generación cuando detecta, entre otros:
 - valor no numérico utilizado en una operación matemática.
 
 Los errores se registran también en **Sistema**.
+
+
+## Porcentajes en Word
+
+`PERCENT()` devuelve un número (por ejemplo, `86.11`) para que pueda reutilizarse en otros cálculos.
+
+Para mostrar el símbolo en el documento, colócalo fuera del marcador:
+
+```text
+{{CAL:APROBACION|Aprobación|ROUND(PERCENT(APROBADOS,TOTAL),2)}} %
+```
