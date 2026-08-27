@@ -14,7 +14,7 @@
     "test:smoke": "electron scripts/smoke-electron.cjs"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "12.9.0",
     "docxtemplater": "^3.62.2",
     "pdf-parse": "^1.1.1",
     "pizzip": "^3.2.0",
@@ -23,5 +23,8 @@
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
     "electron": "^33.0.0"
+  },
+  "engines": {
+    "node": "20.x || 22.x || 24.x"
   }
 }
