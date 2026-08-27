@@ -150,6 +150,20 @@ function formDataForProject(db, projectId) {
   return formData;
 }
 
+function invalidateCalculatedFields(db, projectId) {
+  const row = db.prepare("SELECT template_id FROM projects WHERE id = ?").get(projectId);
+  if (!row || !row.template_id) return;
+
+  const calculated = db.prepare(
+    "SELECT name FROM template_fields WHERE template_id = ? AND type = 'CALC'"
+  ).all(row.template_id);
+
+  const remove = db.prepare(
+    "DELETE FROM project_fields WHERE project_id = ? AND field_name = ?"
+  );
+  calculated.forEach((field) => remove.run(projectId, field.name));
+}
+
 function attachmentsForProject(db, projectId) {
   return db.prepare(
     "SELECT * FROM files WHERE project_id = ? ORDER BY added_at"

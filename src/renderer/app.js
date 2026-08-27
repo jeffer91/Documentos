@@ -850,11 +850,19 @@
     return data;
   }
 
+  function clearCalculatedValues() {
+    const fields = state.project && state.project.template && state.project.template.fields || [];
+    fields.filter((field) => field.type === "CALC").forEach((field) => {
+      delete state.project.formData[field.name];
+    });
+  }
+
   async function persistEditor() {
     if (!state.project) return;
     if (state.project.status === "generated") state.project.status = "draft";
     state.project.analysis = null;
     state.project.formData = collectFormData();
+    clearCalculatedValues();
     const mode = document.querySelector('input[name="aiMode"]:checked');
     if (mode) state.project.aiMode = mode.value;
     const response = await api.saveProject(state.project);
@@ -1003,6 +1011,7 @@
     state.project.formData[markerName] = rows;
     state.project.status = "draft";
     state.project.analysis = null;
+    clearCalculatedValues();
     api.saveProject(state.project).then((response) => {
       if (response && response.ok) state.project = response.project;
       renderEditor();
@@ -1015,6 +1024,7 @@
     state.project.formData[markerName] = rows;
     state.project.status = "draft";
     state.project.analysis = null;
+    clearCalculatedValues();
     api.saveProject(state.project).then((response) => {
       if (response && response.ok) state.project = response.project;
       renderEditor();
