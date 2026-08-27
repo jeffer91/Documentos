@@ -7,6 +7,7 @@ const database = require("../src/main/database-service.cjs");
 const workspace = require("../src/main/workspace-service.cjs");
 const backupService = require("../src/main/backup-service.cjs");
 const errorService = require("../src/main/error-service.cjs");
+const { applyCalculations } = require("../src/main/calculation-service.cjs");
 const catalog = require("../src/renderer/catalog.js");
 
 async function run() {
@@ -121,6 +122,19 @@ async function run() {
       "Fuente de prueba"
     );
 
+    const calculation = applyCalculations({
+      formData: { APROBADOS: 90, REPROBADOS: 10 },
+      template: {
+        markers: [
+          { valid: true, type: "CALC", name: "TOTAL", label: "Total", formula: "SUM(APROBADOS,REPROBADOS)" },
+          { valid: true, type: "CALC", name: "APROBACION", label: "Aprobación", formula: "PERCENT(APROBADOS,TOTAL)" }
+        ]
+      }
+    }, { calculationData: [] });
+    assert.strictEqual(calculation.ok, true, "Cálculo determinístico");
+    assert.strictEqual(calculation.project.formData.TOTAL, 100);
+    assert.strictEqual(calculation.project.formData.APROBACION, 90);
+
     errorService.record(temp, {
       module: "smoke",
       action: "test",
@@ -136,7 +150,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, integridad, objetos históricos, versiones informativas, errores y respaldo."
+      "SMOKE OK: Electron, SQLite, catálogo, cálculos, integridad, objetos históricos, versiones informativas, errores y respaldo."
     );
   } finally {
     database.closeAll();

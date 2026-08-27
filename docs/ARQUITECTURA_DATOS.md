@@ -114,3 +114,19 @@ Esto permite reconstruir versiones anteriores sin duplicar PDFs o Word generados
 ## Salida actual segura
 
 La generación usa una carpeta de staging. Solo después de producir correctamente Word/PDF se sustituye `generated/current/`. Un error de generación no elimina el último resultado válido.
+
+
+## Motor de campos calculados
+
+Los marcadores `CALC` se resuelven de forma determinística antes de ejecutar IA.
+
+El motor puede usar:
+
+- campos escalares;
+- otros campos calculados;
+- columnas de tablas manuales;
+- columnas de Excel/CSV asociadas a un marcador `DATOS`.
+
+No se utiliza `eval()`. El parser admite un conjunto controlado de funciones y operadores y detecta referencias inválidas, división para cero y dependencias circulares.
+
+Los valores calculados se guardan en `project_fields`, por lo que también forman parte de los snapshots de `document_versions`.

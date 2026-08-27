@@ -322,3 +322,37 @@ button.doc-row:hover { border-color: var(--brand-line); background: #fcfffe; }
   background: #eff6ff;
 }
 .error-item.info .error-item-head b { color: #1d4ed8; }
+
+
+.derived-section {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+.derived-field .derived-value {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #eef2f7;
+  font-weight: 700;
+  color: #334155;
+}
+.derived-field small,
+.field small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.mini-table th small {
+  display: block;
+  margin-top: 2px;
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--muted);
+}

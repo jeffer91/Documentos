@@ -13,7 +13,7 @@ function safeJsonParse(value) {
 
 function scalarFields(project) {
   const fields = ((project.template && project.template.fields) || [])
-    .filter((field) => ["CAMPO", "TEXTO", "FECHA", "NUMERO"].includes(field.type));
+    .filter((field) => ["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "CALC"].includes(field.type));
   return fields.map((field) => ({
     name: field.name,
     label: field.label,

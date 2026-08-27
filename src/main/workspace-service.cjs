@@ -2,9 +2,10 @@ const fs = require("fs");
 const path = require("path");
 const { workspaceRoot, openDatabase, queueSync } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
+const { enrichMarker } = require("./template-markers.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
-const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -96,22 +97,17 @@ function parseJson(value, fallback) {
 }
 
 function markerFromRow(row) {
-  const type = row.type;
-  return {
+  return enrichMarker({
     raw: row.raw,
     token: row.raw,
     valid: Boolean(row.valid),
-    type,
+    type: row.type,
     name: row.name,
     label: row.label || row.name,
     required: Boolean(row.required),
     config: row.config || "",
-    columns: parseJson(row.columns_json, []),
-    isBlock: BLOCK_TYPES.has(type),
-    isUserInput: USER_TYPES.has(type),
-    isAi: type === "IA",
-    isSystem: type === "SISTEMA"
-  };
+    columns: parseJson(row.columns_json, [])
+  });
 }
 
 function templateById(db, templateId) {
@@ -136,7 +132,7 @@ function templateById(db, templateId) {
     importedAt: row.imported_at,
     sha256: row.sha256 || "",
     markers,
-    fields: markers.filter((marker) => marker.valid && marker.isUserInput),
+    fields: markers.filter((marker) => marker.valid && (marker.isUserInput || marker.type === "CALC")),
     aiFields: markers.filter((marker) => marker.valid && marker.isAi),
     systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
     validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true })

@@ -50,7 +50,14 @@ function extractSpreadsheet(filePath) {
   return workbook.SheetNames.slice(0, 10).map((name) => {
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { defval: "" });
     const summary = summarizeRows(rows);
-    return { name, rowCount: rows.length, headers: summary.headers, sampleRows: summary.rows, numeric: summary.numeric };
+    return {
+      name,
+      rowCount: rows.length,
+      headers: summary.headers,
+      sampleRows: summary.rows,
+      calculationRows: rows.slice(0, 10000),
+      numeric: summary.numeric
+    };
   });
 }
 
@@ -150,7 +157,22 @@ async function analyzeAttachments(attachments) {
   const dataSummary = extracted.filter((item) => item.type === "spreadsheet").map((item) => ({
     name: item.name,
     markerName: item.markerName,
-    sheets: item.sheets
+    sheets: (item.sheets || []).map((sheet) => ({
+      name: sheet.name,
+      rowCount: sheet.rowCount,
+      headers: sheet.headers,
+      sampleRows: sheet.sampleRows,
+      numeric: sheet.numeric
+    }))
+  }));
+
+  const calculationData = extracted.filter((item) => item.type === "spreadsheet").map((item) => ({
+    name: item.name,
+    markerName: item.markerName,
+    sheets: (item.sheets || []).map((sheet) => ({
+      name: sheet.name,
+      rows: sheet.calculationRows || []
+    }))
   }));
 
   const extractionWarnings = extracted
@@ -163,6 +185,7 @@ async function analyzeAttachments(attachments) {
     extracted,
     textSources,
     dataSummary,
+    calculationData,
     tables: candidates.tables,
     charts: candidates.charts,
     extractionWarnings

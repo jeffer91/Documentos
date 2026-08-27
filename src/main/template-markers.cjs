@@ -1,9 +1,30 @@
+const TYPE_ALIASES = Object.freeze({
+  CAM: "CAMPO",
+  TXT: "TEXTO",
+  FEC: "FECHA",
+  NUM: "NUMERO",
+  LST: "LISTA",
+  CAL: "CALC",
+  BUS: "BUSCAR",
+  SYS: "SISTEMA",
+  AI: "IA",
+  DAT: "DATOS",
+  TAB: "TABLA",
+  IMG: "IMAGEN",
+  IMGS: "IMAGENES",
+  GRA: "GRAFICO",
+  GRAS: "GRAFICOS"
+});
+
 const ALLOWED_TYPES = new Set([
   "SISTEMA",
   "CAMPO",
   "TEXTO",
   "FECHA",
   "NUMERO",
+  "LISTA",
+  "BUSCAR",
+  "CALC",
   "IA",
   "DATOS",
   "TABLA",
@@ -14,7 +35,13 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
-const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const DERIVED_TYPES = new Set(["CALC", "GRAFICO", "GRAFICOS"]);
+
+function canonicalType(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  return TYPE_ALIASES[raw] || raw;
+}
 
 function normalizeName(value) {
   return String(value || "")
@@ -30,6 +57,57 @@ function humanize(value) {
   return text ? text.replace(/(^|\s)\S/g, (letter) => letter.toUpperCase()) : "Campo";
 }
 
+function parseListOptions(config) {
+  return String(config || "")
+    .split(/[,;]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseTableColumns(config) {
+  return String(config || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const colon = item.lastIndexOf(":");
+      let label = item;
+      let type = "CAMPO";
+
+      if (colon > 0) {
+        const possible = canonicalType(item.slice(colon + 1));
+        if (["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR"].includes(possible)) {
+          label = item.slice(0, colon).trim();
+          type = possible;
+        }
+      }
+
+      return {
+        label: label || "Dato",
+        name: normalizeName(label || "Dato"),
+        type
+      };
+    });
+}
+
+function enrichMarker(input) {
+  const marker = Object.assign({}, input || {});
+  marker.type = canonicalType(marker.type);
+  marker.columns = marker.type === "TABLA"
+    ? parseTableColumns(marker.config).map((column) => column.label)
+    : Array.isArray(marker.columns) ? marker.columns : [];
+  marker.columnDefs = marker.type === "TABLA" ? parseTableColumns(marker.config) : [];
+  marker.options = marker.type === "LISTA" ? parseListOptions(marker.config) : [];
+  marker.formula = marker.type === "CALC" ? String(marker.config || "").trim() : "";
+  marker.lookupSource = marker.type === "BUSCAR" ? String(marker.config || "").trim() : "";
+  marker.isBlock = BLOCK_TYPES.has(marker.type);
+  marker.isUserInput = USER_TYPES.has(marker.type);
+  marker.isDerived = DERIVED_TYPES.has(marker.type);
+  marker.isAi = marker.type === "IA";
+  marker.isSystem = marker.type === "SISTEMA";
+  return marker;
+}
+
 function parseMarkerInner(inner) {
   const raw = String(inner || "").trim();
   if (!raw) return null;
@@ -40,7 +118,7 @@ function parseMarkerInner(inner) {
   const config = parts.join("|");
   const colon = head.indexOf(":");
 
-  let type = "CAMPO";
+  let rawType = "CAMPO";
   let required = false;
   let name = head;
 
@@ -51,17 +129,20 @@ function parseMarkerInner(inner) {
       required = true;
       typePart = typePart.slice(0, -1);
     }
-    type = typePart;
+    rawType = typePart;
   } else if (head.endsWith("!")) {
     required = true;
     name = head.slice(0, -1);
   }
 
+  const type = canonicalType(rawType);
   const normalized = normalizeName(name);
   const base = {
     raw,
     token: raw,
+    rawType,
     type,
+    aliasUsed: rawType !== type ? rawType : "",
     name: normalized,
     label: explicitLabel || humanize(normalized || name),
     required,
@@ -69,24 +150,13 @@ function parseMarkerInner(inner) {
   };
 
   if (!ALLOWED_TYPES.has(type)) {
-    return Object.assign(base, { valid: false, error: `Tipo desconocido: ${type}` });
+    return enrichMarker(Object.assign(base, { valid: false, error: `Tipo desconocido: ${rawType}` }));
   }
   if (!normalized) {
-    return Object.assign(base, { valid: false, error: "El marcador no tiene nombre." });
+    return enrichMarker(Object.assign(base, { valid: false, error: "El marcador no tiene nombre." }));
   }
 
-  const columns = type === "TABLA" && config
-    ? config.split(",").map((item) => item.trim()).filter(Boolean)
-    : [];
-
-  return Object.assign(base, {
-    valid: true,
-    columns,
-    isBlock: BLOCK_TYPES.has(type),
-    isUserInput: USER_TYPES.has(type),
-    isAi: type === "IA",
-    isSystem: type === "SISTEMA"
-  });
+  return enrichMarker(Object.assign(base, { valid: true }));
 }
 
 function parseMarkersFromText(text) {
@@ -112,8 +182,21 @@ function validateMarkers(markers) {
 
   list.forEach((marker) => {
     if (!marker.valid) errors.push(marker.error || `Marcador inválido: ${marker.raw}`);
-    if (marker.valid && marker.type === "TABLA" && !marker.columns.length) {
-      warnings.push(`{{${marker.raw}}}: agrega las columnas después de la etiqueta. Ejemplo: {{TABLA:CRONOGRAMA|Cronograma|Actividad,Responsable,Fecha}}`);
+
+    if (marker.valid && marker.type === "TABLA" && !marker.columnDefs.length) {
+      warnings.push(`{{${marker.raw}}}: agrega columnas. Ejemplo: {{TABLA:CRONOGRAMA|Cronograma|Actividad:TEXTO,Responsable:CAMPO,Fecha:FECHA}}`);
+    }
+
+    if (marker.valid && marker.type === "LISTA" && !marker.options.length) {
+      warnings.push(`{{${marker.raw}}}: LISTA no tiene opciones. Ejemplo: {{LISTA:MODALIDAD|Modalidad|Presencial,En línea,Híbrida}}`);
+    }
+
+    if (marker.valid && marker.type === "CALC" && !marker.formula) {
+      errors.push(`{{${marker.raw}}}: CALC necesita una fórmula.`);
+    }
+
+    if (marker.valid && marker.type === "BUSCAR" && !marker.lookupSource) {
+      warnings.push(`{{${marker.raw}}}: BUSCAR no indica una fuente. Ejemplo: {{BUSCAR:DOCENTE|Docente|DOCENTES}}`);
     }
   });
 
@@ -124,6 +207,7 @@ function validateMarkers(markers) {
     raws.push(marker.raw);
     byMeaning.set(key, raws);
   });
+
   byMeaning.forEach((raws, key) => {
     if (new Set(raws).size > 1) warnings.push(`${key} tiene variantes de marcador. Conviene usar una sola forma.`);
   });
@@ -133,11 +217,17 @@ function validateMarkers(markers) {
 }
 
 module.exports = {
+  TYPE_ALIASES,
   ALLOWED_TYPES,
   BLOCK_TYPES,
   USER_TYPES,
+  DERIVED_TYPES,
+  canonicalType,
   normalizeName,
   humanize,
+  parseListOptions,
+  parseTableColumns,
+  enrichMarker,
   parseMarkerInner,
   parseMarkersFromText,
   validateMarkers

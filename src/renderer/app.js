@@ -435,10 +435,40 @@
       </div>`;
     }
 
+    if (marker.type === "LISTA") {
+      const options = marker.options || [];
+      return `<div class="field">
+        <label>${escapeHtml(marker.label)}${required}</label>
+        <select data-field="${escapeHtml(marker.name)}">
+          <option value="">Selecciona</option>
+          ${options.map((option) => `<option value="${escapeHtml(option)}" ${String(value) === String(option) ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+        </select>
+      </div>`;
+    }
+
+    if (marker.type === "BUSCAR") {
+      return `<div class="field">
+        <label>${escapeHtml(marker.label)}${required}</label>
+        <input data-field="${escapeHtml(marker.name)}" type="text" value="${escapeHtml(value)}" placeholder="Buscar o escribir" />
+        <small>Fuente: ${escapeHtml(marker.lookupSource || "pendiente")}</small>
+      </div>`;
+    }
+
     const type = marker.type === "FECHA" ? "date" : marker.type === "NUMERO" ? "number" : "text";
     return `<div class="field">
       <label>${escapeHtml(marker.label)}${required}</label>
       <input data-field="${escapeHtml(marker.name)}" type="${type}" value="${escapeHtml(value)}" />
+    </div>`;
+  }
+
+  function derivedField(marker) {
+    const value = state.project.formData && state.project.formData[marker.name] != null
+      ? state.project.formData[marker.name]
+      : "";
+    return `<div class="field derived-field">
+      <label>${escapeHtml(marker.label)}${marker.required ? " *" : ""}</label>
+      <div class="derived-value">${value === "" ? "Pendiente de calcular" : escapeHtml(value)}</div>
+      <small>${escapeHtml(marker.formula || marker.config || "")}</small>
     </div>`;
   }
 
@@ -456,8 +486,22 @@
     </div>`;
   }
 
+  function tableInput(marker, column, row, rowIndex) {
+    const value = row && row[column.label] != null ? row[column.label] : "";
+    const type = column.type === "FECHA" ? "date" : column.type === "NUMERO" ? "number" : "text";
+    return `<input
+      data-table-marker="${escapeHtml(marker.name)}"
+      data-row="${rowIndex}"
+      data-column="${escapeHtml(column.label)}"
+      type="${type}"
+      value="${escapeHtml(value)}"
+    />`;
+  }
+
   function tableField(marker) {
-    const columns = marker.columns && marker.columns.length ? marker.columns : ["Dato"];
+    const defs = marker.columnDefs && marker.columnDefs.length
+      ? marker.columnDefs
+      : (marker.columns && marker.columns.length ? marker.columns : ["Dato"]).map((label) => ({ label, type: "CAMPO" }));
     const rows = Array.isArray(state.project.formData && state.project.formData[marker.name])
       ? state.project.formData[marker.name]
       : [];
@@ -469,14 +513,14 @@
       </div>
       <div class="table-wrap">
         <table class="mini-table">
-          <thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}<th></th></tr></thead>
+          <thead><tr>${defs.map((column) => `<th>${escapeHtml(column.label)}<small>${escapeHtml(column.type)}</small></th>`).join("")}<th></th></tr></thead>
           <tbody>
             ${rows.length ? rows.map((row, rowIndex) => `
               <tr>
-                ${columns.map((column) => `<td><input data-table-marker="${escapeHtml(marker.name)}" data-row="${rowIndex}" data-column="${escapeHtml(column)}" value="${escapeHtml(row && row[column] != null ? row[column] : "")}" /></td>`).join("")}
+                ${defs.map((column) => `<td>${tableInput(marker, column, row, rowIndex)}</td>`).join("")}
                 <td><button class="table-remove" type="button" data-action="remove-table-row" data-marker="${escapeHtml(marker.name)}" data-row="${rowIndex}">×</button></td>
               </tr>
-            `).join("") : `<tr><td colspan="${columns.length + 1}" class="table-empty">Sin filas</td></tr>`}
+            `).join("") : `<tr><td colspan="${defs.length + 1}" class="table-empty">Sin filas</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -489,12 +533,22 @@
     const fields = template.fields || [];
     if (!fields.length) return '<div class="empty"><b>Sin datos manuales</b>Esta plantilla se completa automáticamente.</div>';
 
+    const calculated = fields.filter((marker) => marker.type === "CALC");
     return `<div class="dynamic-fields">
       <div class="form-grid">
-        ${fields.filter((marker) => ["CAMPO", "TEXTO", "FECHA", "NUMERO"].includes(marker.type)).map(scalarField).join("")}
+        ${fields.filter((marker) => ["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR"].includes(marker.type)).map(scalarField).join("")}
       </div>
       ${fields.filter((marker) => ["DATOS", "IMAGEN", "IMAGENES"].includes(marker.type)).map(uploadField).join("")}
       ${fields.filter((marker) => marker.type === "TABLA").map(tableField).join("")}
+      ${calculated.length ? `
+        <div class="derived-section">
+          <div class="field-card-head">
+            <div><b>Campos calculados</b><span>Se obtienen de otros campos o datos.</span></div>
+            <button class="ghost small-inline" type="button" data-action="recalculate">Recalcular</button>
+          </div>
+          <div class="form-grid">${calculated.map(derivedField).join("")}</div>
+        </div>
+      ` : ""}
     </div>`;
   }
 
@@ -799,6 +853,7 @@
   async function persistEditor() {
     if (!state.project) return;
     if (state.project.status === "generated") state.project.status = "draft";
+    state.project.analysis = null;
     state.project.formData = collectFormData();
     const mode = document.querySelector('input[name="aiMode"]:checked');
     if (mode) state.project.aiMode = mode.value;
@@ -876,6 +931,23 @@
       state.project = response.project;
       renderEditor();
     }
+  }
+
+  async function recalculate() {
+    await persistEditor();
+    setBusy(true);
+    const response = await api.calculate(state.project.id);
+    setBusy(false);
+
+    if (!response || !response.ok) {
+      await refreshErrorCount();
+      renderEditor();
+      return showToast(response && response.error ? response.error : "No se pudieron calcular los campos.");
+    }
+
+    state.project = response.project;
+    renderEditor();
+    showToast("Campos calculados.");
   }
 
   async function generatePdf() {
@@ -1027,6 +1099,7 @@
     if (action === "remove-file") return removeFile(button.dataset.id);
     if (action === "add-table-row") return addTableRow(button.dataset.marker);
     if (action === "remove-table-row") return removeTableRow(button.dataset.marker, button.dataset.row);
+    if (action === "recalculate") return recalculate();
     if (action === "generate") return generatePdf();
     if (action === "archive-upload") return archiveUpload();
     if (action === "save-ai") return saveAi();

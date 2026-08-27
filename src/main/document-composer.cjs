@@ -67,7 +67,7 @@ function systemValues(project, signers) {
 function scalarValue(marker, project, analysis, signers) {
   if (marker.type === "SISTEMA") return systemValues(project, signers)[marker.name] || "";
   if (marker.type === "IA") return text(analysis && analysis.generatedFields && analysis.generatedFields[marker.name]);
-  if (["CAMPO", "TEXTO", "FECHA", "NUMERO"].includes(marker.type)) {
+  if (["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "CALC"].includes(marker.type)) {
     const value = project.formData && project.formData[marker.name];
     return value == null ? "" : String(value);
   }

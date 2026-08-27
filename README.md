@@ -233,3 +233,22 @@ npm start
 ```
 
 `npm start` continúa siendo el comando normal para abrir la app en Electron.
+
+
+## Campos calculados y alias
+
+La app distingue el **tipo** del campo y su **origen**. Además de campos manuales, soporta `LISTA`, `BUSCAR` y `CALC`.
+
+Ejemplo:
+
+```text
+{{NUM:APROBADOS|Aprobados}}
+{{NUM:REPROBADOS|Reprobados}}
+{{CAL:TOTAL|Total|SUM(APROBADOS,REPROBADOS)}}
+{{CAL:APROBACION|% aprobación|PERCENT(APROBADOS,TOTAL)}}
+{{AI:ANALISIS|Análisis}}
+```
+
+Los cálculos se ejecutan antes de la IA. La IA interpreta resultados, pero no sustituye el motor matemático.
+
+La referencia completa de tipos y alias está en `docs/ALIAS_CAMPOS.md`.

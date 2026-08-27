@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "2.4.0",
+  version: "2.6.0",
   getCatalog: () => ipcRenderer.invoke("catalog:get"),
   createProject: (meta) => ipcRenderer.invoke("projects:create", meta),
   listProjects: () => ipcRenderer.invoke("projects:list"),
@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("documentosApp", {
   listTemplates: () => ipcRenderer.invoke("templates:list"),
   updateTemplate: (templateId, patch) => ipcRenderer.invoke("templates:update", templateId, patch),
   analyze: (projectId, mode) => ipcRenderer.invoke("analysis:run", projectId, mode),
+  calculate: (projectId) => ipcRenderer.invoke("calculations:run", projectId),
   generate: (projectId) => ipcRenderer.invoke("documents:generate", projectId),
   archiveUpload: (projectId) => ipcRenderer.invoke("documents:archive-upload", projectId),
   openFile: (filePath) => ipcRenderer.invoke("files:open", filePath),

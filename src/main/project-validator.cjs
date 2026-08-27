@@ -54,14 +54,34 @@ function validateProject(project) {
   (template.fields || []).forEach((field) => {
     if (!field.valid || !field.required) return;
 
-    if (["CAMPO", "TEXTO", "FECHA", "NUMERO"].includes(field.type)) {
-      if (!hasText(project.formData && project.formData[field.name])) errors.push(`Falta: ${field.label}.`);
+    if (["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR"].includes(field.type)) {
+      const value = project.formData && project.formData[field.name];
+      if (!hasText(value)) errors.push(`Falta: ${field.label}.`);
+      if (field.type === "LISTA" && hasText(value) && field.options && field.options.length && !field.options.includes(String(value))) {
+        errors.push(`${field.label}: selecciona una opción válida.`);
+      }
       return;
     }
 
+    if (field.type === "CALC") return;
+
     if (field.type === "TABLA") {
       const rows = project.formData && project.formData[field.name];
-      if (!Array.isArray(rows) || !rows.length) errors.push(`Falta: ${field.label}.`);
+      if (!Array.isArray(rows) || !rows.length) {
+        errors.push(`Falta: ${field.label}.`);
+        return;
+      }
+
+      const defs = field.columnDefs || [];
+      rows.forEach((row, rowIndex) => {
+        defs.forEach((column) => {
+          const value = row && Object.keys(row).find((key) => String(key).toUpperCase() === String(column.label).toUpperCase());
+          const raw = value ? row[value] : row && row[column.label];
+          if (column.type === "NUMERO" && hasText(raw) && !Number.isFinite(Number(String(raw).replace(",", ".")))) {
+            errors.push(`${field.label}, fila ${rowIndex + 1}, ${column.label}: debe ser numérico.`);
+          }
+        });
+      });
       return;
     }
 

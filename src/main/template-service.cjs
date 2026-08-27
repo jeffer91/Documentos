@@ -4,10 +4,11 @@ const PizZip = require("pizzip");
 const { root, copyUnique } = require("./workspace-service.cjs");
 const { openDatabase, queueSync, getCatalog } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
-const { parseMarkersFromText, validateMarkers } = require("./template-markers.cjs");
+const { parseMarkersFromText, validateMarkers, enrichMarker } = require("./template-markers.cjs");
+const { validateFormulaSyntax } = require("./calculation-service.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
-const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
 
 function templatesDir(userDataPath) {
   const dir = path.join(root(userDataPath), "templates");
@@ -47,6 +48,11 @@ function inspectTemplate(filePath) {
   const text = parts.map((part) => plainTextFromXml(part.xml)).join("\n");
   const markers = parseMarkersFromText(text);
   const validation = validateMarkers(markers);
+  markers.filter((marker) => marker.valid && marker.type === "CALC").forEach((marker) => {
+    const formula = validateFormulaSyntax(marker.formula);
+    if (!formula.ok) validation.errors.push(`{{${marker.raw}}}: fórmula inválida. ${formula.error}`);
+  });
+  validation.ok = validation.errors.length === 0;
   validation.warnings.push(...findStandaloneBlockWarnings(parts, markers));
   return { parts, text, markers, validation };
 }
@@ -123,22 +129,17 @@ function parseJson(value, fallback) {
 }
 
 function markerFromRow(row) {
-  const type = row.type;
-  return {
+  return enrichMarker({
     raw: row.raw,
     token: row.raw,
     valid: Boolean(row.valid),
-    type,
+    type: row.type,
     name: row.name,
     label: row.label || row.name,
     required: Boolean(row.required),
     config: row.config || "",
-    columns: parseJson(row.columns_json, []),
-    isBlock: BLOCK_TYPES.has(type),
-    isUserInput: USER_TYPES.has(type),
-    isAi: type === "IA",
-    isSystem: type === "SISTEMA"
-  };
+    columns: parseJson(row.columns_json, [])
+  });
 }
 
 function hydrateTemplate(db, row) {
@@ -159,7 +160,7 @@ function hydrateTemplate(db, row) {
     documentId: row.document_id || "",
     confidence: row.confidence || 0,
     markers,
-    fields: markers.filter((marker) => marker.valid && marker.isUserInput),
+    fields: markers.filter((marker) => marker.valid && (marker.isUserInput || marker.type === "CALC")),
     aiFields: markers.filter((marker) => marker.valid && marker.isAi),
     systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
     validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true }),

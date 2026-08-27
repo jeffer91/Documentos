@@ -14,6 +14,7 @@ const REQUIRED_FILES = [
   "src/renderer/catalog.js",
   "src/renderer/app.js",
   "src/main/database-service.cjs",
+  "src/main/calculation-service.cjs",
   "src/main/backup-service.cjs",
   "src/main/file-integrity-service.cjs",
   "src/main/error-service.cjs",
@@ -31,7 +32,8 @@ const REQUIRED_FILES = [
   "src/main/settings-service.cjs",
   "scripts/render-word.ps1",
   "scripts/smoke-electron.cjs",
-  "docs/ARQUITECTURA_DATOS.md"
+  "docs/ARQUITECTURA_DATOS.md",
+  "docs/ALIAS_CAMPOS.md"
 ];
 
 function lineCount(file) {
@@ -66,18 +68,53 @@ function markerCheck() {
   const { parseMarkersFromText, validateMarkers } = require(path.join(ROOT, "src/main/template-markers.cjs"));
   const markers = parseMarkersFromText([
     "{{CAMPO!:PERIODO|Período}}",
-    "{{TEXTO:OBJETIVO|Objetivo}}",
+    "{{TXT:OBJETIVO|Objetivo}}",
+    "{{LST:MODALIDAD|Modalidad|Presencial,En línea}}",
+    "{{NUM:APROBADOS|Aprobados}}",
+    "{{CAL:TOTAL|Total|SUM(APROBADOS,5)}}",
     "{{IA:CONCLUSIONES|Conclusiones}}",
-    "{{TABLA:CRONOGRAMA|Cronograma|Actividad,Responsable,Fecha}}",
-    "{{IMAGENES:EVIDENCIAS|Evidencias}}",
-    "{{SISTEMA:CODIGO}}",
-    "{{GRAFICO:RESULTADOS|Resultados}}"
+    "{{TAB:CRONOGRAMA|Cronograma|Actividad:TEXTO,Responsable:CAMPO,Fecha:FECHA}}",
+    "{{IMGS:EVIDENCIAS|Evidencias}}",
+    "{{SYS:CODIGO}}",
+    "{{GRA:RESULTADOS|Resultados}}"
   ].join("\n"));
   const validation = validateMarkers(markers);
   return {
     count: markers.length,
     ok: validation.ok,
-    hasTableColumns: Boolean(markers.find((item) => item.type === "TABLA" && item.columns.length === 3))
+    hasTableColumns: Boolean(markers.find((item) => item.type === "TABLA" && item.columnDefs.length === 3 && item.columnDefs[2].type === "FECHA")),
+    hasAliases: Boolean(markers.find((item) => item.aliasUsed === "CAL" && item.type === "CALC")),
+    hasList: Boolean(markers.find((item) => item.type === "LISTA" && item.options.length === 2))
+  };
+}
+
+function calculationCheck() {
+  const { applyCalculations } = require(path.join(ROOT, "src/main/calculation-service.cjs"));
+  const project = {
+    formData: {
+      APROBADOS: 80,
+      REPROBADOS: 20,
+      ACTIVIDADES: [
+        { Planificado: 10, Ejecutado: 8 },
+        { Planificado: 20, Ejecutado: 18 }
+      ]
+    },
+    template: {
+      markers: [
+        { valid: true, type: "CALC", name: "TOTAL", label: "Total", formula: "SUM(APROBADOS,REPROBADOS)" },
+        { valid: true, type: "CALC", name: "PORCENTAJE", label: "Porcentaje", formula: "PERCENT(APROBADOS,TOTAL)" },
+        { valid: true, type: "CALC", name: "PLANIFICADO", label: "Planificado", formula: "SUM(ACTIVIDADES.Planificado)" },
+        { valid: true, type: "CALC", name: "ESTADO", label: "Estado", formula: "IF(PORCENTAJE>=80,\"Cumplido\",\"No cumplido\")" }
+      ]
+    }
+  };
+  const result = applyCalculations(project, { calculationData: [] });
+  return {
+    ok: result.ok,
+    total: result.project.formData.TOTAL,
+    porcentaje: result.project.formData.PORCENTAJE,
+    planificado: result.project.formData.PLANIFICADO,
+    estado: result.project.formData.ESTADO
   };
 }
 
@@ -111,14 +148,23 @@ function main() {
 
   try {
     const markers = markerCheck();
-    if (!markers.ok || markers.count !== 7 || !markers.hasTableColumns) {
+    if (!markers.ok || markers.count !== 10 || !markers.hasTableColumns || !markers.hasAliases || !markers.hasList) {
       errors.push("El parser de marcadores no superó la prueba interna.");
     }
   } catch (error) {
     errors.push(`No se pudo validar marcadores: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.4");
+  try {
+    const calculation = calculationCheck();
+    if (!calculation.ok || calculation.total !== 100 || calculation.porcentaje !== 80 || calculation.planificado !== 30 || calculation.estado !== "Cumplido") {
+      errors.push("El motor de cálculos no superó la prueba interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar cálculos: ${error.message}`);
+  }
+
+  console.log("Documentos ITSQMET · diagnóstico v2.6");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));

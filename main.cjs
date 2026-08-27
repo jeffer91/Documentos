@@ -15,6 +15,7 @@ const { readSettings, saveSettings } = require("./src/main/settings-service.cjs"
 const syncService = require("./src/main/sync-service.cjs");
 const backupService = require("./src/main/backup-service.cjs");
 const errorService = require("./src/main/error-service.cjs");
+const { applyCalculations } = require("./src/main/calculation-service.cjs");
 
 let mainWindow = null;
 
@@ -161,12 +162,59 @@ function registerIpc() {
       project = workspace.saveProject(userData(), project);
 
       const sources = await analyzeAttachments(project.attachments || []);
+      const calculated = applyCalculations(project, sources);
+      if (!calculated.ok) {
+        calculated.errors.forEach((message) => {
+          errorService.record(userData(), {
+            severity: "error",
+            module: "calculation",
+            action: "analysis",
+            message,
+            detail: ""
+          });
+        });
+        return { ok: false, validation: calculated, error: calculated.errors[0] };
+      }
+      project = workspace.saveProject(userData(), calculated.project);
       const analysis = await analyzeWithAi(userData(), project, sources, project.aiMode);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       return { ok: true, analysis, project, validation };
     } catch (error) {
       return failure("analysis", "run", error);
+    }
+  });
+
+  ipcMain.handle("calculations:run", async (_event, projectId) => {
+    try {
+      let project = workspace.getProject(userData(), projectId);
+      if (!project) throw new Error("No se encontró el documento.");
+
+      const validation = validateProject(project);
+      if (!validation.ok) {
+        return { ok: false, validation, error: validation.errors[0] };
+      }
+
+      const sources = await analyzeAttachments(project.attachments || []);
+      const calculated = applyCalculations(project, sources);
+
+      if (!calculated.ok) {
+        calculated.errors.forEach((message) => {
+          errorService.record(userData(), {
+            severity: "error",
+            module: "calculation",
+            action: "preview",
+            message,
+            detail: ""
+          });
+        });
+        return { ok: false, validation: calculated, error: calculated.errors[0] };
+      }
+
+      project = workspace.saveProject(userData(), calculated.project);
+      return { ok: true, project, calculated: calculated.calculated, warnings: calculated.warnings };
+    } catch (error) {
+      return failure("calculation", "preview", error);
     }
   });
 
@@ -179,6 +227,20 @@ function registerIpc() {
       if (!validation.ok) return { ok: false, validation, error: validation.errors[0] };
 
       const sources = await analyzeAttachments(project.attachments || []);
+      const calculated = applyCalculations(project, sources);
+      if (!calculated.ok) {
+        calculated.errors.forEach((message) => {
+          errorService.record(userData(), {
+            severity: "error",
+            module: "calculation",
+            action: "generate",
+            message,
+            detail: ""
+          });
+        });
+        return { ok: false, validation: calculated, error: calculated.errors[0] };
+      }
+      project = workspace.saveProject(userData(), calculated.project);
       const analysis = await analyzeWithAi(userData(), project, sources, project.aiMode || "fallback");
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
