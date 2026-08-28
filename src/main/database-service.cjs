@@ -3,7 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 
 const connections = new Map();
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 function workspaceRoot(userDataPath) {
   const dir = path.join(userDataPath, "documentos-workspace");
@@ -110,7 +110,7 @@ function baseSchema(db) {
       document_type TEXT,
       code_pattern TEXT,
       mode TEXT NOT NULL DEFAULT 'template',
-      ai_mode TEXT NOT NULL DEFAULT 'fallback',
+      ai_mode TEXT NOT NULL DEFAULT 'external',
       generated_code TEXT,
       analysis_json TEXT,
       created_at TEXT NOT NULL,
@@ -243,18 +243,6 @@ function baseSchema(db) {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS ai_providers (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 0,
-      priority INTEGER NOT NULL DEFAULT 9,
-      model TEXT,
-      endpoint TEXT,
-      encrypted_key TEXT,
       updated_at TEXT NOT NULL
     );
 
@@ -413,6 +401,20 @@ function migrateToV5(db) {
   `);
 }
 
+function migrateToV6(db) {
+  db.exec(`
+    UPDATE projects
+    SET ai_mode = 'external'
+    WHERE ai_mode IS NULL OR ai_mode <> 'external';
+
+    UPDATE document_versions
+    SET ai_mode = 'external'
+    WHERE ai_mode IS NULL OR ai_mode <> 'external';
+
+    DROP TABLE IF EXISTS ai_providers;
+  `);
+}
+
 function applyMigrations(db) {
   baseSchema(db);
   let version = schemaVersion(db);
@@ -447,6 +449,13 @@ function applyMigrations(db) {
     const tx = db.transaction(() => migrateToV5(db));
     tx();
     version = 5;
+    setSchemaVersion(db, version);
+  }
+
+  if (version < 6) {
+    const tx = db.transaction(() => migrateToV6(db));
+    tx();
+    version = 6;
     setSchemaVersion(db, version);
   }
 
