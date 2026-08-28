@@ -207,6 +207,20 @@ function externalOnlyUiCheck() {
   };
 }
 
+function legacyExternalOnlyCheck() {
+  const legacySource = fs.readFileSync(path.join(ROOT, "src/main/legacy-migration-service.cjs"), "utf8");
+  const templateSource = fs.readFileSync(path.join(ROOT, "src/main/template-service.cjs"), "utf8");
+  const rendererSource = fs.readFileSync(path.join(ROOT, "src/renderer/app.js"), "utf8");
+  return {
+    legacyDoesNotFallback: !legacySource.includes('project.aiMode || "fallback"'),
+    backendRejectsInvalidActive:
+      templateSource.includes("if (template && !errors.length) return template;"),
+    rendererRejectsInvalidReady:
+      rendererSource.includes("function templateIsUsable(item)") &&
+      rendererSource.includes("!errors.length")
+  };
+}
+
 function releaseConsistencyCheck() {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
   const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
@@ -242,6 +256,15 @@ function main() {
       if (syntaxError) errors.push(`Sintaxis inválida en ${relative}`);
     }
   });
+
+  try {
+    const legacy = legacyExternalOnlyCheck();
+    if (!legacy.legacyDoesNotFallback || !legacy.backendRejectsInvalidActive || !legacy.rendererRejectsInvalidReady) {
+      errors.push("La compatibilidad legacy aún podría reactivar IA interna o mostrar plantillas inválidas como listas.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar compatibilidad legacy: ${error.message}`);
+  }
 
   try {
     const release = releaseConsistencyCheck();
