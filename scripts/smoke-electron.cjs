@@ -483,6 +483,39 @@ async function run() {
     assert.strictEqual(emptyManualTable.ok, false);
     assert.ok(emptyManualTable.errors.some((error) => error.includes("filas vacías")));
 
+    const invalidOptionalTypes = validateProject({
+      mode: "template",
+      codePattern: "",
+      formData: {
+        NUM_OPC: "abc",
+        FECHA_OPC: "mañana",
+        TAB_OPC: [{ Porcentaje: "no-numero" }]
+      },
+      attachments: [],
+      template: {
+        localPath: locationDocx,
+        sha256: "",
+        validation: { errors: [], warnings: [] },
+        systemFields: [],
+        fields: [
+          { valid: true, required: false, type: "NUMERO", name: "NUM_OPC", label: "Número opcional" },
+          { valid: true, required: false, type: "FECHA", name: "FECHA_OPC", label: "Fecha opcional" },
+          {
+            valid: true,
+            required: false,
+            type: "TABLA",
+            name: "TAB_OPC",
+            label: "Tabla opcional",
+            columnDefs: [{ label: "Porcentaje", type: "NUMERO" }]
+          }
+        ]
+      }
+    });
+    assert.strictEqual(invalidOptionalTypes.ok, false);
+    assert.ok(invalidOptionalTypes.errors.some((error) => error.includes("Número opcional")));
+    assert.ok(invalidOptionalTypes.errors.some((error) => error.includes("Fecha opcional")));
+    assert.ok(invalidOptionalTypes.errors.some((error) => error.includes("Tabla opcional")));
+
     const calculation = applyCalculations({
       formData: { APROBADOS: 90, REPROBADOS: 10 },
       template: {
