@@ -26,7 +26,17 @@
     versions: [],
     busy: false,
     editorGuide: null,
-    saveState: "saved"
+    saveState: "saved",
+    externalAi: {
+      templateId: "",
+      guide: "",
+      mode: "manual",
+      fieldsText: "",
+      prompt: "",
+      response: "",
+      preview: null,
+      canUndo: false
+    }
   };
 
   let saveTimer = null;
@@ -184,6 +194,57 @@
     state.versions = response && response.ok ? response.versions || [] : [];
   }
 
+  function resetExternalAi() {
+    state.externalAi = {
+      templateId: state.project && state.project.template ? state.project.template.id : "",
+      guide: "",
+      mode: state.externalAi && state.externalAi.mode === "manual_ai" ? "manual_ai" : "manual",
+      fieldsText: "",
+      prompt: "",
+      response: "",
+      preview: null,
+      canUndo: false
+    };
+  }
+
+  async function loadExternalAi() {
+    if (!state.project || !state.project.template) {
+      resetExternalAi();
+      return;
+    }
+
+    const currentMode = state.externalAi && state.externalAi.mode === "manual_ai" ? "manual_ai" : "manual";
+    const previousResponse = state.externalAi && state.externalAi.templateId === state.project.template.id
+      ? state.externalAi.response || ""
+      : "";
+
+    const guideResponse = await api.getExternalAiGuide(state.project.id);
+    const data = guideResponse && guideResponse.ok ? guideResponse.data || {} : {};
+    state.externalAi = {
+      templateId: state.project.template.id,
+      guide: data.guide || "",
+      mode: currentMode,
+      fieldsText: "",
+      prompt: "",
+      response: previousResponse,
+      preview: null,
+      canUndo: Boolean(data.canUndo)
+    };
+
+    const promptResponse = await api.buildExternalAiPrompt(
+      state.project.id,
+      state.externalAi.mode,
+      state.externalAi.guide
+    );
+    if (promptResponse && promptResponse.ok && promptResponse.data) {
+      state.externalAi.fieldsText = promptResponse.data.fieldsText || "";
+      state.externalAi.prompt = promptResponse.data.prompt || "";
+      state.externalAi.manualCount = Number(promptResponse.data.manualCount || 0);
+      state.externalAi.aiCount = Number(promptResponse.data.aiCount || 0);
+      state.externalAi.fieldCount = Number(promptResponse.data.fieldCount || 0);
+    }
+  }
+
   function activeTemplate(documentId) {
     return state.templates.find((item) => item.documentId === documentId && item.active) || null;
   }
@@ -268,7 +329,7 @@
       }
 
       setNav("home");
-      await loadVersions();
+      await Promise.all([loadVersions(), loadExternalAi()]);
       renderEditor();
       return;
     }
@@ -1126,6 +1187,127 @@
       </div>`;
   }
 
+  function externalAiIssueList(preview) {
+    if (!preview) return "";
+    const problemItems = (preview.items || []).filter((item) => item.status === "error" || item.conflict);
+    const visible = problemItems.slice(0, 20);
+    if (!visible.length) return '<div class="external-ai-ok"><b>Respuesta lista</b><span>No se detectaron campos con errores.</span></div>';
+
+    return `<div class="external-ai-issues">${visible.map((item) => `
+      <div class="external-ai-issue ${item.status === "error" ? "error" : "warn"}">
+        <b>${escapeHtml(item.label || item.name)}</b>
+        <span>${escapeHtml(item.message || "Revisar este campo.")}</span>
+      </div>
+    `).join("")}${problemItems.length > visible.length ? `<small>+${problemItems.length - visible.length} observaciones adicionales</small>` : ""}</div>`;
+  }
+
+  function externalAiPreviewHtml() {
+    const preview = state.externalAi && state.externalAi.preview;
+    if (!preview) return "";
+    const summary = preview.summary || {};
+    const generalMessages = []
+      .concat(preview.errors || [])
+      .concat(preview.warnings || []);
+
+    return `
+      <div class="external-ai-preview">
+        <div class="external-ai-summary">
+          <span><b>${Number(summary.valid || 0)}</b> válidos</span>
+          <span><b>${Number(summary.empty || 0)}</b> vacíos</span>
+          <span><b>${Number(summary.errors || 0)}</b> errores</span>
+          <span><b>${Number(summary.conflicts || 0)}</b> conflictos</span>
+        </div>
+        ${generalMessages.length ? `<div class="notice-warn"><b>Validación</b><span>${generalMessages.slice(0, 3).map(escapeHtml).join(" · ")}</span></div>` : ""}
+        ${externalAiIssueList(preview)}
+        <div class="button-row end">
+          <label class="external-ai-overwrite"><input id="externalAiOverwrite" type="checkbox"> Sobrescribir si ya existe un valor</label>
+          <button class="primary" type="button" data-action="external-ai-import" ${preview.canImport ? "" : "disabled"}>Importar campos válidos</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function externalAiHtml(template) {
+    const data = state.externalAi || {};
+    const mode = data.mode === "manual_ai" ? "manual_ai" : "manual";
+    const aiCount = Number(data.aiCount || 0);
+    const manualCount = Number(data.manualCount || 0);
+    const total = Number(data.fieldCount || 0);
+
+    return `
+      <section class="panel external-ai-panel">
+        <div class="panel-title external-ai-title">
+          <div>
+            <h2>IA externa</h2>
+            <small>Prepara el documento con ChatGPT, Claude, Gemini u otra IA y pega aquí la respuesta.</small>
+          </div>
+          <span class="status good">ITSQMET-CAMPOS-V1</span>
+        </div>
+
+        <div class="external-ai-grid">
+          <div class="external-ai-section">
+            <div class="external-ai-section-head">
+              <div><span>1</span><div><h3>Guía para llenar</h3><p>Se guarda únicamente para esta plantilla v${template.version}.</p></div></div>
+              <button class="ghost small-inline" type="button" data-action="external-ai-save-guide">Guardar guía</button>
+            </div>
+            <textarea id="externalAiGuide" class="external-ai-textarea guide" placeholder="Pega aquí la guía: qué información usar, criterios, estructura, metodología, reglas de redacción...">${escapeHtml(data.guide || "")}</textarea>
+          </div>
+
+          <div class="external-ai-section">
+            <div class="external-ai-section-head">
+              <div><span>2</span><div><h3>Campos que debe devolver</h3><p>Siempre corresponde al documento completo.</p></div></div>
+              <div class="external-ai-copy-actions">
+                <button class="ghost small-inline" type="button" data-action="external-ai-build">Actualizar</button>
+                <button class="secondary small-inline" type="button" data-action="external-ai-copy-fields" ${data.fieldsText ? "" : "disabled"}>Copiar campos</button>
+              </div>
+            </div>
+
+            <div class="external-ai-mode">
+              <label class="mode-option">
+                <input type="radio" name="externalAiMode" value="manual" ${mode === "manual" ? "checked" : ""}>
+                <b>Solo campos manuales</b>
+                <small>${manualCount} campos de texto</small>
+              </label>
+              <label class="mode-option">
+                <input type="radio" name="externalAiMode" value="manual_ai" ${mode === "manual_ai" ? "checked" : ""}>
+                <b>Manuales + campos IA</b>
+                <small>${manualCount + aiCount} campos</small>
+              </label>
+            </div>
+
+            <textarea class="external-ai-textarea fields" readonly>${escapeHtml(data.fieldsText || "")}</textarea>
+            <small class="external-ai-note">No se envían CALC, SISTEMA, imágenes, archivos, datos ni gráficos: esos elementos los controla la app.</small>
+          </div>
+        </div>
+
+        <div class="external-ai-section external-ai-prompt-section">
+          <div class="external-ai-section-head">
+            <div><span>3</span><div><h3>Prompt completo</h3><p>Incluye guía, reglas, todos los campos y el formato obligatorio.</p></div></div>
+            <button class="primary small-inline" type="button" data-action="external-ai-copy-prompt" ${data.prompt ? "" : "disabled"}>Copiar prompt completo</button>
+          </div>
+          <textarea class="external-ai-textarea prompt" readonly>${escapeHtml(data.prompt || "")}</textarea>
+          <div class="external-ai-counts">
+            <span>${total} campos solicitados</span>
+            <span>${manualCount} manuales</span>
+            <span>${aiCount} IA</span>
+          </div>
+        </div>
+
+        <div class="external-ai-section">
+          <div class="external-ai-section-head">
+            <div><span>4</span><div><h3>Respuesta de la IA</h3><p>Pega el único texto devuelto por la IA externa y valídalo antes de importar.</p></div></div>
+            <div class="external-ai-copy-actions">
+              ${data.canUndo ? '<button class="ghost small-inline" type="button" data-action="external-ai-undo">Deshacer última importación</button>' : ""}
+              <button class="secondary small-inline" type="button" data-action="external-ai-preview">Analizar respuesta</button>
+            </div>
+          </div>
+          <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-CAMPOS-V1//&#10;//DOCUMENTO:...//&#10;...">${escapeHtml(data.response || "")}</textarea>
+          ${externalAiPreviewHtml()}
+        </div>
+      </section>
+    `;
+  }
+
   function renderEditor() {
     if (!state.document || !state.project) return navigate("home", {}, false);
     if (state.document.mode === "upload") return renderUploadDocument();
@@ -1197,6 +1379,7 @@
           ` : ""}
         </aside>
       </div>
+      ${externalAiHtml(template)}
       ${outputsHtml()}
       ${versionsHtml()}
     `;
@@ -1391,12 +1574,33 @@
     });
   }
 
+  function preservedExternalAnalysis() {
+    const external = state.project && state.project.analysis && state.project.analysis.externalGeneratedFields;
+    if (!external || typeof external !== "object" || !Object.keys(external).length) return null;
+    const fields = Object.assign({}, external);
+    const sources = {};
+    Object.keys(fields).forEach((name) => { sources[name] = ["IA externa"]; });
+    return {
+      provider: "IA externa",
+      generatedAt: new Date().toISOString(),
+      generatedFields: fields,
+      externalGeneratedFields: fields,
+      fieldSources: sources,
+      keyFindings: [],
+      missingData: [],
+      tables: [],
+      charts: [],
+      sourceTrace: [],
+      notes: "Campos importados mediante ITSQMET-CAMPOS-V1."
+    };
+  }
+
   async function persistEditor() {
     if (!state.project) return;
     state.saveState = "saving";
     updateSaveStateLabel();
     if (state.project.status === "generated") state.project.status = "draft";
-    state.project.analysis = null;
+    state.project.analysis = preservedExternalAnalysis();
     state.project.formData = collectFormData();
     clearCalculatedValues();
     const mode = document.querySelector('input[name="aiMode"]:checked');
@@ -1414,6 +1618,102 @@
     updateSaveStateLabel();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => persistEditor(), 450);
+  }
+
+  function readExternalAiInputs() {
+    const guide = document.getElementById("externalAiGuide");
+    const response = document.getElementById("externalAiResponse");
+    const mode = document.querySelector('input[name="externalAiMode"]:checked');
+    if (guide) state.externalAi.guide = guide.value;
+    if (response) state.externalAi.response = response.value;
+    if (mode) state.externalAi.mode = mode.value === "manual_ai" ? "manual_ai" : "manual";
+  }
+
+  async function saveExternalAiGuide() {
+    if (!state.project) return;
+    readExternalAiInputs();
+    const response = await api.saveExternalAiGuide(state.project.id, state.externalAi.guide);
+    if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo guardar la guía.");
+    state.externalAi.guide = response.data && response.data.guide || state.externalAi.guide;
+    state.externalAi.canUndo = Boolean(response.data && response.data.canUndo);
+    await buildExternalAiPrompt(false);
+    showToast("Guía guardada para esta plantilla.");
+  }
+
+  async function buildExternalAiPrompt(showMessage) {
+    if (!state.project) return;
+    readExternalAiInputs();
+    const response = await api.buildExternalAiPrompt(
+      state.project.id,
+      state.externalAi.mode,
+      state.externalAi.guide
+    );
+    if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo preparar el prompt.");
+
+    const data = response.data || {};
+    state.externalAi.fieldsText = data.fieldsText || "";
+    state.externalAi.prompt = data.prompt || "";
+    state.externalAi.manualCount = Number(data.manualCount || 0);
+    state.externalAi.aiCount = Number(data.aiCount || 0);
+    state.externalAi.fieldCount = Number(data.fieldCount || 0);
+    state.externalAi.preview = null;
+    renderEditor();
+    if (showMessage !== false) showToast("Prompt actualizado.");
+  }
+
+  async function copyExternalAiText(kind) {
+    readExternalAiInputs();
+    const text = kind === "fields" ? state.externalAi.fieldsText : state.externalAi.prompt;
+    if (!text) return showToast("Primero prepara el prompt.");
+    const response = await api.copyText(text);
+    showToast(response && response.ok ? (kind === "fields" ? "Campos copiados." : "Prompt completo copiado.") : "No se pudo copiar.");
+  }
+
+  async function previewExternalAiResponse() {
+    if (!state.project) return;
+    readExternalAiInputs();
+    if (!state.externalAi.response.trim()) return showToast("Pega primero la respuesta de la IA.");
+    const response = await api.previewExternalAiResponse(
+      state.project.id,
+      state.externalAi.response,
+      state.externalAi.mode
+    );
+    if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo analizar la respuesta.");
+    state.externalAi.preview = response.preview;
+    renderEditor();
+  }
+
+  async function importExternalAiResponse() {
+    if (!state.project) return;
+    readExternalAiInputs();
+    const overwrite = Boolean(document.getElementById("externalAiOverwrite") && document.getElementById("externalAiOverwrite").checked);
+    const response = await api.applyExternalAiResponse(
+      state.project.id,
+      state.externalAi.response,
+      state.externalAi.mode,
+      overwrite
+    );
+    if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo importar la respuesta.");
+
+    const result = response.result || {};
+    state.project = result.project || state.project;
+    state.externalAi.canUndo = Boolean(result.canUndo);
+    state.externalAi.preview = null;
+    await loadVersions();
+    renderEditor();
+    showToast(String(result.imported || 0) + " campos importados.");
+  }
+
+  async function undoExternalAiImport() {
+    if (!state.project) return;
+    const response = await api.undoExternalAiImport(state.project.id);
+    if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo deshacer.");
+    const result = response.result || {};
+    state.project = result.project || state.project;
+    state.externalAi.canUndo = Boolean(result.canUndo);
+    state.externalAi.preview = null;
+    renderEditor();
+    showToast("Última importación deshecha.");
   }
 
   function associationForDocument(documentId) {
@@ -1504,7 +1804,9 @@
       state.editorGuide = null;
       state.project.analysis = null;
       state.project.status = "draft";
-      await api.saveProject(state.project);
+      const saved = await api.saveProject(state.project);
+      if (saved && saved.ok) state.project = saved.project;
+      await loadExternalAi();
       renderEditor();
     } else {
       renderTemplates();
@@ -1621,7 +1923,7 @@
     rows.push(row);
     state.project.formData[markerName] = rows;
     state.project.status = "draft";
-    state.project.analysis = null;
+    state.project.analysis = preservedExternalAnalysis();
     clearCalculatedValues();
     api.saveProject(state.project).then((response) => {
       if (response && response.ok) state.project = response.project;
@@ -1634,7 +1936,7 @@
     rows.splice(Number(rowIndex), 1);
     state.project.formData[markerName] = rows;
     state.project.status = "draft";
-    state.project.analysis = null;
+    state.project.analysis = preservedExternalAnalysis();
     clearCalculatedValues();
     api.saveProject(state.project).then((response) => {
       if (response && response.ok) state.project = response.project;
@@ -1694,11 +1996,17 @@
       scheduleSave();
     }
 
+    if (event.target.id === "externalAiGuide") state.externalAi.guide = event.target.value;
+    if (event.target.id === "externalAiResponse") state.externalAi.response = event.target.value;
     if (event.target.id === "librarySearch") renderLibrary(event.target.value);
   });
 
   view.addEventListener("change", (event) => {
     if (event.target.matches("[data-field], input[name='aiMode']")) scheduleSave();
+    if (event.target.matches('input[name="externalAiMode"]')) {
+      state.externalAi.mode = event.target.value === "manual_ai" ? "manual_ai" : "manual";
+      buildExternalAiPrompt(false);
+    }
     if (event.target.id === "careerSelector") changeGuideCareer(Number(event.target.value));
   });
 
@@ -1720,6 +2028,13 @@
     if (action === "replace-template-document") return importTemplateForDocument(button.dataset.documentId, button.dataset.templateId);
     if (action === "delete-template") return deleteTemplateFromUi(button.dataset.templateId);
     if (action === "assign-template") return assignTemplate(button.dataset.id);
+    if (action === "external-ai-save-guide") return saveExternalAiGuide();
+    if (action === "external-ai-build") return buildExternalAiPrompt(true);
+    if (action === "external-ai-copy-fields") return copyExternalAiText("fields");
+    if (action === "external-ai-copy-prompt") return copyExternalAiText("prompt");
+    if (action === "external-ai-preview") return previewExternalAiResponse();
+    if (action === "external-ai-import") return importExternalAiResponse();
+    if (action === "external-ai-undo") return undoExternalAiImport();
     if (action === "add-files") return addFiles(button.dataset.kind, button.dataset.marker || "", button.dataset.multiple !== "false");
     if (action === "remove-file") return removeFile(button.dataset.id);
     if (action === "add-table-row") return addTableRow(button.dataset.marker);
