@@ -136,6 +136,7 @@ function requirementFor(marker, project, sys) {
     formula: marker.formula || "",
     multiple: marker.type === "IMAGENES",
     locations: Array.isArray(marker.locations) ? marker.locations : [],
+    contexts: Array.isArray(marker.contexts) ? marker.contexts : [],
     occurrenceCount: Number(marker.occurrenceCount || 1)
   };
 }
