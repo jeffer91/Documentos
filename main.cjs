@@ -9,7 +9,7 @@ const templates = require("./src/main/template-service.cjs");
 const { analyzeAttachments } = require("./src/main/source-service.cjs");
 const aiProviders = require("./src/main/ai-provider-service.cjs");
 const { generateDocument, systemValues } = require("./src/main/document-composer.cjs");
-const { validateProject, validateAiFields, validateSystemFields } = require("./src/main/project-validator.cjs");
+const { validateProject, validateAiFields, validateSystemFields, validateExtractedData } = require("./src/main/project-validator.cjs");
 const { readSettings, saveSettings } = require("./src/main/settings-service.cjs");
 const syncService = require("./src/main/sync-service.cjs");
 const backupService = require("./src/main/backup-service.cjs");
@@ -292,6 +292,11 @@ function registerIpc() {
       }
 
       const sources = await analyzeAttachments(activeTemplateAttachments(project));
+      const dataValidation = validateExtractedData(project, sources);
+      if (!dataValidation.ok) {
+        return { ok: false, validation: dataValidation, error: dataValidation.errors[0] };
+      }
+
       const calculated = applyCalculations(project, sources);
       if (!calculated.ok) {
         calculated.errors.forEach((message) => {
