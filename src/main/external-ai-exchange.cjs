@@ -657,7 +657,7 @@ function externalAnalysis(externalFields, deterministicSources) {
   Object.keys(fields).forEach((name) => { fieldSources[name] = ["IA externa"]; });
 
   return {
-    provider: "IA externa + procesamiento local",
+    provider: deterministicSources ? "IA externa + procesamiento local" : "IA externa",
     generatedAt: new Date().toISOString(),
     generatedFields: fields,
     externalGeneratedFields: fields,
