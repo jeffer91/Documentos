@@ -113,7 +113,9 @@ function inferAssociation(userDataPath, fileName, text) {
   const haystack = normalizeSearch(`${fileName} ${text.slice(0, 12000)}`);
   const ranked = allDocumentsFromCatalog(catalog).map(({ unit, process, document }) => {
     let score = 0;
-    normalizeSearch(document.name).split(" ").filter((word) => word.length >= 5)
+    const normalizedDocumentName = normalizeSearch(document.name);
+    if (normalizedDocumentName && haystack.includes(normalizedDocumentName)) score += 30;
+    normalizedDocumentName.split(" ").filter((word) => word.length >= 5)
       .forEach((word) => { if (haystack.includes(word)) score += 2; });
 
     staticCodeParts(document.code).forEach((part) => {
