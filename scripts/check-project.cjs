@@ -175,11 +175,15 @@ function externalOnlyUiCheck() {
 
   return {
     noInternalGeneration: !mainSource.includes("analyzeWithAi"),
-    usesExternalAnalysis: mainSource.includes("analysisFromExternalOnly"),
+    usesExternalAnalysis:
+      mainSource.includes("analysisFromExternalOnly(project, sources)") &&
+      mainSource.includes("activeTemplateAttachments(project)"),
     noAiNav: !indexSource.includes('data-route="ai"'),
     simpleExternalFlow:
       rendererSource.includes("Copiar prompt para IA externa") &&
       rendererSource.includes("Importar respuesta") &&
+      rendererSource.includes("Requisitos de la plantilla") &&
+      rendererSource.includes("Ubicación:") &&
       !rendererSource.includes('name="externalAiMode"') &&
       !rendererSource.includes('<h3>IA</h3><span class="status good"')
   };
@@ -267,7 +271,7 @@ function main() {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.8");
+  console.log("Documentos ITSQMET · diagnóstico v2.8.1");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
@@ -276,7 +280,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: estructura, sintaxis, catálogo, requisitos de plantilla e IA externa V2 correctos.");
+    console.log("OK: estructura, sintaxis, catálogo, requisitos, ubicaciones, datos locales e IA externa V2 correctos.");
   }
 }
 
