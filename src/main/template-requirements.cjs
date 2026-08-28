@@ -26,15 +26,19 @@ function categoryFor(type) {
   return "other";
 }
 
-function sourceFor(type) {
-  if (type === "SISTEMA") return "Sistema";
+function sourceFor(type, name) {
+  if (type === "SISTEMA") {
+    if (["ELABORADO_POR", "CARGO_ELABORADO", "REVISADO_POR", "CARGO_REVISADO", "APROBADO_POR", "CARGO_APROBADO"].includes(name)) return "Ajustes institucionales";
+    if (["CODIGO", "CODIGO_DOCUMENTO"].includes(name)) return "Catálogo + número de documento";
+    return "Sistema";
+  }
   if (SCALAR_TYPES.has(type)) return "Usuario o IA externa";
   if (type === "IA") return "IA externa";
   if (type === "TABLA") return "IA externa o captura manual";
   if (type === "DATOS") return "Archivo Excel / CSV";
   if (type === "IMAGEN" || type === "IMAGENES") return "Archivos de evidencia";
   if (type === "CALC") return "Cálculo automático";
-  if (type === "GRAFICO" || type === "GRAFICOS") return "Generación automática";
+  if (type === "GRAFICO" || type === "GRAFICOS") return "Generación local desde datos";
   return "Aplicación";
 }
 
@@ -85,7 +89,7 @@ function statusFor(marker, project, value) {
     }
     return text(value) ? "ready" : (marker.required ? "missing" : "pending");
   }
-  if (marker.type === "TABLA") return Array.isArray(value) && value.length ? "ready" : "pending";
+  if (marker.type === "TABLA") return Array.isArray(value) && value.length ? "ready" : (marker.required ? "missing" : "pending");
   if (marker.type === "DATOS" || marker.type === "IMAGEN" || marker.type === "IMAGENES") {
     return Number(value || 0) > 0 ? "ready" : (marker.required ? "missing" : "pending");
   }
@@ -112,7 +116,7 @@ function requirementFor(marker, project, sys) {
     blocking: Boolean(marker.required) || needsDocumentNumber,
     blockingReason: needsDocumentNumber ? "Falta el número de documento para construir el código." : "",
     category: categoryFor(marker.type),
-    source: sourceFor(marker.type),
+    source: sourceFor(marker.type, marker.name),
     action: actionFor(marker.type),
     status: statusFor(marker, project, value),
     value,
@@ -122,7 +126,9 @@ function requirementFor(marker, project, sys) {
       ? marker.columnDefs.map((column) => ({ name: column.name, label: column.label, type: column.type }))
       : [],
     formula: marker.formula || "",
-    multiple: marker.type === "IMAGENES"
+    multiple: marker.type === "IMAGENES",
+    locations: Array.isArray(marker.locations) ? marker.locations : [],
+    occurrenceCount: Number(marker.occurrenceCount || 1)
   };
 }
 
