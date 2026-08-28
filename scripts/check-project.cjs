@@ -90,6 +90,19 @@ function markerCheck() {
   };
 }
 
+function invalidMarkerCheck() {
+  const { parseMarkersFromText, validateMarkers } = require(path.join(ROOT, "src/main/template-markers.cjs"));
+  const unknownSys = validateMarkers(parseMarkersFromText("{{SYS:CAMPO_QUE_NO_EXISTE}}"));
+  const ambiguous = validateMarkers(parseMarkersFromText([
+    "{{CAM:DATO|Dato}}",
+    "{{AI:DATO|Dato redactado}}"
+  ].join("\n")));
+  return {
+    unknownSysRejected: !unknownSys.ok && unknownSys.errors.some((item) => item.includes("SISTEMA no reconoce")),
+    ambiguousRejected: !ambiguous.ok && ambiguous.errors.some((item) => item.includes("varios tipos"))
+  };
+}
+
 function externalAiProtocolCheck() {
   const { PROTOCOL, parseResponse } = require(path.join(ROOT, "src/main/external-ai-exchange.cjs"));
   const parsed = parseResponse([
@@ -174,11 +187,18 @@ function externalOnlyUiCheck() {
   const indexSource = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 
   return {
-    noInternalGeneration: !mainSource.includes("analyzeWithAi"),
+    noInternalGeneration:
+      !mainSource.includes("analyzeWithAi") &&
+      !mainSource.includes('ipcMain.handle("ai:get"') &&
+      !mainSource.includes('ipcMain.handle("ai:save"'),
     usesExternalAnalysis:
       mainSource.includes("analysisFromExternalOnly(project, sources)") &&
       mainSource.includes("activeTemplateAttachments(project)"),
-    noAiNav: !indexSource.includes('data-route="ai"'),
+    noAiNav:
+      !indexSource.includes('data-route="ai"') &&
+      !rendererSource.includes("renderAi()") &&
+      !rendererSource.includes("getAiProviders") &&
+      !rendererSource.includes("saveAiProviders"),
     simpleExternalFlow:
       rendererSource.includes("Copiar prompt para IA externa") &&
       rendererSource.includes("Importar respuesta") &&
@@ -224,6 +244,15 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar marcadores: ${error.message}`);
+  }
+
+  try {
+    const invalidMarkers = invalidMarkerCheck();
+    if (!invalidMarkers.unknownSysRejected || !invalidMarkers.ambiguousRejected) {
+      errors.push("La validación negativa de marcadores no superó la prueba interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar marcadores inválidos: ${error.message}`);
   }
 
   try {
