@@ -51,6 +51,14 @@ function validateProject(project) {
     errors.push(...template.validation.errors);
   }
 
+  const needsDocumentNumber = (template.systemFields || []).some((field) =>
+    field.valid !== false && ["CODIGO", "CODIGO_DOCUMENTO"].includes(field.name)
+  ) && /(0X|XX)/.test(String(project.codePattern || ""));
+  const documentNumber = project.formData && (project.formData.NUMERO_DOCUMENTO || project.formData.NUMERO);
+  if (needsDocumentNumber && !hasText(documentNumber)) {
+    errors.push("Falta el número de documento necesario para construir {{SYS:CODIGO}}.");
+  }
+
   (template.fields || []).forEach((field) => {
     if (!field.valid || !field.required) return;
 
