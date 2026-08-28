@@ -206,28 +206,6 @@ function migrateSettings(db, rootDir) {
     `).run(json(settings), now);
   }
 
-  const providers = readJson(path.join(rootDir, "ai-providers.json"), []);
-  if (Array.isArray(providers)) {
-    const insert = db.prepare(`
-      INSERT OR IGNORE INTO ai_providers
-        (id, name, kind, enabled, priority, model, endpoint, encrypted_key, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    providers.forEach((provider) => {
-      if (!provider || !provider.id) return;
-      insert.run(
-        provider.id,
-        provider.name || provider.id,
-        provider.kind || "openai-compatible",
-        provider.enabled ? 1 : 0,
-        Number(provider.priority || 9),
-        provider.model || "",
-        provider.endpoint || "",
-        provider.encryptedKey || "",
-        now
-      );
-    });
-  }
 }
 
 function migrateLegacy(db, rootDir) {
