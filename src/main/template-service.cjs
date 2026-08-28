@@ -359,16 +359,19 @@ function importTemplate(userDataPath, sourcePath, association) {
   const unitId = inferred && inferred.unitId ? inferred.unitId : null;
   const processId = inferred && inferred.processId ? inferred.processId : null;
   const version = versionFor(db, documentId);
+  const canActivate = inspected.validation.errors.length === 0;
   const id = `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const now = new Date().toISOString();
 
   const tx = db.transaction(() => {
-    if (documentId) db.prepare("UPDATE templates SET active = 0, updated_at = ? WHERE document_id = ?").run(now, documentId);
+    if (documentId && canActivate) {
+      db.prepare("UPDATE templates SET active = 0, updated_at = ? WHERE document_id = ?").run(now, documentId);
+    }
 
     db.prepare(`
       INSERT INTO templates
         (id, document_id, unit_id, process_id, name, version, local_path, active, confidence, imported_at, validation_json, sha256, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       documentId,
@@ -377,6 +380,7 @@ function importTemplate(userDataPath, sourcePath, association) {
       path.basename(stored),
       version,
       stored,
+      canActivate ? 1 : 0,
       inferred && inferred.confidence ? inferred.confidence : 0,
       now,
       JSON.stringify(inspected.validation),
@@ -424,6 +428,16 @@ function updateTemplate(userDataPath, templateId, patch) {
 
   if (nextDocumentId && nextDocumentId !== current.document_id) {
     nextVersion = versionFor(db, nextDocumentId);
+  }
+
+  if (nextActive) {
+    const hydrated = hydrateTemplate(db, current);
+    const errors = hydrated && hydrated.validation && Array.isArray(hydrated.validation.errors)
+      ? hydrated.validation.errors
+      : [];
+    if (errors.length) {
+      throw new Error("No se puede activar una plantilla con errores: " + errors[0]);
+    }
   }
 
   const now = new Date().toISOString();
