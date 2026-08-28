@@ -654,7 +654,12 @@
     }
     if (marker.type === "TABLA") {
       const rows = fieldValue(marker);
-      return Array.isArray(rows) && rows.length > 0;
+      const defs = Array.isArray(marker.columnDefs) ? marker.columnDefs : [];
+      return Array.isArray(rows) && rows.some((row) =>
+        defs.length
+          ? defs.some((column) => String(row && row[column.label] == null ? "" : row[column.label]).trim() !== "")
+          : Object.values(row || {}).some((cell) => String(cell == null ? "" : cell).trim() !== "")
+      );
     }
     const value = fieldValue(marker);
     return value != null && String(value).trim() !== "";
