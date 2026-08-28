@@ -96,6 +96,36 @@ function parseJson(value, fallback) {
   try { return JSON.parse(value); } catch (_error) { return fallback; }
 }
 
+function externalAnalysisOnly(value) {
+  const analysis = parseJson(value, null);
+  const external = analysis && analysis.externalGeneratedFields;
+  if (!external || typeof external !== "object" || !Object.keys(external).length) return null;
+  const fields = Object.assign({}, external);
+  const sources = {};
+  Object.keys(fields).forEach((name) => { sources[name] = ["IA externa"]; });
+  return {
+    provider: "IA externa",
+    generatedAt: new Date().toISOString(),
+    generatedFields: fields,
+    externalGeneratedFields: fields,
+    fieldSources: sources,
+    keyFindings: [],
+    missingData: [],
+    tables: [],
+    charts: [],
+    sourceTrace: [],
+    notes: "Campos importados mediante ITSQMET-CAMPOS-V1."
+  };
+}
+
+function invalidateAnalysisPreservingExternal(db, projectId, now) {
+  const row = db.prepare("SELECT analysis_json FROM projects WHERE id = ?").get(projectId);
+  const externalOnly = externalAnalysisOnly(row && row.analysis_json);
+  db.prepare(
+    "UPDATE projects SET analysis_json = ?, status = 'draft', updated_at = ? WHERE id = ?"
+  ).run(externalOnly ? JSON.stringify(externalOnly) : null, now || new Date().toISOString(), projectId);
+}
+
 function markerFromRow(row) {
   return enrichMarker({
     raw: row.raw,
@@ -471,9 +501,7 @@ function addAttachments(userDataPath, projectId, kind, paths, markerName) {
       });
     });
 
-    db.prepare(
-      "UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?"
-    ).run(new Date().toISOString(), projectId);
+    invalidateAnalysisPreservingExternal(db, projectId, new Date().toISOString());
   });
 
   tx();
@@ -491,9 +519,7 @@ function removeAttachment(userDataPath, projectId, attachmentId) {
   }
 
   db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").run(attachmentId, projectId);
-  db.prepare(
-    "UPDATE projects SET analysis_json = NULL, status = 'draft', updated_at = ? WHERE id = ?"
-  ).run(new Date().toISOString(), projectId);
+  invalidateAnalysisPreservingExternal(db, projectId, new Date().toISOString());
 
   queueSync(db, "file", attachmentId, "delete", { projectId });
   return getProject(userDataPath, projectId);
