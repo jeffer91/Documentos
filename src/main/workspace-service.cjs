@@ -3,7 +3,7 @@ const path = require("path");
 const { workspaceRoot, openDatabase, queueSync } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
 const PizZip = require("pizzip");
-const { enrichMarker, parseMarkerInner } = require("./template-markers.cjs");
+const { enrichMarker, parseMarkerInner, validateMarkers } = require("./template-markers.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
@@ -227,6 +227,14 @@ function templateById(db, templateId) {
     // La ubicación es informativa; no debe impedir abrir un proyecto.
   }
 
+  const storedValidation = parseJson(row.validation_json, { errors: [], warnings: [], ok: true });
+  const liveValidation = validateMarkers(markers);
+  const validation = {
+    errors: Array.from(new Set([].concat(storedValidation.errors || [], liveValidation.errors || []))),
+    warnings: Array.from(new Set([].concat(storedValidation.warnings || [], liveValidation.warnings || [])))
+  };
+  validation.ok = validation.errors.length === 0;
+
   return {
     id: row.id,
     documentId: row.document_id || "",
@@ -243,7 +251,7 @@ function templateById(db, templateId) {
     fields: markers.filter((marker) => marker.valid && (marker.isUserInput || marker.type === "CALC")),
     aiFields: markers.filter((marker) => marker.valid && marker.isAi),
     systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
-    validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true })
+    validation
   };
 }
 
