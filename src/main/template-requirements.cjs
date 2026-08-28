@@ -55,7 +55,14 @@ function actionFor(type) {
 }
 
 function valueFor(marker, project, sys) {
-  if (marker.type === "SISTEMA") return sys[marker.name] == null ? "" : sys[marker.name];
+  if (marker.type === "SISTEMA") {
+    if (
+      ["CODIGO", "CODIGO_DOCUMENTO"].includes(marker.name) &&
+      /(0X|XX)/.test(String(project.codePattern || "")) &&
+      !text(project.formData && (project.formData.NUMERO_DOCUMENTO || project.formData.NUMERO))
+    ) return "";
+    return sys[marker.name] == null ? "" : sys[marker.name];
+  }
   if (marker.type === "IA") {
     const fields = project.analysis && project.analysis.externalGeneratedFields || {};
     return fields[marker.name] == null ? "" : fields[marker.name];
@@ -78,7 +85,7 @@ function systemNote(marker, project, value) {
   if (!/(0X|XX)/.test(pattern)) return "Se calcula automáticamente con el patrón institucional del documento.";
   const explicit = text(project.formData && (project.formData.NUMERO_DOCUMENTO || project.formData.NUMERO));
   if (explicit) return "Número de documento utilizado: " + explicit + ".";
-  return "El patrón necesita un número de documento. Actualmente se usaría 01 por defecto; puedes cambiarlo antes de generar.";
+  return "El patrón necesita un número de documento. La app no permitirá generar hasta que indiques ese número.";
 }
 
 function statusFor(marker, project, value) {
