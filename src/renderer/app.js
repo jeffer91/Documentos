@@ -1842,6 +1842,15 @@
     if (!response || response.canceled) return;
     if (!response.ok) return showToast(response.error || "No se pudo importar.");
 
+    const errors = response.template.validation && response.template.validation.errors || [];
+    if (errors.length) {
+      await loadTemplates();
+      if (state.route === "process") renderProcess();
+      else renderTemplates();
+      showToast("Plantilla no reemplazada: " + errors[0]);
+      return;
+    }
+
     if (oldTemplateId && oldTemplateId !== response.template.id) {
       const removed = await api.deleteTemplate(oldTemplateId);
       if (!removed || !removed.ok) {
@@ -1853,8 +1862,7 @@
     if (state.route === "process") renderProcess();
     else renderTemplates();
 
-    const errors = response.template.validation && response.template.validation.errors || [];
-    showToast(errors.length ? errors[0] : "Plantilla reemplazada correctamente.");
+    showToast("Plantilla reemplazada correctamente.");
   }
 
   async function deleteTemplateFromUi(templateId) {
@@ -1902,6 +1910,15 @@
     if (!response || response.canceled) return;
     if (!response.ok) return showToast(response.error || "No se pudo importar.");
 
+    const errors = response.template.validation && response.template.validation.errors || [];
+    if (errors.length) {
+      await loadTemplates();
+      if (globalOnly) renderTemplates();
+      else renderEditor();
+      showToast("Plantilla no aplicada: " + errors[0]);
+      return;
+    }
+
     if (!globalOnly && previousTemplateId && previousTemplateId !== response.template.id) {
       await api.deleteTemplate(previousTemplateId);
     }
@@ -1935,8 +1952,9 @@
       renderTemplates();
     }
 
-    const errors = response.template.validation && response.template.validation.errors || [];
-    showToast(errors.length ? errors[0] : (!globalOnly && previousTemplateId ? "Plantilla reemplazada. Campos y archivos del borrador anterior fueron reiniciados." : "Plantilla guardada."));
+    showToast(!globalOnly && previousTemplateId
+      ? "Plantilla reemplazada. Campos y archivos del borrador anterior fueron reiniciados."
+      : "Plantilla guardada.");
   }
 
   async function assignTemplate(templateId) {
