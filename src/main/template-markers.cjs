@@ -37,6 +37,27 @@ const ALLOWED_TYPES = new Set([
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
 const DERIVED_TYPES = new Set(["CALC", "GRAFICO", "GRAFICOS"]);
+const SYSTEM_FIELD_NAMES = new Set([
+  "UNIDAD",
+  "SIGLA_UNIDAD",
+  "PROCESO",
+  "CODIGO_PROCESO",
+  "DOCUMENTO",
+  "TITULO",
+  "CODIGO",
+  "CODIGO_DOCUMENTO",
+  "FECHA_ACTUAL",
+  "VERSION",
+  "VERSION_DOCUMENTO",
+  "VERSION_PLANTILLA",
+  "PERIODO",
+  "ELABORADO_POR",
+  "CARGO_ELABORADO",
+  "REVISADO_POR",
+  "CARGO_REVISADO",
+  "APROBADO_POR",
+  "CARGO_APROBADO"
+]);
 
 function canonicalType(value) {
   const raw = String(value || "").trim().toUpperCase();
@@ -198,6 +219,10 @@ function validateMarkers(markers) {
     if (marker.valid && marker.type === "BUSCAR" && !marker.lookupSource) {
       warnings.push(`{{${marker.raw}}}: BUSCAR no indica una fuente. Ejemplo: {{BUSCAR:DOCENTE|Docente|DOCENTES}}`);
     }
+
+    if (marker.valid && marker.type === "SISTEMA" && !SYSTEM_FIELD_NAMES.has(marker.name)) {
+      errors.push(`{{${marker.raw}}}: SISTEMA no reconoce el campo ${marker.name}.`);
+    }
   });
 
   const byMeaning = new Map();
@@ -222,6 +247,7 @@ module.exports = {
   BLOCK_TYPES,
   USER_TYPES,
   DERIVED_TYPES,
+  SYSTEM_FIELD_NAMES,
   canonicalType,
   normalizeName,
   humanize,
