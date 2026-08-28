@@ -399,12 +399,33 @@
           : template
             ? `Plantilla v${template.version} lista`
             : "Falta plantilla";
+
+        if (document.mode === "upload") {
+          return `
+            <button class="doc-row" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
+              <span class="doc-icon">⇧</span>
+              <span class="doc-main"><h3>${escapeHtml(document.name)}</h3><p>${escapeHtml(document.code)} · Archivo</p></span>
+              <span class="doc-arrow">→</span>
+            </button>
+          `;
+        }
+
         return `
-          <button class="doc-row" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
-            <span class="doc-icon">${document.mode === "upload" ? "⇧" : template ? "✓" : "W"}</span>
-            <span class="doc-main"><h3>${escapeHtml(document.name)}</h3><p>${escapeHtml(document.code)} · ${escapeHtml(templateText)}</p></span>
-            <span class="doc-arrow">→</span>
-          </button>
+          <div class="doc-row doc-row-manage">
+            <button class="doc-open-zone" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
+              <span class="doc-icon">${template ? "✓" : "W"}</span>
+              <span class="doc-main"><h3>${escapeHtml(document.name)}</h3><p>${escapeHtml(document.code)} · ${escapeHtml(templateText)}</p></span>
+            </button>
+            <div class="doc-template-actions">
+              ${template ? `
+                <button class="ghost small-inline" type="button" data-action="replace-template-document" data-template-id="${escapeHtml(template.id)}" data-document-id="${escapeHtml(document.id)}">Reemplazar</button>
+                <button class="danger-button small-inline" type="button" data-action="delete-template" data-template-id="${escapeHtml(template.id)}">Eliminar</button>
+              ` : `
+                <button class="secondary small-inline" type="button" data-action="upload-template-document" data-document-id="${escapeHtml(document.id)}">+ Plantilla</button>
+              `}
+              <button class="doc-arrow-button" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}" aria-label="Abrir documento">→</button>
+            </div>
+          </div>
         `;
       }).join("")}</div>
     `;
@@ -1141,7 +1162,7 @@
           ${guideNavigation(plan, guide)}
 
           <section class="panel compact">
-            <div class="panel-title"><h3>Plantilla</h3><button class="ghost small-inline" type="button" data-action="import-template">Cambiar</button></div>
+            <div class="panel-title"><h3>Plantilla</h3><button class="ghost small-inline" type="button" data-action="import-template">Reemplazar</button></div>
             <div class="template-summary">
               <b>${escapeHtml(template.name)}</b>
               <span>Plantilla v${template.version} · lista</span>
@@ -1223,6 +1244,10 @@
                 <h3>${escapeHtml(item.name)}</h3>
                 <p>${escapeHtml(label)} · v${item.version} · ${count} campos</p>
                 ${!item.documentId ? `<div class="assign-row"><select id="assign-${escapeHtml(item.id)}">${documentOptionList("")}</select><button class="secondary" type="button" data-action="assign-template" data-id="${escapeHtml(item.id)}">Asignar</button></div>` : ""}
+                <div class="template-actions">
+                  ${item.documentId && item.active ? `<button class="ghost small-inline" type="button" data-action="replace-template-document" data-template-id="${escapeHtml(item.id)}" data-document-id="${escapeHtml(item.documentId)}">Reemplazar</button>` : ""}
+                  <button class="danger-button small-inline" type="button" data-action="delete-template" data-template-id="${escapeHtml(item.id)}">Eliminar</button>
+                </div>
               </div>
               <span class="status ${hasError ? "error" : item.active ? "good" : ""}">${hasError ? "Error" : item.active ? "Activa" : "Anterior"}</span>
             </div>
@@ -1391,7 +1416,71 @@
     saveTimer = setTimeout(() => persistEditor(), 450);
   }
 
+  function associationForDocument(documentId) {
+    const found = catalog.findDocument(documentId);
+    if (!found) return null;
+    return {
+      unitId: found.unit.id,
+      processId: found.process.id,
+      documentId: found.document.id
+    };
+  }
+
+  async function importTemplateForDocument(documentId, oldTemplateId) {
+    const association = associationForDocument(documentId);
+    if (!association) return showToast("Documento no válido.");
+
+    const response = await api.importTemplate(association);
+    if (!response || response.canceled) return;
+    if (!response.ok) return showToast(response.error || "No se pudo importar.");
+
+    if (oldTemplateId && oldTemplateId !== response.template.id) {
+      const removed = await api.deleteTemplate(oldTemplateId);
+      if (!removed || !removed.ok) {
+        showToast("La nueva plantilla quedó activa, pero no se pudo retirar la anterior.");
+      }
+    }
+
+    await loadTemplates();
+    if (state.route === "process") renderProcess();
+    else renderTemplates();
+
+    const errors = response.template.validation && response.template.validation.errors || [];
+    showToast(errors.length ? errors[0] : "Plantilla reemplazada correctamente.");
+  }
+
+  async function deleteTemplateFromUi(templateId) {
+    const item = state.templates.find((template) => template.id === templateId);
+    if (!item) return showToast("No se encontró la plantilla.");
+
+    const label = item.documentId
+      ? (catalog.findDocument(item.documentId)?.document?.name || item.name)
+      : item.name;
+    if (!window.confirm(`¿Eliminar la plantilla de "${label}"?\n\nLos documentos históricos conservarán su referencia, pero esta plantilla dejará de aparecer y de usarse para nuevos documentos.`)) return;
+
+    const response = await api.deleteTemplate(templateId);
+    if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo eliminar.");
+
+    await loadTemplates();
+
+    if (state.project && state.project.template && state.project.template.id === templateId) {
+      state.project.template = null;
+      state.project.analysis = null;
+      state.project.status = "draft";
+      await api.saveProject(state.project);
+    }
+
+    if (state.route === "process") renderProcess();
+    else if (state.route === "templates") renderTemplates();
+    else if (state.route === "editor") renderEditor();
+
+    showToast("Plantilla eliminada.");
+  }
+
   async function importTemplate(globalOnly) {
+    const previousTemplateId = !globalOnly && state.project && state.project.template
+      ? state.project.template.id
+      : null;
     const association = globalOnly || !state.document
       ? null
       : {
@@ -1403,6 +1492,10 @@
     const response = await api.importTemplate(association);
     if (!response || response.canceled) return;
     if (!response.ok) return showToast(response.error || "No se pudo importar.");
+
+    if (!globalOnly && previousTemplateId && previousTemplateId !== response.template.id) {
+      await api.deleteTemplate(previousTemplateId);
+    }
 
     await loadTemplates();
 
@@ -1418,7 +1511,7 @@
     }
 
     const errors = response.template.validation && response.template.validation.errors || [];
-    showToast(errors.length ? errors[0] : "Plantilla guardada.");
+    showToast(errors.length ? errors[0] : (!globalOnly && previousTemplateId ? "Plantilla reemplazada." : "Plantilla guardada."));
   }
 
   async function assignTemplate(templateId) {
@@ -1623,6 +1716,9 @@
     if (action === "open-project") return navigate("editor", { projectId: button.dataset.id });
     if (action === "import-template") return importTemplate(false);
     if (action === "import-template-global") return importTemplate(true);
+    if (action === "upload-template-document") return importTemplateForDocument(button.dataset.documentId, null);
+    if (action === "replace-template-document") return importTemplateForDocument(button.dataset.documentId, button.dataset.templateId);
+    if (action === "delete-template") return deleteTemplateFromUi(button.dataset.templateId);
     if (action === "assign-template") return assignTemplate(button.dataset.id);
     if (action === "add-files") return addFiles(button.dataset.kind, button.dataset.marker || "", button.dataset.multiple !== "false");
     if (action === "remove-file") return removeFile(button.dataset.id);
