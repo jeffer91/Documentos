@@ -347,7 +347,7 @@ function normalizeProject(input) {
     codePattern: p.codePattern || "",
     mode: p.mode || "template",
     formData: p.formData && typeof p.formData === "object" ? p.formData : {},
-    aiMode: p.aiMode || "fallback",
+    aiMode: p.aiMode || "external",
     template: p.template || null,
     attachments: Array.isArray(p.attachments) ? p.attachments : [],
     analysis: p.analysis || null,
@@ -379,7 +379,7 @@ function hydrateProject(db, row) {
     codePattern: row.code_pattern || "",
     mode: row.mode || "template",
     formData: formDataForProject(db, row.id),
-    aiMode: row.ai_mode || "fallback",
+    aiMode: row.ai_mode || "external",
     template: templateById(db, row.template_id),
     attachments: attachmentsForProject(db, row.id),
     analysis: parseJson(row.analysis_json, null),
@@ -670,7 +670,7 @@ function saveDocumentVersion(db, project, version, generationResult, now) {
     JSON.stringify(project.formData || {}),
     project.analysis ? JSON.stringify(project.analysis) : null,
     JSON.stringify(snapshotFiles(project)),
-    project.aiMode || "fallback",
+    project.aiMode || "external",
     now
   );
   return id;
@@ -757,7 +757,7 @@ function listDocumentVersions(userDataPath, projectId) {
       templateVersion: row.template_version || null,
       documentCode: row.document_code || "",
       documentVersion: row.document_version || "1.0",
-      aiMode: row.ai_mode || "fallback",
+      aiMode: row.ai_mode || "external",
       createdAt: row.created_at,
       fieldCount: Object.keys(formData).length,
       fileCount: Array.isArray(files) ? files.length : 0,
@@ -784,7 +784,7 @@ function getDocumentVersion(userDataPath, projectId, version) {
     formData: parseJson(row.form_data_json, {}),
     analysis: parseJson(row.analysis_json, null),
     files: parseJson(row.files_json, []),
-    aiMode: row.ai_mode || "fallback",
+    aiMode: row.ai_mode || "external",
     createdAt: row.created_at
   };
 }
@@ -884,7 +884,7 @@ function restoreDocumentVersion(userDataPath, projectId, version) {
     `).run(
       snapshot.templateId || null,
       snapshot.documentVersion || "1.0",
-      snapshot.aiMode || "fallback",
+      snapshot.aiMode || "external",
       snapshot.documentCode || "",
       snapshot.analysis ? JSON.stringify(snapshot.analysis) : null,
       now,
