@@ -21,7 +21,6 @@ contextBridge.exposeInMainWorld("documentosApp", {
   applyExternalAiResponse: (projectId, rawText, mode, overwrite) => ipcRenderer.invoke("external-ai:apply", projectId, rawText, mode, overwrite),
   undoExternalAiImport: (projectId) => ipcRenderer.invoke("external-ai:undo", projectId),
   copyText: (text) => ipcRenderer.invoke("clipboard:write", text),
-  analyze: (projectId, mode) => ipcRenderer.invoke("analysis:run", projectId, mode),
   calculate: (projectId) => ipcRenderer.invoke("calculations:run", projectId),
   generate: (projectId) => ipcRenderer.invoke("documents:generate", projectId),
   archiveUpload: (projectId) => ipcRenderer.invoke("documents:archive-upload", projectId),
