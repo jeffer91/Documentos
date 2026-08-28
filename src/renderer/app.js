@@ -1043,10 +1043,13 @@
     const calcCount = (template.fields || []).filter((field) => field.type === "CALC").length;
     const warnings = template.validation && template.validation.warnings || [];
     const errors = template.validation && template.validation.errors || [];
+    const overallTotal = Number(requirementData.summary && requirementData.summary.total || 0);
+    const overallReady = Number(requirementData.summary && requirementData.summary.ready || 0);
+    const overallPercent = overallTotal ? Math.round((overallReady / overallTotal) * 100) : stats.percent;
 
     return `
       <div class="review-hero">
-        <div class="review-score"><strong>${stats.percent}%</strong><span>datos completados</span></div>
+        <div class="review-score"><strong>${overallPercent}%</strong><span>requisitos resueltos</span></div>
         <div><h3>Revisión del documento</h3><p>La app mantiene ocultos los procesos automáticos y te muestra únicamente lo que necesita atención.</p></div>
       </div>
       <div class="review-grid">
@@ -1055,7 +1058,7 @@
         <div class="review-card"><span>Sistema</span><b>${sysCount}</b><small>valores automáticos</small></div>
         <div class="review-card"><span>Cálculos</span><b>${calcCount}</b><small>se ejecutan al generar</small></div>
       </div>
-      ${requiredMissing.length ? `<div class="review-alert"><b>Faltan ${requiredMissing.length} campos obligatorios</b><span>${requiredMissing.slice(0, 6).map((field) => escapeHtml(field.label + " · " + field.literal)).join(" · ")}${requiredMissing.length > 6 ? "…" : ""}</span></div>` : '<div class="review-ok"><b>Campos obligatorios completos</b><span>El documento está listo para la generación técnica.</span></div>'}
+      ${requiredMissing.length ? `<div class="review-alert"><b>Faltan ${requiredMissing.length} requisitos obligatorios</b><span>${requiredMissing.slice(0, 6).map((field) => escapeHtml(field.label + " · " + field.literal)).join(" · ")}${requiredMissing.length > 6 ? "…" : ""}</span></div>` : '<div class="review-ok"><b>Campos obligatorios completos</b><span>El documento está listo para la generación técnica.</span></div>'}
       ${errors.length ? `<div class="notice-error"><b>La plantilla tiene errores</b><span>${escapeHtml(errors[0])}</span></div>` : ""}
       ${!errors.length && warnings.length ? `<div class="notice-warn"><b>Aviso de plantilla</b><span>${escapeHtml(warnings[0])}</span></div>` : ""}
       <button class="primary review-generate" type="button" data-action="generate" ${requiredMissing.length || errors.length ? "disabled" : ""}>Generar documento PDF</button>
@@ -1221,7 +1224,7 @@
   function requirementActionHtml(item) {
     if (item.type === "SISTEMA" && ["CODIGO", "CODIGO_DOCUMENTO"].includes(item.name) && item.status === "warning") {
       const current = state.project && state.project.formData && (state.project.formData.NUMERO_DOCUMENTO || state.project.formData.NUMERO) || "";
-      return `<div class="requirement-code-input"><label>Número del documento</label><input data-field="NUMERO_DOCUMENTO" type="number" min="1" value="${escapeHtml(current)}" placeholder="01"></div>`;
+      return `<div class="requirement-code-input"><label>Número del documento</label><input data-field="NUMERO_DOCUMENTO" type="number" min="1" step="1" value="${escapeHtml(current)}" placeholder="01"></div>`;
     }
     if (item.action === "upload_data") {
       return `<button class="ghost small-inline" type="button" data-action="add-files" data-kind="data" data-marker="${escapeHtml(item.name)}" data-multiple="false">Cargar Excel / CSV</button>`;
@@ -1231,6 +1234,13 @@
     }
     if (item.action === "table") {
       return `<button class="ghost small-inline" type="button" data-action="add-table-row" data-marker="${escapeHtml(item.name)}">+ Fila manual</button>`;
+    }
+    if (
+      item.type === "SISTEMA" &&
+      ["ELABORADO_POR", "CARGO_ELABORADO", "REVISADO_POR", "CARGO_REVISADO", "APROBADO_POR", "CARGO_APROBADO"].includes(item.name) &&
+      ["missing", "pending"].includes(item.status)
+    ) {
+      return '<button class="ghost small-inline" type="button" data-route="settings">Ir a Ajustes</button>';
     }
     return "";
   }
@@ -1266,6 +1276,8 @@
           <div class="requirement-meta">
             <span>${escapeHtml(item.type === "IA" ? "REDACCION" : item.type)}</span>
             <span>Fuente: ${escapeHtml(item.source)}</span>
+            ${Array.isArray(item.locations) && item.locations.length ? `<span>Ubicación: ${escapeHtml(item.locations.join(" · "))}</span>` : ""}
+            <span>${Number(item.occurrenceCount || 1)} aparición${Number(item.occurrenceCount || 1) === 1 ? "" : "es"}</span>
           </div>
           ${columns}
           ${item.blockingReason ? `<p class="requirement-note">${escapeHtml(item.blockingReason)}</p>` : ""}
@@ -1297,7 +1309,7 @@
         <div class="panel-title requirements-title">
           <div>
             <h2>Requisitos de la plantilla</h2>
-            <small>La app muestra el marcador exacto del Word, quién lo llena y su estado actual.</small>
+            <small>La app muestra el marcador exacto del Word, dónde aparece, quién lo llena y su estado actual.</small>
           </div>
           <span class="status ${Number(summary.blocking || 0) ? "warn" : "good"}">${Number(summary.ready || 0)}/${Number(summary.total || 0)} resueltos</span>
         </div>
@@ -1923,6 +1935,7 @@
     if (!globalOnly && state.project) {
       state.project.template = response.template;
       state.editorGuide = null;
+      state.project.formData = {};
       state.project.analysis = null;
       state.project.status = "draft";
       const saved = await api.saveProject(state.project);
@@ -1934,7 +1947,7 @@
     }
 
     const errors = response.template.validation && response.template.validation.errors || [];
-    showToast(errors.length ? errors[0] : (!globalOnly && previousTemplateId ? "Plantilla reemplazada." : "Plantilla guardada."));
+    showToast(errors.length ? errors[0] : (!globalOnly && previousTemplateId ? "Plantilla reemplazada. El borrador se reinició para la nueva estructura." : "Plantilla guardada."));
   }
 
   async function assignTemplate(templateId) {
