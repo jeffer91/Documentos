@@ -135,6 +135,7 @@ function validateExtractedData(project, sources) {
   const errors = [];
   const warnings = [];
   const tables = Array.isArray(sources && sources.tables) ? sources.tables : [];
+  const truncations = Array.isArray(sources && sources.truncations) ? sources.truncations : [];
   const extractionWarnings = Array.isArray(sources && sources.extractionWarnings) ? sources.extractionWarnings : [];
 
   ((project.template && project.template.fields) || [])
@@ -144,6 +145,16 @@ function validateExtractedData(project, sources) {
       if (!hasFile) return;
 
       const matching = tables.filter((table) => String(table.markerName || "") === String(field.name));
+      const truncated = truncations.filter((item) => String(item.markerName || "") === String(field.name));
+
+      if (field.required && truncated.length) {
+        errors.push(
+          `${field.label}: el archivo excede el límite seguro de inserción en Word y produciría información incompleta. ${truncated[0].message}`
+        );
+      } else if (truncated.length) {
+        warnings.push(`${field.label}: ${truncated[0].message}`);
+      }
+
       if (field.required && !matching.length) {
         errors.push(`${field.label}: el archivo fue cargado, pero no se pudo obtener una tabla utilizable para {{${field.raw}}}.`);
       } else if (!matching.length) {
