@@ -237,6 +237,18 @@ function validateMarkers(markers) {
     if (new Set(raws).size > 1) warnings.push(`${key} tiene variantes de marcador. Conviene usar una sola forma.`);
   });
 
+  const typesByName = new Map();
+  list.filter((marker) => marker.valid).forEach((marker) => {
+    const types = typesByName.get(marker.name) || new Set();
+    types.add(marker.type);
+    typesByName.set(marker.name, types);
+  });
+  typesByName.forEach((types, name) => {
+    if (types.size > 1) {
+      errors.push(`${name} está usado con varios tipos (${Array.from(types).join(", ")}). Cada identificador debe tener un único tipo.`);
+    }
+  });
+
   if (!list.length) warnings.push("No se detectaron marcadores {{...}}.");
   return { errors, warnings, ok: errors.length === 0 };
 }
