@@ -1265,6 +1265,7 @@
             <span>${escapeHtml(item.type === "IA" ? "REDACCION" : item.type)}</span>
             <span>Fuente: ${escapeHtml(item.source)}</span>
             ${Array.isArray(item.locations) && item.locations.length ? `<span>Ubicación: ${escapeHtml(item.locations.join(" · "))}</span>` : ""}
+            ${Array.isArray(item.contexts) && item.contexts.length ? `<span>Sección: ${escapeHtml(item.contexts.join(" · "))}</span>` : ""}
             <span>${Number(item.occurrenceCount || 1)} aparición${Number(item.occurrenceCount || 1) === 1 ? "" : "es"}</span>
           </div>
           ${columns}
@@ -1297,7 +1298,7 @@
         <div class="panel-title requirements-title">
           <div>
             <h2>Requisitos de la plantilla</h2>
-            <small>La app muestra el marcador exacto del Word, dónde aparece, quién lo llena y su estado actual.</small>
+            <small>La app muestra el marcador exacto del Word, su sección, dónde aparece, quién lo llena y su estado actual.</small>
           </div>
           <span class="status ${Number(summary.blocking || 0) ? "warn" : "good"}">${Number(summary.ready || 0)}/${Number(summary.total || 0)} resueltos</span>
         </div>
