@@ -57,8 +57,11 @@ function validateProject(project) {
   const documentNumber = project.formData && (project.formData.NUMERO_DOCUMENTO || project.formData.NUMERO);
   if (needsDocumentNumber && !hasText(documentNumber)) {
     errors.push("Falta el número de documento necesario para construir {{SYS:CODIGO}}.");
-  } else if (needsDocumentNumber && !/^\d+$/.test(String(documentNumber).trim())) {
-    errors.push("El número de documento para {{SYS:CODIGO}} debe contener únicamente dígitos enteros.");
+  } else if (
+    needsDocumentNumber &&
+    (!/^\d+$/.test(String(documentNumber).trim()) || Number(documentNumber) < 1)
+  ) {
+    errors.push("El número de documento para {{SYS:CODIGO}} debe ser un entero positivo (1 o mayor).");
   }
 
   (template.fields || []).forEach((field) => {
