@@ -23,6 +23,7 @@ const REQUIRED_FILES = [
   "src/main/workspace-service.cjs",
   "src/main/template-markers.cjs",
   "src/main/template-service.cjs",
+  "src/main/external-ai-exchange.cjs",
   "src/main/source-service.cjs",
   "src/main/project-validator.cjs",
   "src/main/ai-provider-service.cjs",
@@ -85,6 +86,39 @@ function markerCheck() {
     hasTableColumns: Boolean(markers.find((item) => item.type === "TABLA" && item.columnDefs.length === 3 && item.columnDefs[2].type === "FECHA")),
     hasAliases: Boolean(markers.find((item) => item.aliasUsed === "CAL" && item.type === "CALC")),
     hasList: Boolean(markers.find((item) => item.type === "LISTA" && item.options.length === 2))
+  };
+}
+
+function externalAiProtocolCheck() {
+  const { PROTOCOL, parseResponse } = require(path.join(ROOT, "src/main/external-ai-exchange.cjs"));
+  const parsed = parseResponse([
+    "//FORMATO:" + PROTOCOL + "//",
+    "//DOCUMENTO:doc-test//",
+    "//PLANTILLA:abc123//",
+    "//MODO:MANUALES+IA//",
+    "",
+    "//CAMPO:PERIODO//",
+    "Mayo 2026 - Noviembre 2026",
+    "//FIN:PERIODO//",
+    "",
+    "//CAMPO:CONCLUSIONES//",
+    "Primera línea.",
+    "Segunda línea.",
+    "//FIN:CONCLUSIONES//",
+    "",
+    "//FIN-DOCUMENTO//"
+  ].join("\n"));
+
+  return {
+    protocol: PROTOCOL,
+    format: parsed.metadata.format,
+    documentId: parsed.metadata.documentId,
+    template: parsed.metadata.template,
+    mode: parsed.metadata.mode,
+    blockCount: parsed.blocks.length,
+    period: parsed.blocks[0] && parsed.blocks[0].value,
+    multiline: parsed.blocks[1] && parsed.blocks[1].value,
+    ended: parsed.ended
   };
 }
 
@@ -164,7 +198,26 @@ function main() {
     errors.push(`No se pudo validar cálculos: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.6");
+  try {
+    const exchange = externalAiProtocolCheck();
+    if (
+      exchange.protocol !== "ITSQMET-CAMPOS-V1" ||
+      exchange.format !== exchange.protocol ||
+      exchange.documentId !== "doc-test" ||
+      exchange.template !== "abc123" ||
+      exchange.mode !== "MANUALES+IA" ||
+      exchange.blockCount !== 2 ||
+      exchange.period !== "Mayo 2026 - Noviembre 2026" ||
+      exchange.multiline !== "Primera línea.\nSegunda línea." ||
+      !exchange.ended
+    ) {
+      errors.push("El protocolo de IA externa no superó la prueba interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar IA externa: ${error.message}`);
+  }
+
+  console.log("Documentos ITSQMET · diagnóstico v2.7");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
@@ -173,7 +226,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: estructura, sintaxis, catálogo y marcadores correctos.");
+    console.log("OK: estructura, sintaxis, catálogo, marcadores e IA externa correctos.");
   }
 }
 
