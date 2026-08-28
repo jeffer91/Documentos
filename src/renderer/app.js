@@ -30,7 +30,7 @@
     externalAi: {
       templateId: "",
       guide: "",
-      mode: "manual",
+      mode: "manual_ai",
       fieldsText: "",
       prompt: "",
       response: "",
@@ -198,7 +198,7 @@
     state.externalAi = {
       templateId: state.project && state.project.template ? state.project.template.id : "",
       guide: "",
-      mode: state.externalAi && state.externalAi.mode === "manual_ai" ? "manual_ai" : "manual",
+      mode: "manual_ai",
       fieldsText: "",
       prompt: "",
       response: "",
@@ -213,7 +213,7 @@
       return;
     }
 
-    const currentMode = state.externalAi && state.externalAi.mode === "manual_ai" ? "manual_ai" : "manual";
+    const currentMode = "manual_ai";
     const previousResponse = state.externalAi && state.externalAi.templateId === state.project.template.id
       ? state.externalAi.response || ""
       : "";
@@ -233,7 +233,7 @@
 
     const promptResponse = await api.buildExternalAiPrompt(
       state.project.id,
-      state.externalAi.mode,
+      "manual_ai",
       state.externalAi.guide
     );
     if (promptResponse && promptResponse.ok && promptResponse.data) {
@@ -320,9 +320,7 @@
             documentType: found.document.type,
             codePattern: found.document.code,
             mode: found.document.mode,
-            aiMode: state.settings && state.settings.generation
-              ? state.settings.generation.defaultAiMode
-              : "fallback"
+            aiMode: "external"
           });
           if (response && response.ok) state.project = response.project;
         }
@@ -1229,83 +1227,68 @@
 
   function externalAiHtml(template) {
     const data = state.externalAi || {};
-    const mode = data.mode === "manual_ai" ? "manual_ai" : "manual";
     const aiCount = Number(data.aiCount || 0);
     const manualCount = Number(data.manualCount || 0);
-    const total = Number(data.fieldCount || 0);
+    const total = Number(data.fieldCount || (manualCount + aiCount));
 
-    return `
-      <section class="panel external-ai-panel">
+    return \`
+      <section class="panel external-ai-panel external-ai-simple">
         <div class="panel-title external-ai-title">
           <div>
             <h2>IA externa</h2>
-            <small>Prepara el documento con ChatGPT, Claude, Gemini u otra IA y pega aquí la respuesta.</small>
+            <small>La app prepara el prompt. Tú lo usas en ChatGPT, Claude, Gemini u otra IA y pegas aquí el resultado.</small>
           </div>
-          <span class="status good">ITSQMET-CAMPOS-V1</span>
+          <span class="status good">Documento completo · \${total} campos</span>
         </div>
 
-        <div class="external-ai-grid">
+        <div class="external-ai-simple-flow">
           <div class="external-ai-section">
             <div class="external-ai-section-head">
-              <div><span>1</span><div><h3>Guía para llenar</h3><p>Se guarda únicamente para esta plantilla v${template.version}.</p></div></div>
-              <button class="ghost small-inline" type="button" data-action="external-ai-save-guide">Guardar guía</button>
+              <div><span>1</span><div><h3>Preparar prompt</h3><p>Incluye automáticamente todos los campos manuales y de redacción IA de la plantilla.</p></div></div>
             </div>
-            <textarea id="externalAiGuide" class="external-ai-textarea guide" placeholder="Pega aquí la guía: qué información usar, criterios, estructura, metodología, reglas de redacción...">${escapeHtml(data.guide || "")}</textarea>
+
+            <label class="external-ai-label" for="externalAiGuide">Instrucciones adicionales <small>(opcional)</small></label>
+            <textarea id="externalAiGuide" class="external-ai-textarea guide compact-guide" placeholder="Solo si este documento necesita una indicación especial. Puedes dejarlo vacío.">\${escapeHtml(data.guide || "")}</textarea>
+
+            <div class="external-ai-counts">
+              <span>\${total} campos del documento</span>
+              <span>\${manualCount} datos manuales</span>
+              <span>\${aiCount} campos de redacción</span>
+            </div>
+
+            <div class="external-ai-main-action">
+              <button class="primary external-ai-copy-main" type="button" data-action="external-ai-copy-prompt" \${data.prompt ? "" : "disabled"}>Copiar prompt para IA externa</button>
+              <small>Al copiar, las instrucciones opcionales se guardan automáticamente para esta plantilla v\${template.version}.</small>
+            </div>
+
+            <details class="external-ai-details">
+              <summary>Ver campos que se enviarán</summary>
+              <textarea class="external-ai-textarea fields" readonly>\${escapeHtml(data.fieldsText || "")}</textarea>
+            </details>
+
+            <details class="external-ai-details">
+              <summary>Ver prompt generado</summary>
+              <textarea class="external-ai-textarea prompt" readonly>\${escapeHtml(data.prompt || "")}</textarea>
+            </details>
           </div>
 
           <div class="external-ai-section">
             <div class="external-ai-section-head">
-              <div><span>2</span><div><h3>Campos que debe devolver</h3><p>Siempre corresponde al documento completo.</p></div></div>
-              <div class="external-ai-copy-actions">
-                <button class="ghost small-inline" type="button" data-action="external-ai-build">Actualizar</button>
-                <button class="secondary small-inline" type="button" data-action="external-ai-copy-fields" ${data.fieldsText ? "" : "disabled"}>Copiar campos</button>
-              </div>
+              <div><span>2</span><div><h3>Importar respuesta</h3><p>Pega el único bloque que devolvió la IA externa. La app lo valida antes de llenar el documento.</p></div></div>
+              \${data.canUndo ? '<button class="ghost small-inline" type="button" data-action="external-ai-undo">Deshacer última importación</button>' : ""}
             </div>
 
-            <div class="external-ai-mode">
-              <label class="mode-option">
-                <input type="radio" name="externalAiMode" value="manual" ${mode === "manual" ? "checked" : ""}>
-                <b>Solo campos manuales</b>
-                <small>${manualCount} campos de texto</small>
-              </label>
-              <label class="mode-option">
-                <input type="radio" name="externalAiMode" value="manual_ai" ${mode === "manual_ai" ? "checked" : ""}>
-                <b>Manuales + campos IA</b>
-                <small>${manualCount + aiCount} campos</small>
-              </label>
+            <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-CAMPOS-V1//&#10;//DOCUMENTO:...//&#10;//PLANTILLA:...//&#10;//VERSION-PLANTILLA:...//&#10;//MODO:MANUALES+IA//&#10;&#10;//CAMPO:...//&#10;contenido&#10;//FIN:...//&#10;&#10;//FIN-DOCUMENTO//">\${escapeHtml(data.response || "")}</textarea>
+
+            <div class="button-row end external-ai-analyze-row">
+              <button class="secondary" type="button" data-action="external-ai-preview">Analizar respuesta</button>
             </div>
 
-            <textarea class="external-ai-textarea fields" readonly>${escapeHtml(data.fieldsText || "")}</textarea>
-            <small class="external-ai-note">No se envían CALC, SISTEMA, imágenes, archivos, datos ni gráficos: esos elementos los controla la app.</small>
+            \${externalAiPreviewHtml()}
           </div>
-        </div>
-
-        <div class="external-ai-section external-ai-prompt-section">
-          <div class="external-ai-section-head">
-            <div><span>3</span><div><h3>Prompt completo</h3><p>Incluye guía, reglas, todos los campos y el formato obligatorio.</p></div></div>
-            <button class="primary small-inline" type="button" data-action="external-ai-copy-prompt" ${data.prompt ? "" : "disabled"}>Copiar prompt completo</button>
-          </div>
-          <textarea class="external-ai-textarea prompt" readonly>${escapeHtml(data.prompt || "")}</textarea>
-          <div class="external-ai-counts">
-            <span>${total} campos solicitados</span>
-            <span>${manualCount} manuales</span>
-            <span>${aiCount} IA</span>
-          </div>
-        </div>
-
-        <div class="external-ai-section">
-          <div class="external-ai-section-head">
-            <div><span>4</span><div><h3>Respuesta de la IA</h3><p>Pega el único texto devuelto por la IA externa y valídalo antes de importar.</p></div></div>
-            <div class="external-ai-copy-actions">
-              ${data.canUndo ? '<button class="ghost small-inline" type="button" data-action="external-ai-undo">Deshacer última importación</button>' : ""}
-              <button class="secondary small-inline" type="button" data-action="external-ai-preview">Analizar respuesta</button>
-            </div>
-          </div>
-          <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-CAMPOS-V1//&#10;//DOCUMENTO:...//&#10;...">${escapeHtml(data.response || "")}</textarea>
-          ${externalAiPreviewHtml()}
         </div>
       </section>
-    `;
+    \`;
   }
 
   function renderEditor() {
@@ -1329,7 +1312,6 @@
     const manualCount = manualTemplateFields(template).length;
     const systemCount = (template.systemFields || []).length;
     const calcCount = (template.fields || []).filter((field) => field.type === "CALC").length;
-    const sourceCount = (state.project.attachments || []).filter((item) => item.kind === "source").length;
     const plan = buildEditorPlan(template);
     const guide = ensureEditorGuide(plan);
 
@@ -1351,32 +1333,12 @@
             </div>
             <div class="template-metrics">
               <span><b>${manualCount}</b> datos</span>
-              <span><b>${aiCount}</b> IA</span>
+              <span><b>${aiCount}</b> redacción externa</span>
               <span><b>${systemCount + calcCount}</b> automáticos</span>
             </div>
           </section>
 
-          ${aiCount ? `
-            <section class="panel compact">
-              <div class="panel-title"><h3>IA</h3><span class="status good">${aiCount} automáticos</span></div>
-              <div class="mode-row">
-                <label class="mode-option">
-                  <input type="radio" name="aiMode" value="fallback" ${state.project.aiMode !== "deep" ? "checked" : ""}>
-                  <b>Automático</b><small>Con respaldo</small>
-                </label>
-                <label class="mode-option">
-                  <input type="radio" name="aiMode" value="deep" ${state.project.aiMode === "deep" ? "checked" : ""}>
-                  <b>Profundo</b><small>Varias IAs</small>
-                </label>
-              </div>
-            </section>
 
-            <section class="panel compact">
-              <div class="panel-title"><h3>Fuentes</h3><span class="status">${sourceCount}</span></div>
-              <button class="upload-button" type="button" data-action="add-files" data-kind="source" data-marker="" data-multiple="true"><b>+ Documentos</b><span>Word · PDF</span></button>
-              ${fileList("source", "")}
-            </section>
-          ` : ""}
         </aside>
       </div>
       ${externalAiHtml(template)}
@@ -1543,7 +1505,6 @@
       <section class="panel compact">
         <div class="panel-title"><h3>Generación</h3></div>
         <div class="form-grid">
-          <div class="field"><label>IA</label><select id="defaultAiMode"><option value="fallback" ${settings.generation.defaultAiMode !== "deep" ? "selected" : ""}>Automático</option><option value="deep" ${settings.generation.defaultAiMode === "deep" ? "selected" : ""}>Profundo</option></select></div>
           <div class="field"><label>Abrir PDF</label><select id="openAfterGenerate"><option value="yes" ${settings.generation.openAfterGenerate ? "selected" : ""}>Sí</option><option value="no" ${!settings.generation.openAfterGenerate ? "selected" : ""}>No</option></select></div>
         </div>
       </section>
@@ -1603,8 +1564,6 @@
     state.project.analysis = preservedExternalAnalysis();
     state.project.formData = collectFormData();
     clearCalculatedValues();
-    const mode = document.querySelector('input[name="aiMode"]:checked');
-    if (mode) state.project.aiMode = mode.value;
     const response = await api.saveProject(state.project);
     if (response && response.ok) {
       state.project = response.project;
@@ -1623,10 +1582,9 @@
   function readExternalAiInputs() {
     const guide = document.getElementById("externalAiGuide");
     const response = document.getElementById("externalAiResponse");
-    const mode = document.querySelector('input[name="externalAiMode"]:checked');
     if (guide) state.externalAi.guide = guide.value;
     if (response) state.externalAi.response = response.value;
-    if (mode) state.externalAi.mode = mode.value === "manual_ai" ? "manual_ai" : "manual";
+    state.externalAi.mode = "manual_ai";
   }
 
   async function saveExternalAiGuide() {
@@ -1661,12 +1619,37 @@
     if (showMessage !== false) showToast("Prompt actualizado.");
   }
 
-  async function copyExternalAiText(kind) {
+  async function copyExternalAiPrompt() {
+    if (!state.project) return;
     readExternalAiInputs();
-    const text = kind === "fields" ? state.externalAi.fieldsText : state.externalAi.prompt;
-    if (!text) return showToast("Primero prepara el prompt.");
-    const response = await api.copyText(text);
-    showToast(response && response.ok ? (kind === "fields" ? "Campos copiados." : "Prompt completo copiado.") : "No se pudo copiar.");
+
+    const saved = await api.saveExternalAiGuide(state.project.id, state.externalAi.guide);
+    if (!saved || !saved.ok) {
+      return showToast(saved && saved.error ? saved.error : "No se pudieron guardar las instrucciones.");
+    }
+
+    const built = await api.buildExternalAiPrompt(
+      state.project.id,
+      "manual_ai",
+      state.externalAi.guide
+    );
+    if (!built || !built.ok || !built.data) {
+      return showToast(built && built.error ? built.error : "No se pudo preparar el prompt.");
+    }
+
+    state.externalAi.mode = "manual_ai";
+    state.externalAi.fieldsText = built.data.fieldsText || "";
+    state.externalAi.prompt = built.data.prompt || "";
+    state.externalAi.manualCount = Number(built.data.manualCount || 0);
+    state.externalAi.aiCount = Number(built.data.aiCount || 0);
+    state.externalAi.fieldCount = Number(built.data.fieldCount || 0);
+    state.externalAi.canUndo = Boolean(saved.data && saved.data.canUndo);
+
+    const copied = await api.copyText(state.externalAi.prompt);
+    if (!copied || !copied.ok) return showToast("No se pudo copiar el prompt.");
+
+    renderEditor();
+    showToast("Prompt completo copiado. Pégalo en tu IA externa.");
   }
 
   async function previewExternalAiResponse() {
@@ -1676,7 +1659,7 @@
     const response = await api.previewExternalAiResponse(
       state.project.id,
       state.externalAi.response,
-      state.externalAi.mode
+      "manual_ai"
     );
     if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo analizar la respuesta.");
     state.externalAi.preview = response.preview;
@@ -1690,7 +1673,7 @@
     const response = await api.applyExternalAiResponse(
       state.project.id,
       state.externalAi.response,
-      state.externalAi.mode,
+      "manual_ai",
       overwrite
     );
     if (!response || !response.ok) return showToast(response && response.error ? response.error : "No se pudo importar la respuesta.");
@@ -1970,7 +1953,7 @@
     const response = await api.saveSettings({
       signers,
       generation: {
-        defaultAiMode: document.getElementById("defaultAiMode").value,
+        defaultAiMode: "external",
         openAfterGenerate: document.getElementById("openAfterGenerate").value === "yes",
         includeSourceTrace: false
       }
@@ -2002,11 +1985,7 @@
   });
 
   view.addEventListener("change", (event) => {
-    if (event.target.matches("[data-field], input[name='aiMode']")) scheduleSave();
-    if (event.target.matches('input[name="externalAiMode"]')) {
-      state.externalAi.mode = event.target.value === "manual_ai" ? "manual_ai" : "manual";
-      buildExternalAiPrompt(false);
-    }
+    if (event.target.matches("[data-field]")) scheduleSave();
     if (event.target.id === "careerSelector") changeGuideCareer(Number(event.target.value));
   });
 
@@ -2029,9 +2008,7 @@
     if (action === "delete-template") return deleteTemplateFromUi(button.dataset.templateId);
     if (action === "assign-template") return assignTemplate(button.dataset.id);
     if (action === "external-ai-save-guide") return saveExternalAiGuide();
-    if (action === "external-ai-build") return buildExternalAiPrompt(true);
-    if (action === "external-ai-copy-fields") return copyExternalAiText("fields");
-    if (action === "external-ai-copy-prompt") return copyExternalAiText("prompt");
+    if (action === "external-ai-copy-prompt") return copyExternalAiPrompt();
     if (action === "external-ai-preview") return previewExternalAiResponse();
     if (action === "external-ai-import") return importExternalAiResponse();
     if (action === "external-ai-undo") return undoExternalAiImport();
