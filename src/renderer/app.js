@@ -1231,14 +1231,14 @@
     const manualCount = Number(data.manualCount || 0);
     const total = Number(data.fieldCount || (manualCount + aiCount));
 
-    return \`
+    return `
       <section class="panel external-ai-panel external-ai-simple">
         <div class="panel-title external-ai-title">
           <div>
             <h2>IA externa</h2>
             <small>La app prepara el prompt. Tú lo usas en ChatGPT, Claude, Gemini u otra IA y pegas aquí el resultado.</small>
           </div>
-          <span class="status good">Documento completo · \${total} campos</span>
+          <span class="status good">Documento completo · ${total} campos</span>
         </div>
 
         <div class="external-ai-simple-flow">
@@ -1248,47 +1248,47 @@
             </div>
 
             <label class="external-ai-label" for="externalAiGuide">Instrucciones adicionales <small>(opcional)</small></label>
-            <textarea id="externalAiGuide" class="external-ai-textarea guide compact-guide" placeholder="Solo si este documento necesita una indicación especial. Puedes dejarlo vacío.">\${escapeHtml(data.guide || "")}</textarea>
+            <textarea id="externalAiGuide" class="external-ai-textarea guide compact-guide" placeholder="Solo si este documento necesita una indicación especial. Puedes dejarlo vacío.">${escapeHtml(data.guide || "")}</textarea>
 
             <div class="external-ai-counts">
-              <span>\${total} campos del documento</span>
-              <span>\${manualCount} datos manuales</span>
-              <span>\${aiCount} campos de redacción</span>
+              <span>${total} campos del documento</span>
+              <span>${manualCount} datos manuales</span>
+              <span>${aiCount} campos de redacción</span>
             </div>
 
             <div class="external-ai-main-action">
-              <button class="primary external-ai-copy-main" type="button" data-action="external-ai-copy-prompt" \${data.prompt ? "" : "disabled"}>Copiar prompt para IA externa</button>
-              <small>Al copiar, las instrucciones opcionales se guardan automáticamente para esta plantilla v\${template.version}.</small>
+              <button class="primary external-ai-copy-main" type="button" data-action="external-ai-copy-prompt" ${data.prompt ? "" : "disabled"}>Copiar prompt para IA externa</button>
+              <small>Al copiar, las instrucciones opcionales se guardan automáticamente para esta plantilla v${template.version}.</small>
             </div>
 
             <details class="external-ai-details">
               <summary>Ver campos que se enviarán</summary>
-              <textarea class="external-ai-textarea fields" readonly>\${escapeHtml(data.fieldsText || "")}</textarea>
+              <textarea class="external-ai-textarea fields" readonly>${escapeHtml(data.fieldsText || "")}</textarea>
             </details>
 
             <details class="external-ai-details">
               <summary>Ver prompt generado</summary>
-              <textarea class="external-ai-textarea prompt" readonly>\${escapeHtml(data.prompt || "")}</textarea>
+              <textarea class="external-ai-textarea prompt" readonly>${escapeHtml(data.prompt || "")}</textarea>
             </details>
           </div>
 
           <div class="external-ai-section">
             <div class="external-ai-section-head">
               <div><span>2</span><div><h3>Importar respuesta</h3><p>Pega el único bloque que devolvió la IA externa. La app lo valida antes de llenar el documento.</p></div></div>
-              \${data.canUndo ? '<button class="ghost small-inline" type="button" data-action="external-ai-undo">Deshacer última importación</button>' : ""}
+              ${data.canUndo ? '<button class="ghost small-inline" type="button" data-action="external-ai-undo">Deshacer última importación</button>' : ""}
             </div>
 
-            <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-CAMPOS-V1//&#10;//DOCUMENTO:...//&#10;//PLANTILLA:...//&#10;//VERSION-PLANTILLA:...//&#10;//MODO:MANUALES+IA//&#10;&#10;//CAMPO:...//&#10;contenido&#10;//FIN:...//&#10;&#10;//FIN-DOCUMENTO//">\${escapeHtml(data.response || "")}</textarea>
+            <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-CAMPOS-V1//&#10;//DOCUMENTO:...//&#10;//PLANTILLA:...//&#10;//VERSION-PLANTILLA:...//&#10;//MODO:MANUALES+IA//&#10;&#10;//CAMPO:...//&#10;contenido&#10;//FIN:...//&#10;&#10;//FIN-DOCUMENTO//">${escapeHtml(data.response || "")}</textarea>
 
             <div class="button-row end external-ai-analyze-row">
               <button class="secondary" type="button" data-action="external-ai-preview">Analizar respuesta</button>
             </div>
 
-            \${externalAiPreviewHtml()}
+            ${externalAiPreviewHtml()}
           </div>
         </div>
       </section>
-    \`;
+    `;
   }
 
   function renderEditor() {
