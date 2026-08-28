@@ -10,6 +10,9 @@ const errorService = require("../src/main/error-service.cjs");
 const { applyCalculations } = require("../src/main/calculation-service.cjs");
 const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
 const templateRequirements = require("../src/main/template-requirements.cjs");
+const templateService = require("../src/main/template-service.cjs");
+const { validateSystemFields } = require("../src/main/project-validator.cjs");
+const PizZip = require("pizzip");
 const catalog = require("../src/renderer/catalog.js");
 
 async function run() {
@@ -31,6 +34,23 @@ async function run() {
       Number(db.pragma("user_version", { simple: true })),
       database.CURRENT_SCHEMA_VERSION
     );
+
+    const locationDocx = path.join(temp, "ubicaciones.docx");
+    const locationZip = new PizZip();
+    locationZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>{{CAM!:PERIODO|Período}}</w:t></w:r></w:p></w:body></w:document>");
+    locationZip.file("word/header1.xml", "<w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:r><w:t>{{SYS:CODIGO}} {{SYS:CODIGO}}</w:t></w:r></w:p></w:hdr>");
+    fs.writeFileSync(locationDocx, locationZip.generate({ type: "nodebuffer" }));
+    const locationTemplate = templateService.importTemplate(temp, locationDocx, {
+      unitId: "UTET",
+      processId: "utet-95",
+      documentId: "utet-informe-final"
+    });
+    const locationCode = locationTemplate.markers.find((item) => item.name === "CODIGO");
+    const locationPeriod = locationTemplate.markers.find((item) => item.name === "PERIODO");
+    assert.ok(locationCode && locationCode.locations.includes("Encabezado"));
+    assert.strictEqual(locationCode.occurrenceCount, 2);
+    assert.ok(locationPeriod && locationPeriod.locations.includes("Cuerpo del documento"));
+    assert.strictEqual(locationPeriod.occurrenceCount, 1);
 
     const source = path.join(temp, "fuente.txt");
     fs.writeFileSync(source, "Fuente de prueba", "utf8");
@@ -159,7 +179,7 @@ async function run() {
       "TABLA",
       "RESULTADOS_EXT",
       "Resultados externos",
-      0,
+      1,
       "Carrera:CAMPO,Porcentaje:NUMERO",
       JSON.stringify(["Carrera", "Porcentaje"]),
       "TAB:RESULTADOS_EXT|Resultados externos|Carrera:CAMPO,Porcentaje:NUMERO",
@@ -193,6 +213,13 @@ async function run() {
       mode: "template",
       template: { id: extTemplateId }
     });
+
+    const reqBeforeImport = templateRequirements.getRequirements(temp, externalProject.id);
+    const tableReqBefore = reqBeforeImport.requirements.find((item) => item.name === "RESULTADOS_EXT");
+    assert.ok(tableReqBefore);
+    assert.strictEqual(tableReqBefore.status, "missing");
+    assert.ok(reqBeforeImport.summary.blocking >= 1);
+
 
     const savedGuide = externalAiExchange.saveGuide(temp, externalProject.id, "Usar lenguaje institucional.");
     assert.strictEqual(savedGuide.guide, "Usar lenguaje institucional.");
@@ -239,6 +266,11 @@ async function run() {
       "//FIN-DOCUMENTO//"
     ].join("\n");
 
+    const malformedResponse = externalResponse.replace("//DATO:CARRERA//", "//DATO:CARRERA_MAL//").replace("//FIN-DATO:CARRERA//", "//FIN-DATO:CARRERA_MAL//");
+    const malformedPreview = externalAiExchange.previewResponse(temp, externalProject.id, malformedResponse, "manual_ai");
+    assert.strictEqual(malformedPreview.canImport, false);
+    assert.ok(malformedPreview.summary.errors >= 1);
+
     const externalPreview = externalAiExchange.previewResponse(temp, externalProject.id, externalResponse, "manual_ai");
     assert.strictEqual(externalPreview.canImport, true);
     assert.strictEqual(externalPreview.summary.valid, 4);
@@ -255,6 +287,9 @@ async function run() {
     assert.strictEqual(externalProject.formData.RESULTADOS_EXT.length, 1);
     assert.strictEqual(externalProject.formData.RESULTADOS_EXT[0].Carrera, "Administración");
     assert.strictEqual(externalProject.formData.RESULTADOS_EXT[0].Porcentaje, 82);
+    const reqAfterImport = templateRequirements.getRequirements(temp, externalProject.id);
+    const tableReqAfter = reqAfterImport.requirements.find((item) => item.name === "RESULTADOS_EXT");
+    assert.strictEqual(tableReqAfter.status, "ready");
 
     const reqBeforeNumber = templateRequirements.getRequirements(temp, externalProject.id);
     const codeReqBefore = reqBeforeNumber.requirements.find((item) => item.name === "CODIGO");
@@ -269,6 +304,18 @@ async function run() {
     const codeReqAfter = reqAfterNumber.requirements.find((item) => item.name === "CODIGO");
     assert.strictEqual(codeReqAfter.status, "ready");
     assert.ok(String(codeReqAfter.value).includes("07"));
+
+    const deterministic = externalAiExchange.analysisFromExternalOnly(externalProject, {
+      tables: [{ markerName: "BASE", headers: ["A"], rows: [["1"]] }],
+      charts: [{ markerName: "GRAFICO", title: "Prueba", data: [{ label: "A", value: 1 }, { label: "B", value: 2 }] }],
+      extractionWarnings: ["aviso"],
+      dataSummary: [{ name: "base.xlsx", markerName: "BASE" }],
+      textSources: []
+    });
+    assert.strictEqual(deterministic.tables.length, 1);
+    assert.strictEqual(deterministic.charts.length, 1);
+    assert.strictEqual(deterministic.missingData.length, 1);
+    assert.strictEqual(deterministic.sourceTrace[0].name, "base.xlsx");
 
     const mergedExternal = externalAiExchange.mergeExternalGeneratedFields(externalProject, {
       provider: "Local",
@@ -300,6 +347,14 @@ async function run() {
     assert.strictEqual(externalProject.formData.UNRELATED_EXT, "Debe conservarse");
     assert.strictEqual(externalProject.analysis, null);
 
+    const systemRequired = validateSystemFields({
+      template: {
+        systemFields: [{ valid: true, required: true, name: "ELABORADO_POR", label: "Elaborado por", raw: "SYS!:ELABORADO_POR" }]
+      }
+    }, {});
+    assert.strictEqual(systemRequired.ok, false);
+    assert.ok(systemRequired.errors[0].includes("{{SYS!:ELABORADO_POR}}"));
+
     const calculation = applyCalculations({
       formData: { APROBADOS: 90, REPROBADOS: 10 },
       template: {
@@ -328,7 +383,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, requisitos, SYS, tablas IA externa V2, cálculos, integridad, versiones, errores y respaldo."
+      "SMOKE OK: Electron, SQLite, catálogo, ubicaciones, requisitos, SYS, tablas IA externa V2, datos locales, cálculos, integridad, versiones, errores y respaldo."
     );
   } finally {
     database.closeAll();
