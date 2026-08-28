@@ -47,11 +47,11 @@ La tabla registra metadatos y rutas. Los binarios permanecen en:
 - `evidence/`
 - `generated/`
 
-### IA
+### Redacción externa y análisis local
 
 `projects → ai_analyses`
 
-Se conserva historial de análisis, proveedor y contenido estructurado.
+La app no llama a proveedores de IA internos durante la generación. Esta tabla conserva el contenido estructurado importado desde IA externa y el análisis determinístico local de archivos, tablas y gráficos.
 
 ### Versiones documentales como información
 
@@ -130,3 +130,11 @@ El motor puede usar:
 No se utiliza `eval()`. El parser admite un conjunto controlado de funciones y operadores y detecta referencias inválidas, división para cero y dependencias circulares.
 
 Los valores calculados se guardan en `project_fields`, por lo que también forman parte de los snapshots de `document_versions`.
+
+## Requisitos de plantilla
+
+Cada plantilla se interpreta como un conjunto completo de requisitos, no solo como campos de formulario. La app distingue datos directos, redacción externa, sistema, cálculos, tablas, archivos, evidencias y gráficos. Para cada marcador puede mostrar el literal `{{...}}`, su estado, su ubicación general en Word y el número de apariciones.
+
+## Protocolo de IA externa
+
+El protocolo vigente es `ITSQMET-DOCUMENTO-V2`. Permite importar campos/redacciones y tablas. Los valores `SYS`, `CALC`, archivos `DATOS`, evidencias y gráficos permanecen bajo control local.
