@@ -154,6 +154,32 @@ function templatePartLocation(name) {
   return "Cuerpo del documento";
 }
 
+function templateHeadingLevel(paragraph) {
+  const match = String(paragraph || "").match(/<w:pStyle\b[^>]*w:val="([^"]+)"/i);
+  if (!match) return 0;
+  const normalized = decodeTemplateXml(match[1])
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "")
+    .toUpperCase();
+  const heading = normalized.match(/^(?:HEADING|TITULO)([1-6])$/);
+  return heading ? Number(heading[1]) : 0;
+}
+
+function collectTemplateMarkerOccurrences(text, location, context, byRaw) {
+  const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  let match;
+  while ((match = regex.exec(String(text || "")))) {
+    const parsed = parseMarkerInner(match[1]);
+    if (!parsed) continue;
+    const meta = byRaw.get(parsed.raw) || { count: 0, locations: new Set(), contexts: new Set() };
+    meta.count += 1;
+    meta.locations.add(location);
+    if (context) meta.contexts.add(context);
+    byRaw.set(parsed.raw, meta);
+  }
+}
+
 function attachTemplateLocations(filePath, markers) {
   if (!filePath || !fs.existsSync(filePath) || !Array.isArray(markers) || !markers.length) return markers;
 
@@ -169,22 +195,43 @@ function attachTemplateLocations(filePath, markers) {
       .filter((name) => /^word\/(document|header\d+|footer\d+)\.xml$/.test(name))
       .forEach((name) => {
         const xml = zip.file(name).asText();
-        const text = templatePlainText(xml);
-        const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
-        let match;
-        while ((match = regex.exec(text))) {
-          const parsed = parseMarkerInner(match[1]);
-          if (!parsed) continue;
-          const meta = byRaw.get(parsed.raw) || { count: 0, locations: new Set() };
-          meta.count += 1;
-          meta.locations.add(templatePartLocation(name));
-          byRaw.set(parsed.raw, meta);
+        const location = templatePartLocation(name);
+        const paragraphs = xml.match(/<w:p\b[\s\S]*?<\/w:p>/g) || [];
+
+        if (location !== "Cuerpo del documento") {
+          paragraphs.forEach((paragraph) => {
+            collectTemplateMarkerOccurrences(templatePlainText(paragraph), location, location, byRaw);
+          });
+          return;
         }
+
+        const headings = {};
+        paragraphs.forEach((paragraph) => {
+          const paragraphText = templatePlainText(paragraph).trim();
+          const level = templateHeadingLevel(paragraph);
+          if (level && paragraphText) {
+            headings[level] = paragraphText;
+            for (let deeper = level + 1; deeper <= 6; deeper += 1) delete headings[deeper];
+          }
+
+          let context = "";
+          for (let candidate = 6; candidate >= 1; candidate -= 1) {
+            if (headings[candidate]) {
+              context = headings[candidate];
+              break;
+            }
+          }
+          collectTemplateMarkerOccurrences(paragraphText, location, context || location, byRaw);
+        });
       });
 
     cached = {};
     byRaw.forEach((meta, raw) => {
-      cached[raw] = { count: meta.count, locations: Array.from(meta.locations) };
+      cached[raw] = {
+        count: meta.count,
+        locations: Array.from(meta.locations),
+        contexts: Array.from(meta.contexts)
+      };
     });
     templateLocationCache.clear();
     templateLocationCache.set(cacheKey, cached);
@@ -194,8 +241,21 @@ function attachTemplateLocations(filePath, markers) {
     const meta = cached[marker.raw];
     marker.occurrenceCount = meta ? meta.count : 0;
     marker.locations = meta ? meta.locations.slice() : [];
+    marker.contexts = meta ? meta.contexts.slice() : [];
   });
   return markers;
+}
+
+function templateBlockLocationErrors(markers) {
+  return (markers || [])
+    .filter((marker) =>
+      marker.valid &&
+      marker.isBlock &&
+      (marker.locations || []).some((location) => location !== "Cuerpo del documento")
+    )
+    .map((marker) =>
+      `{{${marker.raw}}}: los bloques de tablas, datos, imágenes o gráficos deben estar en el cuerpo del documento; no se admiten en encabezados ni pies de página.`
+    );
 }
 
 function markerFromRow(row) {
@@ -230,7 +290,11 @@ function templateById(db, templateId) {
   const storedValidation = parseJson(row.validation_json, { errors: [], warnings: [], ok: true });
   const liveValidation = validateMarkers(markers);
   const validation = {
-    errors: Array.from(new Set([].concat(storedValidation.errors || [], liveValidation.errors || []))),
+    errors: Array.from(new Set([].concat(
+      storedValidation.errors || [],
+      liveValidation.errors || [],
+      templateBlockLocationErrors(markers)
+    ))),
     warnings: Array.from(new Set([].concat(storedValidation.warnings || [], liveValidation.warnings || [])))
   };
   validation.ok = validation.errors.length === 0;
