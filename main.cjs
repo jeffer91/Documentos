@@ -7,7 +7,6 @@ const { migrateLegacy } = require("./src/main/legacy-migration-service.cjs");
 const workspace = require("./src/main/workspace-service.cjs");
 const templates = require("./src/main/template-service.cjs");
 const { analyzeAttachments } = require("./src/main/source-service.cjs");
-const aiProviders = require("./src/main/ai-provider-service.cjs");
 const { generateDocument, systemValues } = require("./src/main/document-composer.cjs");
 const { validateProject, validateAiFields, validateSystemFields, validateExtractedData } = require("./src/main/project-validator.cjs");
 const { readSettings, saveSettings } = require("./src/main/settings-service.cjs");
@@ -380,17 +379,6 @@ function registerIpc() {
   ipcMain.handle("settings:save", (_event, settings) => safeResponse(
     () => ({ ok: true, settings: saveSettings(userData(), settings) }),
     "settings",
-    "save"
-  ));
-
-  ipcMain.handle("ai:get", () => safeResponse(
-    () => ({ ok: true, providers: aiProviders.publicProviders(userData()) }),
-    "ai",
-    "get"
-  ));
-  ipcMain.handle("ai:save", (_event, providers) => safeResponse(
-    () => ({ ok: true, providers: aiProviders.saveProviders(userData(), providers) }),
-    "ai",
     "save"
   ));
 
