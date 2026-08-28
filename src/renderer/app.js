@@ -24,7 +24,9 @@
     errors: [],
     errorCount: 0,
     versions: [],
-    busy: false
+    busy: false,
+    editorGuide: null,
+    saveState: "saved"
   };
 
   let saveTimer = null;
@@ -552,6 +554,503 @@
     </div>`;
   }
 
+
+  const GUIDE_MANUAL_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+
+  function manualTemplateFields(template) {
+    return (template && template.fields || []).filter((field) => field.valid !== false && GUIDE_MANUAL_TYPES.has(field.type));
+  }
+
+  function fieldValue(marker) {
+    return state.project && state.project.formData && state.project.formData[marker.name] != null
+      ? state.project.formData[marker.name]
+      : "";
+  }
+
+  function fieldIsComplete(marker) {
+    if (!marker) return false;
+    if (["DATOS", "IMAGEN", "IMAGENES"].includes(marker.type)) {
+      const kind = marker.type === "DATOS" ? "data" : "evidence";
+      return (state.project.attachments || []).some((item) => item.kind === kind && item.markerName === marker.name);
+    }
+    if (marker.type === "TABLA") {
+      const rows = fieldValue(marker);
+      return Array.isArray(rows) && rows.length > 0;
+    }
+    const value = fieldValue(marker);
+    return value != null && String(value).trim() !== "";
+  }
+
+  function completionFor(fields) {
+    const list = (fields || []).filter(Boolean);
+    const completed = list.filter(fieldIsComplete).length;
+    return {
+      total: list.length,
+      completed,
+      percent: list.length ? Math.round((completed / list.length) * 100) : 100
+    };
+  }
+
+  function guideStorageKey() {
+    return state.project ? `documentos-guide-${state.project.id}` : "";
+  }
+
+  function loadGuidePosition(stepCount) {
+    const key = guideStorageKey();
+    let saved = null;
+    try { saved = key ? JSON.parse(localStorage.getItem(key) || "null") : null; } catch (_error) { saved = null; }
+    return {
+      projectId: state.project && state.project.id,
+      step: Math.max(0, Math.min(Number(saved && saved.step || 0), Math.max(0, stepCount - 1))),
+      career: Math.max(0, Number(saved && saved.career || 0))
+    };
+  }
+
+  function persistGuidePosition() {
+    if (!state.editorGuide || !state.project) return;
+    try {
+      localStorage.setItem(guideStorageKey(), JSON.stringify({
+        step: state.editorGuide.step || 0,
+        career: state.editorGuide.career || 0
+      }));
+    } catch (_error) { /* almacenamiento opcional */ }
+  }
+
+  function careerGroups(template) {
+    const groups = new Map();
+    const manual = manualTemplateFields(template);
+    manual.forEach((field) => {
+      const match = String(field.name || "").match(/^([A-Z0-9]+)_(N|TIPO|REC|PCT)(\d+)$/);
+      if (!match) return;
+      const prefix = match[1];
+      const group = groups.get(prefix) || { prefix, fields: [], indexes: new Set() };
+      group.fields.push(field);
+      group.indexes.add(Number(match[3]));
+      groups.set(prefix, group);
+    });
+
+    const aiFields = template && template.aiFields || [];
+    return Array.from(groups.values())
+      .filter((group) => group.indexes.size >= 3 && group.fields.length >= 9)
+      .map((group) => {
+        const priority = manual.find((field) => field.name === `CAP_${group.prefix}`) || null;
+        const analysis = aiFields.find((field) =>
+          field.name === `ANALISIS_${group.prefix}` ||
+          (field.name.endsWith(`_${group.prefix}`) && /diagn[oó]stico/i.test(field.label || ""))
+        );
+        const relation = aiFields.find((field) => field.name === `RELACION_GENERICA_${group.prefix}`);
+        let title = group.prefix;
+        const sourceLabel = (analysis && analysis.label) || (relation && relation.label) || (priority && priority.label) || "";
+        if (sourceLabel.includes(" - ")) title = sourceLabel.split(" - ").pop().trim();
+        else if (priority) title = String(priority.label || "").replace(/^Capacitaci[oó]n priorizada\s*-?\s*/i, "").trim() || group.prefix;
+        return {
+          prefix: group.prefix,
+          title,
+          fields: priority ? group.fields.concat(priority) : group.fields,
+          priority
+        };
+      });
+  }
+
+  function buildEditorPlan(template) {
+    const manual = manualTemplateFields(template);
+    const careers = careerGroups(template);
+    const careerNames = new Set(careers.flatMap((group) => group.fields.map((field) => field.name)));
+    const specialDetection = careers.length >= 3 && manual.some((field) => /^INST_/.test(field.name));
+
+    if (!specialDetection) {
+      const evidence = manual.filter((field) => ["DATOS", "IMAGEN", "IMAGENES"].includes(field.type));
+      const regular = manual.filter((field) => !["DATOS", "IMAGEN", "IMAGENES"].includes(field.type));
+      const chunks = [];
+      for (let i = 0; i < regular.length; i += 14) {
+        chunks.push({
+          key: `data-${Math.floor(i / 14) + 1}`,
+          title: regular.length > 14 ? `Datos ${Math.floor(i / 14) + 1}` : "Datos",
+          subtitle: "Información solicitada por la plantilla",
+          where: "Campos del documento",
+          kind: "standard",
+          fields: regular.slice(i, i + 14)
+        });
+      }
+      if (evidence.length) chunks.push({
+        key: "evidence",
+        title: "Evidencias y archivos",
+        subtitle: "Documentos, datos e imágenes",
+        where: "Anexos y fuentes del documento",
+        kind: "standard",
+        fields: evidence
+      });
+      chunks.push({
+        key: "review",
+        title: "Revisión",
+        subtitle: "Comprobar y generar",
+        where: "Documento completo",
+        kind: "review",
+        fields: manual
+      });
+      return { special: false, careers: [], steps: chunks };
+    }
+
+    const evidenceNames = /TOTAL_RESPUESTAS_VALIDAS|DESTINATARIOS_CONVOCATORIA|FECHA_CONVOCATORIA/;
+    const evidence = manual.filter((field) => ["DATOS", "IMAGEN", "IMAGENES"].includes(field.type) || evidenceNames.test(field.name));
+    const institutional = manual.filter((field) => /^INST_/.test(field.name));
+    const generic = manual.filter((field) => /^(CAP_GENERICA|CRIT_GEN_|ALT_GEN_|FORT_GEN_|LIM_GEN_|RES_GEN_|ENC_)/.test(field.name));
+    const general = manual.filter((field) => field.name === "PERIODO");
+    const assigned = new Set([...general, ...institutional, ...generic, ...evidence].map((field) => field.name));
+    careerNames.forEach((name) => assigned.add(name));
+    const summary = manual.filter((field) => !assigned.has(field.name));
+
+    const steps = [
+      {
+        key: "general",
+        title: "Datos generales",
+        subtitle: "Información que se reutiliza en todo el documento",
+        where: "Portada, encabezado y alcance temporal",
+        kind: "standard",
+        fields: general
+      },
+      {
+        key: "institutional",
+        title: "Necesidades institucionales",
+        subtitle: "Registro consolidado de necesidades recurrentes",
+        where: "5.1 · Síntesis general de resultados",
+        kind: "institutional",
+        fields: institutional
+      },
+      {
+        key: "generic",
+        title: "Capacitación genérica",
+        subtitle: "Criterios, alternativas y evidencia cuantitativa",
+        where: "5.2 · Capacitación genérica institucional",
+        kind: "generic",
+        fields: generic
+      },
+      {
+        key: "careers",
+        title: "Necesidades por carrera",
+        subtitle: `${careers.length} carreras detectadas`,
+        where: "5 · Resultados del diagnóstico por carrera",
+        kind: "careers",
+        fields: careers.flatMap((group) => group.fields)
+      },
+      {
+        key: "summary",
+        title: "Resumen ejecutivo",
+        subtitle: "Caracterización y consolidación final",
+        where: "6 · Resumen ejecutivo de resultados",
+        kind: "standard",
+        fields: summary
+      },
+      {
+        key: "evidence",
+        title: "Evidencias y fuentes",
+        subtitle: "Archivos, base de datos y soportes",
+        where: "10 · Anexos y fuentes del diagnóstico",
+        kind: "standard",
+        fields: evidence
+      },
+      {
+        key: "review",
+        title: "Revisión",
+        subtitle: "Comprobar y generar el documento",
+        where: "Documento completo",
+        kind: "review",
+        fields: manual
+      }
+    ].filter((step) => step.kind === "review" || step.fields.length);
+
+    return { special: true, careers, steps };
+  }
+
+  function ensureEditorGuide(plan) {
+    if (!state.editorGuide || state.editorGuide.projectId !== (state.project && state.project.id)) {
+      state.editorGuide = loadGuidePosition(plan.steps.length);
+    }
+    state.editorGuide.step = Math.max(0, Math.min(state.editorGuide.step || 0, Math.max(0, plan.steps.length - 1)));
+    state.editorGuide.career = Math.max(0, Math.min(state.editorGuide.career || 0, Math.max(0, plan.careers.length - 1)));
+    return state.editorGuide;
+  }
+
+  function compactControl(marker, className) {
+    if (!marker) return '<span class="guide-missing">—</span>';
+    const value = fieldValue(marker);
+    const cls = className ? ` class="${className}"` : "";
+    if (marker.type === "LISTA") {
+      return `<select${cls} data-field="${escapeHtml(marker.name)}">
+        <option value="">Selecciona</option>
+        ${(marker.options || []).map((option) => `<option value="${escapeHtml(option)}" ${String(value) === String(option) ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+      </select>`;
+    }
+    const type = marker.type === "FECHA" ? "date" : marker.type === "NUMERO" ? "number" : "text";
+    if (marker.type === "TEXTO" && className && className.includes("multiline")) {
+      return `<textarea${cls} data-field="${escapeHtml(marker.name)}">${escapeHtml(value)}</textarea>`;
+    }
+    return `<input${cls} data-field="${escapeHtml(marker.name)}" type="${type}" value="${escapeHtml(value)}" />`;
+  }
+
+  function guidedScalarField(marker, where) {
+    if (["DATOS", "IMAGEN", "IMAGENES"].includes(marker.type)) return uploadField(marker);
+    if (marker.type === "TABLA") return tableField(marker);
+
+    const value = fieldValue(marker);
+    const required = marker.required ? " *" : "";
+    let control = "";
+    if (marker.type === "TEXTO") {
+      control = `<textarea data-field="${escapeHtml(marker.name)}">${escapeHtml(value)}</textarea>`;
+    } else if (marker.type === "LISTA") {
+      control = `<select data-field="${escapeHtml(marker.name)}">
+        <option value="">Selecciona</option>
+        ${(marker.options || []).map((option) => `<option value="${escapeHtml(option)}" ${String(value) === String(option) ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+      </select>`;
+    } else if (marker.type === "BUSCAR") {
+      control = `<input data-field="${escapeHtml(marker.name)}" type="text" value="${escapeHtml(value)}" placeholder="Buscar o escribir" />`;
+    } else {
+      const type = marker.type === "FECHA" ? "date" : marker.type === "NUMERO" ? "number" : "text";
+      control = `<input data-field="${escapeHtml(marker.name)}" type="${type}" value="${escapeHtml(value)}" />`;
+    }
+
+    return `<div class="field guide-field ${marker.type === "TEXTO" ? "full" : ""}">
+      <label>${escapeHtml(marker.label)}${required}</label>
+      ${control}
+      <small class="field-context">Se usa en: ${escapeHtml(where || "documento")}</small>
+    </div>`;
+  }
+
+  function renderInstitutionalStep(step) {
+    const byName = new Map(step.fields.map((field) => [field.name, field]));
+    const rows = [1, 2, 3, 4, 5].map((index) => ({
+      need: byName.get(`INST_N${index}`),
+      presence: byName.get(`INST_PRES${index}`),
+      percent: byName.get(`INST_PCT${index}`)
+    })).filter((row) => row.need || row.presence || row.percent);
+
+    if (!rows.length) return `<div class="form-grid">${step.fields.map((field) => guidedScalarField(field, step.where)).join("")}</div>`;
+
+    return `
+      <div class="guide-explainer">Completa cada necesidad en una sola fila. La app la distribuirá en todos los lugares correspondientes de la plantilla.</div>
+      <div class="table-wrap guide-table-wrap">
+        <table class="guide-matrix">
+          <thead><tr><th>#</th><th>Necesidad institucional</th><th>Presencia</th><th>% recurrencia</th></tr></thead>
+          <tbody>
+            ${rows.map((row, index) => `<tr>
+              <td class="guide-row-number">${index + 1}</td>
+              <td>${compactControl(row.need, "guide-cell-input")}</td>
+              <td>${compactControl(row.presence, "guide-cell-input")}</td>
+              <td>${compactControl(row.percent, "guide-cell-input guide-number")}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderGenericStep(step) {
+    const byName = new Map(step.fields.map((field) => [field.name, field]));
+    const cap = byName.get("CAP_GENERICA");
+    const criteria = [1,2,3,4,5].map((i) => byName.get(`CRIT_GEN_${i}`)).filter(Boolean);
+    const alternatives = [1,2,3,4].map((i) => ({
+      alt: byName.get(`ALT_GEN_${i}`),
+      strong: byName.get(`FORT_GEN_${i}`),
+      limit: byName.get(`LIM_GEN_${i}`),
+      result: byName.get(`RES_GEN_${i}`)
+    })).filter((row) => row.alt || row.strong || row.limit || row.result);
+    const survey = [1,2,3,4].map((i) => ({
+      aspect: byName.get(`ENC_ASP_${i}`),
+      percent: byName.get(`ENC_PCT_${i}`)
+    })).filter((row) => row.aspect || row.percent);
+
+    const used = new Set();
+    [cap, ...criteria].filter(Boolean).forEach((field) => used.add(field.name));
+    alternatives.forEach((row) => Object.values(row).filter(Boolean).forEach((field) => used.add(field.name)));
+    survey.forEach((row) => Object.values(row).filter(Boolean).forEach((field) => used.add(field.name)));
+    const rest = step.fields.filter((field) => !used.has(field.name));
+
+    return `
+      ${cap ? `<div class="guide-focus-card"><span>Capacitación institucional priorizada</span>${compactControl(cap, "guide-focus-input")}</div>` : ""}
+      ${criteria.length ? `<div class="guide-subsection"><h3>Criterios de priorización</h3><p>Selecciona el nivel de cumplimiento de cada criterio.</p><div class="form-grid">${criteria.map((field) => guidedScalarField(field, step.where)).join("")}</div></div>` : ""}
+      ${alternatives.length ? `<div class="guide-subsection"><h3>Alternativas evaluadas</h3><p>Compara las alternativas antes de definir la seleccionada.</p>
+        <div class="table-wrap guide-table-wrap"><table class="guide-matrix wide">
+          <thead><tr><th>#</th><th>Alternativa</th><th>Fortalezas</th><th>Limitaciones</th><th>Resultado</th></tr></thead>
+          <tbody>${alternatives.map((row, index) => `<tr>
+            <td class="guide-row-number">${index + 1}</td>
+            <td>${compactControl(row.alt, "guide-cell-input")}</td>
+            <td>${compactControl(row.strong, "guide-cell-input multiline")}</td>
+            <td>${compactControl(row.limit, "guide-cell-input multiline")}</td>
+            <td>${compactControl(row.result, "guide-cell-input")}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+      </div>` : ""}
+      ${survey.length ? `<div class="guide-subsection"><h3>Resultados de encuesta</h3><p>Registra los aspectos evaluados y su porcentaje.</p>
+        <div class="table-wrap guide-table-wrap"><table class="guide-matrix">
+          <thead><tr><th>#</th><th>Aspecto evaluado</th><th>% docentes</th></tr></thead>
+          <tbody>${survey.map((row, index) => `<tr>
+            <td class="guide-row-number">${index + 1}</td>
+            <td>${compactControl(row.aspect, "guide-cell-input multiline")}</td>
+            <td>${compactControl(row.percent, "guide-cell-input guide-number")}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+      </div>` : ""}
+      ${rest.length ? `<div class="form-grid">${rest.map((field) => guidedScalarField(field, step.where)).join("")}</div>` : ""}
+    `;
+  }
+
+  function renderCareersStep(step, plan, guide) {
+    const careers = plan.careers || [];
+    if (!careers.length) return '<div class="empty"><b>Sin carreras detectadas</b>No hay grupos repetitivos en esta plantilla.</div>';
+    const group = careers[Math.max(0, Math.min(guide.career || 0, careers.length - 1))];
+    const byName = new Map(group.fields.map((field) => [field.name, field]));
+    const rows = [1,2,3,4,5].map((index) => ({
+      need: byName.get(`${group.prefix}_N${index}`),
+      type: byName.get(`${group.prefix}_TIPO${index}`),
+      recurrence: byName.get(`${group.prefix}_REC${index}`),
+      percent: byName.get(`${group.prefix}_PCT${index}`)
+    })).filter((row) => row.need || row.type || row.recurrence || row.percent);
+    const stats = completionFor(group.fields);
+    const priority = group.priority;
+
+    return `
+      <div class="career-toolbar">
+        <button class="ghost small-inline" type="button" data-action="guide-career-prev" ${guide.career <= 0 ? "disabled" : ""}>←</button>
+        <div class="career-select-wrap">
+          <span>Carrera ${guide.career + 1} de ${careers.length}</span>
+          <select id="careerSelector">
+            ${careers.map((item, index) => `<option value="${index}" ${index === guide.career ? "selected" : ""}>${escapeHtml(item.title)}</option>`).join("")}
+          </select>
+        </div>
+        <button class="ghost small-inline" type="button" data-action="guide-career-next" ${guide.career >= careers.length - 1 ? "disabled" : ""}>→</button>
+      </div>
+      <div class="career-headline">
+        <div><span>Resultados por carrera</span><h3>${escapeHtml(group.title)}</h3><small>Se usa en: 5 · Resultados del diagnóstico · ${escapeHtml(group.title)}</small></div>
+        <span class="status ${stats.percent === 100 ? "good" : ""}">${stats.completed}/${stats.total}</span>
+      </div>
+      <div class="table-wrap guide-table-wrap">
+        <table class="guide-matrix wide">
+          <thead><tr><th>#</th><th>Necesidad</th><th>Tipo</th><th>Recurrencia</th><th>% recurrencia</th></tr></thead>
+          <tbody>${rows.map((row, index) => `<tr>
+            <td class="guide-row-number">${index + 1}</td>
+            <td>${compactControl(row.need, "guide-cell-input multiline")}</td>
+            <td>${compactControl(row.type, "guide-cell-input")}</td>
+            <td>${compactControl(row.recurrence, "guide-cell-input")}</td>
+            <td>${compactControl(row.percent, "guide-cell-input guide-number")}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+      ${priority ? `<div class="guide-focus-card career-priority"><span>Capacitación priorizada para ${escapeHtml(group.title)}</span>${compactControl(priority, "guide-focus-input")}</div>` : ""}
+    `;
+  }
+
+  function reviewStepContent(plan, template) {
+    const manual = manualTemplateFields(template);
+    const stats = completionFor(manual);
+    const requiredMissing = manual.filter((field) => field.required && !fieldIsComplete(field));
+    const incomplete = manual.filter((field) => !fieldIsComplete(field));
+    const aiCount = (template.aiFields || []).length;
+    const sysCount = (template.systemFields || []).length;
+    const calcCount = (template.fields || []).filter((field) => field.type === "CALC").length;
+    const warnings = template.validation && template.validation.warnings || [];
+    const errors = template.validation && template.validation.errors || [];
+
+    return `
+      <div class="review-hero">
+        <div class="review-score"><strong>${stats.percent}%</strong><span>datos completados</span></div>
+        <div><h3>Revisión del documento</h3><p>La app mantiene ocultos los procesos automáticos y te muestra únicamente lo que necesita atención.</p></div>
+      </div>
+      <div class="review-grid">
+        <div class="review-card"><span>Datos manuales</span><b>${stats.completed}/${stats.total}</b><small>${incomplete.length ? `${incomplete.length} pendientes` : "Completo"}</small></div>
+        <div class="review-card"><span>IA</span><b>${aiCount}</b><small>contenidos automáticos</small></div>
+        <div class="review-card"><span>Sistema</span><b>${sysCount}</b><small>valores automáticos</small></div>
+        <div class="review-card"><span>Cálculos</span><b>${calcCount}</b><small>se ejecutan al generar</small></div>
+      </div>
+      ${requiredMissing.length ? `<div class="review-alert"><b>Faltan ${requiredMissing.length} campos obligatorios</b><span>${requiredMissing.slice(0, 6).map((field) => escapeHtml(field.label)).join(" · ")}${requiredMissing.length > 6 ? "…" : ""}</span></div>` : '<div class="review-ok"><b>Campos obligatorios completos</b><span>El documento está listo para la generación técnica.</span></div>'}
+      ${errors.length ? `<div class="notice-error"><b>La plantilla tiene errores</b><span>${escapeHtml(errors[0])}</span></div>` : ""}
+      ${!errors.length && warnings.length ? `<div class="notice-warn"><b>Aviso de plantilla</b><span>${escapeHtml(warnings[0])}</span></div>` : ""}
+      <button class="primary review-generate" type="button" data-action="generate" ${requiredMissing.length || errors.length ? "disabled" : ""}>Generar documento PDF</button>
+      <small class="review-hint">${requiredMissing.length ? "Completa los campos obligatorios para habilitar la generación." : "La IA, los cálculos y los campos del sistema se procesarán automáticamente."}</small>
+    `;
+  }
+
+  function renderGuideStep(step, plan, guide, template) {
+    if (!step) return "";
+    if (step.kind === "institutional") return renderInstitutionalStep(step);
+    if (step.kind === "generic") return renderGenericStep(step);
+    if (step.kind === "careers") return renderCareersStep(step, plan, guide);
+    if (step.kind === "review") return reviewStepContent(plan, template);
+    return `<div class="form-grid guide-standard-grid">${step.fields.map((field) => guidedScalarField(field, step.where)).join("")}</div>`;
+  }
+
+  function guideNavigation(plan, guide) {
+    const totalStats = completionFor(manualTemplateFields(state.project.template));
+    return `
+      <section class="panel compact guide-progress-panel">
+        <div class="progress-head"><div><h3>Progreso</h3><small id="saveStateLabel">${state.saveState === "saving" ? "Guardando…" : "Guardado automáticamente ✓"}</small></div><b>${totalStats.percent}%</b></div>
+        <div class="progress-track"><span style="width:${totalStats.percent}%"></span></div>
+        <div class="guide-step-list">
+          ${plan.steps.map((step, index) => {
+            const stats = completionFor(step.fields);
+            const active = index === guide.step;
+            const done = step.kind === "review" ? totalStats.percent === 100 : stats.total > 0 && stats.completed === stats.total;
+            const detail = step.kind === "careers"
+              ? `${(plan.careers || []).filter((group) => completionFor(group.fields).percent === 100).length}/${(plan.careers || []).length} carreras`
+              : step.kind === "review"
+                ? "Comprobar y generar"
+                : `${stats.completed}/${stats.total}`;
+            return `<button type="button" class="guide-step ${active ? "active" : ""} ${done ? "done" : ""}" data-action="guide-step" data-index="${index}">
+              <span class="guide-step-index">${done ? "✓" : index + 1}</span>
+              <span class="guide-step-copy"><b>${escapeHtml(step.title)}</b><small>${escapeHtml(detail)}</small></span>
+            </button>`;
+          }).join("")}
+        </div>
+      </section>`;
+  }
+
+  function guidedEditorContent(template, plan, guide) {
+    const step = plan.steps[guide.step];
+    const stats = completionFor(step.fields);
+    return `
+      <div class="guide-page-head">
+        <div>
+          <span class="guide-kicker">Paso ${guide.step + 1} de ${plan.steps.length}</span>
+          <h2>${escapeHtml(step.title)}</h2>
+          <p>${escapeHtml(step.subtitle || "")}</p>
+          <small>Se usa en: ${escapeHtml(step.where || "documento")}</small>
+        </div>
+        ${step.kind !== "review" ? `<span class="status ${stats.percent === 100 ? "good" : ""}">${stats.completed}/${stats.total}</span>` : ""}
+      </div>
+      ${renderGuideStep(step, plan, guide, template)}
+      <div class="guide-footer">
+        <button class="ghost" type="button" data-action="guide-prev" ${guide.step <= 0 ? "disabled" : ""}>← Anterior</button>
+        <span>Paso ${guide.step + 1} de ${plan.steps.length}</span>
+        <button class="primary" type="button" data-action="guide-next" ${guide.step >= plan.steps.length - 1 ? "disabled" : ""}>Siguiente →</button>
+      </div>
+    `;
+  }
+
+  function updateSaveStateLabel() {
+    const label = document.getElementById("saveStateLabel");
+    if (label) label.textContent = state.saveState === "saving" ? "Guardando…" : "Guardado automáticamente ✓";
+  }
+
+  async function changeGuideStep(nextStep) {
+    if (!state.project) return;
+    await persistEditor();
+    const plan = buildEditorPlan(state.project.template);
+    ensureEditorGuide(plan);
+    state.editorGuide.step = Math.max(0, Math.min(Number(nextStep), plan.steps.length - 1));
+    persistGuidePosition();
+    renderEditor();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function changeGuideCareer(nextCareer) {
+    if (!state.project) return;
+    await persistEditor();
+    const plan = buildEditorPlan(state.project.template);
+    ensureEditorGuide(plan);
+    state.editorGuide.career = Math.max(0, Math.min(Number(nextCareer), Math.max(0, plan.careers.length - 1)));
+    persistGuidePosition();
+    renderEditor();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function templateStatus(template) {
     if (!template) return "";
     const errors = template.validation && template.validation.errors ? template.validation.errors : [];
@@ -622,29 +1121,39 @@
     }
 
     const aiCount = (template.aiFields || []).length;
-    const fieldCount = (template.fields || []).length;
+    const manualCount = manualTemplateFields(template).length;
+    const systemCount = (template.systemFields || []).length;
+    const calcCount = (template.fields || []).filter((field) => field.type === "CALC").length;
     const sourceCount = (state.project.attachments || []).filter((item) => item.kind === "source").length;
+    const plan = buildEditorPlan(template);
+    const guide = ensureEditorGuide(plan);
 
     view.innerHTML = `
-      <div class="editor-grid">
-        <section class="panel">
-          <div class="panel-title">
-            <div><h2>Datos</h2><small>${fieldCount} campos · plantilla v${template.version}</small></div>
-            <span class="status ${statusClass(state.project.status)}">${statusLabel(state.project.status)}</span>
-          </div>
+      <div class="editor-grid guided-editor-grid">
+        <section class="panel guide-main-panel">
           ${templateStatus(template)}
-          ${dynamicFields()}
+          ${guidedEditorContent(template, plan, guide)}
         </section>
 
-        <aside>
+        <aside class="guide-aside">
+          ${guideNavigation(plan, guide)}
+
           <section class="panel compact">
-            <div class="panel-title"><h3>Plantilla</h3><button class="ghost" type="button" data-action="import-template">Cambiar</button></div>
-            <div class="template-summary"><b>${escapeHtml(template.name)}</b><span>${(template.markers || []).length} campos detectados</span></div>
+            <div class="panel-title"><h3>Plantilla</h3><button class="ghost small-inline" type="button" data-action="import-template">Cambiar</button></div>
+            <div class="template-summary">
+              <b>${escapeHtml(template.name)}</b>
+              <span>Plantilla v${template.version} · lista</span>
+            </div>
+            <div class="template-metrics">
+              <span><b>${manualCount}</b> datos</span>
+              <span><b>${aiCount}</b> IA</span>
+              <span><b>${systemCount + calcCount}</b> automáticos</span>
+            </div>
           </section>
 
           ${aiCount ? `
             <section class="panel compact">
-              <div class="panel-title"><h3>IA</h3><span class="status good">${aiCount} campos</span></div>
+              <div class="panel-title"><h3>IA</h3><span class="status good">${aiCount} automáticos</span></div>
               <div class="mode-row">
                 <label class="mode-option">
                   <input type="radio" name="aiMode" value="fallback" ${state.project.aiMode !== "deep" ? "checked" : ""}>
@@ -663,8 +1172,6 @@
               ${fileList("source", "")}
             </section>
           ` : ""}
-
-          <button class="primary generate-pdf" type="button" data-action="generate">Generar PDF</button>
         </aside>
       </div>
       ${outputsHtml()}
@@ -859,6 +1366,8 @@
 
   async function persistEditor() {
     if (!state.project) return;
+    state.saveState = "saving";
+    updateSaveStateLabel();
     if (state.project.status === "generated") state.project.status = "draft";
     state.project.analysis = null;
     state.project.formData = collectFormData();
@@ -866,10 +1375,16 @@
     const mode = document.querySelector('input[name="aiMode"]:checked');
     if (mode) state.project.aiMode = mode.value;
     const response = await api.saveProject(state.project);
-    if (response && response.ok) state.project = response.project;
+    if (response && response.ok) {
+      state.project = response.project;
+      state.saveState = "saved";
+      updateSaveStateLabel();
+    }
   }
 
   function scheduleSave() {
+    state.saveState = "saving";
+    updateSaveStateLabel();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => persistEditor(), 450);
   }
@@ -891,6 +1406,7 @@
 
     if (!globalOnly && state.project) {
       state.project.template = response.template;
+      state.editorGuide = null;
       state.project.analysis = null;
       state.project.status = "draft";
       await api.saveProject(state.project);
@@ -1088,6 +1604,7 @@
 
   view.addEventListener("change", (event) => {
     if (event.target.matches("[data-field], input[name='aiMode']")) scheduleSave();
+    if (event.target.id === "careerSelector") changeGuideCareer(Number(event.target.value));
   });
 
   document.addEventListener("click", async (event) => {
@@ -1110,6 +1627,11 @@
     if (action === "add-table-row") return addTableRow(button.dataset.marker);
     if (action === "remove-table-row") return removeTableRow(button.dataset.marker, button.dataset.row);
     if (action === "recalculate") return recalculate();
+    if (action === "guide-step") return changeGuideStep(Number(button.dataset.index));
+    if (action === "guide-prev") return changeGuideStep((state.editorGuide && state.editorGuide.step || 0) - 1);
+    if (action === "guide-next") return changeGuideStep((state.editorGuide && state.editorGuide.step || 0) + 1);
+    if (action === "guide-career-prev") return changeGuideCareer((state.editorGuide && state.editorGuide.career || 0) - 1);
+    if (action === "guide-career-next") return changeGuideCareer((state.editorGuide && state.editorGuide.career || 0) + 1);
     if (action === "generate") return generatePdf();
     if (action === "archive-upload") return archiveUpload();
     if (action === "save-ai") return saveAi();
