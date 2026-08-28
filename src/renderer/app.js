@@ -1244,7 +1244,7 @@
         <div class="external-ai-simple-flow">
           <div class="external-ai-section">
             <div class="external-ai-section-head">
-              <div><span>1</span><div><h3>Preparar prompt</h3><p>Incluye automáticamente todos los campos manuales y de redacción IA de la plantilla.</p></div></div>
+              <div><span>1</span><div><h3>Preparar prompt</h3><p>Incluye automáticamente todos los campos de datos y de redacción de la plantilla.</p></div></div>
             </div>
 
             <label class="external-ai-label" for="externalAiGuide">Instrucciones adicionales <small>(opcional)</small></label>
