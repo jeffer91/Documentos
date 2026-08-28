@@ -7,6 +7,7 @@ const { enrichMarker, parseMarkerInner } = require("./template-markers.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const templateLocationCache = new Map();
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -155,29 +156,44 @@ function templatePartLocation(name) {
 
 function attachTemplateLocations(filePath, markers) {
   if (!filePath || !fs.existsSync(filePath) || !Array.isArray(markers) || !markers.length) return markers;
-  const zip = new PizZip(fs.readFileSync(filePath));
-  const byRaw = new Map(markers.map((marker) => [marker.raw, { count: 0, locations: new Set() }]));
 
-  Object.keys(zip.files)
-    .filter((name) => /^word\/(document|header\d+|footer\d+)\.xml$/.test(name))
-    .forEach((name) => {
-      const xml = zip.file(name).asText();
-      const text = templatePlainText(xml);
-      const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
-      let match;
-      while ((match = regex.exec(text))) {
-        const parsed = parseMarkerInner(match[1]);
-        if (!parsed || !byRaw.has(parsed.raw)) continue;
-        const meta = byRaw.get(parsed.raw);
-        meta.count += 1;
-        meta.locations.add(templatePartLocation(name));
-      }
+  const stat = fs.statSync(filePath);
+  const cacheKey = path.resolve(filePath) + "|" + stat.size + "|" + Math.round(stat.mtimeMs);
+  let cached = templateLocationCache.get(cacheKey);
+
+  if (!cached) {
+    const zip = new PizZip(fs.readFileSync(filePath));
+    const byRaw = new Map();
+
+    Object.keys(zip.files)
+      .filter((name) => /^word\/(document|header\d+|footer\d+)\.xml$/.test(name))
+      .forEach((name) => {
+        const xml = zip.file(name).asText();
+        const text = templatePlainText(xml);
+        const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+        let match;
+        while ((match = regex.exec(text))) {
+          const parsed = parseMarkerInner(match[1]);
+          if (!parsed) continue;
+          const meta = byRaw.get(parsed.raw) || { count: 0, locations: new Set() };
+          meta.count += 1;
+          meta.locations.add(templatePartLocation(name));
+          byRaw.set(parsed.raw, meta);
+        }
+      });
+
+    cached = {};
+    byRaw.forEach((meta, raw) => {
+      cached[raw] = { count: meta.count, locations: Array.from(meta.locations) };
     });
+    templateLocationCache.clear();
+    templateLocationCache.set(cacheKey, cached);
+  }
 
   markers.forEach((marker) => {
-    const meta = byRaw.get(marker.raw);
+    const meta = cached[marker.raw];
     marker.occurrenceCount = meta ? meta.count : 0;
-    marker.locations = meta ? Array.from(meta.locations) : [];
+    marker.locations = meta ? meta.locations.slice() : [];
   });
   return markers;
 }
