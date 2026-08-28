@@ -105,7 +105,7 @@ function externalAnalysisOnly(value) {
   const sources = {};
   Object.keys(fields).forEach((name) => { sources[name] = ["IA externa"]; });
   return {
-    provider: "IA externa + procesamiento local",
+    provider: "IA externa",
     generatedAt: new Date().toISOString(),
     generatedFields: fields,
     externalGeneratedFields: fields,
