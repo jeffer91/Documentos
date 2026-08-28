@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const catalog = require("./src/renderer/catalog.js");
@@ -16,6 +16,7 @@ const syncService = require("./src/main/sync-service.cjs");
 const backupService = require("./src/main/backup-service.cjs");
 const errorService = require("./src/main/error-service.cjs");
 const { applyCalculations } = require("./src/main/calculation-service.cjs");
+const externalAiExchange = require("./src/main/external-ai-exchange.cjs");
 
 let mainWindow = null;
 
@@ -155,6 +156,41 @@ function registerIpc() {
     result: templates.deleteTemplate(userData(), templateId)
   })));
 
+  ipcMain.handle("external-ai:guide-get", (_event, projectId) => safeResponse(() => ({
+    ok: true,
+    data: externalAiExchange.getGuide(userData(), projectId)
+  })));
+
+  ipcMain.handle("external-ai:guide-save", (_event, projectId, guideText) => safeResponse(() => ({
+    ok: true,
+    data: externalAiExchange.saveGuide(userData(), projectId, guideText)
+  })));
+
+  ipcMain.handle("external-ai:build-prompt", (_event, projectId, mode, guideText) => safeResponse(() => ({
+    ok: true,
+    data: externalAiExchange.buildPrompt(userData(), projectId, mode, guideText)
+  })));
+
+  ipcMain.handle("external-ai:preview", (_event, projectId, rawText, mode) => safeResponse(() => ({
+    ok: true,
+    preview: externalAiExchange.previewResponse(userData(), projectId, rawText, mode)
+  })));
+
+  ipcMain.handle("external-ai:apply", (_event, projectId, rawText, mode, overwrite) => safeResponse(() => ({
+    ok: true,
+    result: externalAiExchange.applyResponse(userData(), projectId, rawText, mode, overwrite)
+  })));
+
+  ipcMain.handle("external-ai:undo", (_event, projectId) => safeResponse(() => ({
+    ok: true,
+    result: externalAiExchange.undoLastImport(userData(), projectId)
+  })));
+
+  ipcMain.handle("clipboard:write", (_event, text) => safeResponse(() => {
+    clipboard.writeText(String(text || ""));
+    return { ok: true };
+  }));
+
   ipcMain.handle("analysis:run", async (_event, projectId, mode) => {
     try {
       let project = workspace.getProject(userData(), projectId);
@@ -181,7 +217,8 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      const analysis = await analyzeWithAi(userData(), project, sources, project.aiMode);
+      let analysis = await analyzeWithAi(userData(), project, sources, project.aiMode);
+      analysis = externalAiExchange.mergeExternalGeneratedFields(project, analysis);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       return { ok: true, analysis, project, validation };
@@ -246,7 +283,8 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      const analysis = await analyzeWithAi(userData(), project, sources, project.aiMode || "fallback");
+      let analysis = await analyzeWithAi(userData(), project, sources, project.aiMode || "fallback");
+      analysis = externalAiExchange.mergeExternalGeneratedFields(project, analysis);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       const aiValidation = validateAiFields(project, analysis);
