@@ -251,8 +251,15 @@
     }
   }
 
+  function templateIsUsable(item) {
+    const errors = item && item.validation && Array.isArray(item.validation.errors)
+      ? item.validation.errors
+      : [];
+    return Boolean(item && item.active && item.documentId && !errors.length);
+  }
+
   function activeTemplate(documentId) {
-    return state.templates.find((item) => item.documentId === documentId && item.active) || null;
+    return state.templates.find((item) => item.documentId === documentId && templateIsUsable(item)) || null;
   }
 
   async function navigate(route, payload, remember) {
@@ -408,7 +415,7 @@
     setHeader("Documentos", "Inicio", false);
     const generated = state.projects.filter((item) => item.status === "generated").length;
     const drafts = state.projects.filter((item) => item.status === "draft" || item.status === "analyzed").length;
-    const activeTemplates = state.templates.filter((item) => item.active && item.documentId).length;
+    const activeTemplates = state.templates.filter(templateIsUsable).length;
 
     view.innerHTML = `
       <div class="hero">
