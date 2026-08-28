@@ -89,6 +89,16 @@ function systemNote(marker, project, value) {
   return "El patrón necesita un número de documento. La app no permitirá generar hasta que indiques ese número.";
 }
 
+function tableHasContent(marker, value) {
+  if (!Array.isArray(value) || !value.length) return false;
+  const defs = Array.isArray(marker.columnDefs) ? marker.columnDefs : [];
+  return value.some((row) =>
+    defs.length
+      ? defs.some((column) => text(row && row[column.label]))
+      : Object.values(row || {}).some((cell) => text(cell))
+  );
+}
+
 function statusFor(marker, project, value) {
   if (marker.type === "SISTEMA") {
     if (["CODIGO", "CODIGO_DOCUMENTO"].includes(marker.name) && /(0X|XX)/.test(String(project.codePattern || ""))) {
@@ -97,7 +107,7 @@ function statusFor(marker, project, value) {
     }
     return text(value) ? "ready" : (marker.required ? "missing" : "pending");
   }
-  if (marker.type === "TABLA") return Array.isArray(value) && value.length ? "ready" : (marker.required ? "missing" : "pending");
+  if (marker.type === "TABLA") return tableHasContent(marker, value) ? "ready" : (marker.required ? "missing" : "pending");
   if (marker.type === "DATOS" || marker.type === "IMAGEN" || marker.type === "IMAGENES") {
     return Number(value || 0) > 0 ? "ready" : (marker.required ? "missing" : "pending");
   }
