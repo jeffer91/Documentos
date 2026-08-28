@@ -118,7 +118,9 @@ function fieldDescription(field, index) {
     const defs = Array.isArray(field.columnDefs) ? field.columnDefs : [];
     lines.push("Columnas obligatorias de la tabla:");
     defs.forEach((column) => lines.push("- " + column.name + " (" + column.type + "): " + column.label));
-    lines.push("Puedes devolver cero, una o varias filas según la información disponible.");
+    lines.push(field.required
+      ? "Esta tabla es obligatoria: devuelve al menos una fila con información real. Si no tienes información suficiente, no inventes datos."
+      : "Esta tabla es opcional: puedes devolver cero, una o varias filas según la información disponible.");
   }
   return lines.join("\n");
 }
