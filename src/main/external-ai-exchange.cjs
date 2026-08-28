@@ -137,6 +137,7 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     "//FORMATO:" + PROTOCOL + "//",
     "//DOCUMENTO:" + project.documentId + "//",
     "//PLANTILLA:" + fingerprint + "//",
+    "//VERSION-PLANTILLA:" + Number(project.template.version || 1) + "//",
     "//MODO:" + protocolMode(normalizedMode) + "//"
   ];
 
@@ -260,6 +261,8 @@ function parseResponse(rawText) {
     if (documentId != null) { metadata.documentId = documentId; return; }
     const template = parseMetadataLine(line, "PLANTILLA");
     if (template != null) { metadata.template = template; return; }
+    const templateVersion = parseMetadataLine(line, "VERSION-PLANTILLA");
+    if (templateVersion != null) { metadata.templateVersion = templateVersion; return; }
     const mode = parseMetadataLine(line, "MODO");
     if (mode != null) { metadata.mode = mode; return; }
 
@@ -363,6 +366,15 @@ function previewResponse(userDataPath, projectId, rawText, mode) {
   }
   if (parsed.metadata.template !== templateFingerprint(project)) {
     errors.push("La respuesta corresponde a otra plantilla o versión.");
+  }
+  if (
+    parsed.metadata.templateVersion != null &&
+    Number(parsed.metadata.templateVersion) !== Number(project.template.version || 1)
+  ) {
+    errors.push("La respuesta corresponde a otra versión de la plantilla.");
+  }
+  if (parsed.metadata.templateVersion == null) {
+    warnings.push("La respuesta no incluye VERSION-PLANTILLA; se validó mediante la huella de la plantilla.");
   }
   if (parsed.metadata.mode !== protocolMode(normalizedMode)) {
     errors.push("El modo de la respuesta no coincide con el modo seleccionado.");
@@ -582,23 +594,88 @@ function undoLastImport(userDataPath, projectId) {
   ).get(projectId);
   if (!row) throw new Error("No hay una importación de IA externa para deshacer.");
 
+  const project = workspace.getProject(userDataPath, projectId);
+  if (!project) throw new Error("No se encontró el documento.");
+
   const previousForm = parseJson(row.previous_form_json, {});
   const previousAnalysis = parseJson(row.previous_analysis_json, null);
-  const previousStatus = row.previous_status || "draft";
+  const imported = parseJson(row.imported_json, []);
   const now = new Date().toISOString();
 
-  const tx = db.transaction(() => {
-    db.prepare("DELETE FROM project_fields WHERE project_id = ?").run(projectId);
-    const insert = db.prepare(
-      "INSERT INTO project_fields(project_id, field_name, value_json, updated_at) VALUES (?, ?, ?, ?)"
+  const manualNames = imported
+    .filter((item) => item && item.type !== "IA" && item.name)
+    .map((item) => String(item.name));
+  const aiNames = imported
+    .filter((item) => item && item.type === "IA" && item.name)
+    .map((item) => String(item.name));
+
+  const currentForm = Object.assign({}, project.formData || {});
+  manualNames.forEach((name) => {
+    if (Object.prototype.hasOwnProperty.call(previousForm, name)) currentForm[name] = previousForm[name];
+    else delete currentForm[name];
+  });
+
+  let nextAnalysis = project.analysis ? Object.assign({}, project.analysis) : null;
+  const currentExternal = nextAnalysis && nextAnalysis.externalGeneratedFields
+    ? Object.assign({}, nextAnalysis.externalGeneratedFields)
+    : {};
+  const previousExternal = previousAnalysis && previousAnalysis.externalGeneratedFields
+    ? previousAnalysis.externalGeneratedFields
+    : {};
+
+  aiNames.forEach((name) => {
+    if (Object.prototype.hasOwnProperty.call(previousExternal, name)) currentExternal[name] = previousExternal[name];
+    else delete currentExternal[name];
+  });
+
+  const currentGenerated = nextAnalysis && nextAnalysis.generatedFields
+    ? Object.assign({}, nextAnalysis.generatedFields)
+    : {};
+  aiNames.forEach((name) => {
+    if (Object.prototype.hasOwnProperty.call(previousExternal, name)) currentGenerated[name] = previousExternal[name];
+    else delete currentGenerated[name];
+  });
+
+  const onlyExternalAnalysis = nextAnalysis &&
+    String(nextAnalysis.provider || "") === "IA externa" &&
+    Object.keys(nextAnalysis.generatedFields || {}).every((name) =>
+      Object.prototype.hasOwnProperty.call(nextAnalysis.externalGeneratedFields || {}, name)
     );
-    Object.entries(previousForm || {}).forEach(([name, value]) => {
-      insert.run(projectId, name, JSON.stringify(value), now);
+
+  if (onlyExternalAnalysis) {
+    nextAnalysis = previousAnalysis;
+  } else if (nextAnalysis) {
+    nextAnalysis.generatedFields = currentGenerated;
+    nextAnalysis.externalGeneratedFields = currentExternal;
+    nextAnalysis.fieldSources = Object.assign({}, nextAnalysis.fieldSources || {});
+    aiNames.forEach((name) => {
+      if (Object.prototype.hasOwnProperty.call(previousExternal, name)) {
+        nextAnalysis.fieldSources[name] = ["IA externa"];
+      } else {
+        delete nextAnalysis.fieldSources[name];
+      }
+    });
+  }
+
+  const tx = db.transaction(() => {
+    const upsert = db.prepare(`
+      INSERT INTO project_fields(project_id, field_name, value_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id, field_name)
+      DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+    `);
+
+    manualNames.forEach((name) => {
+      if (Object.prototype.hasOwnProperty.call(previousForm, name)) {
+        upsert.run(projectId, name, JSON.stringify(previousForm[name]), now);
+      } else {
+        db.prepare("DELETE FROM project_fields WHERE project_id = ? AND field_name = ?").run(projectId, name);
+      }
     });
 
     db.prepare(
-      "UPDATE projects SET analysis_json = ?, status = ?, updated_at = ? WHERE id = ?"
-    ).run(previousAnalysis ? JSON.stringify(previousAnalysis) : null, previousStatus, now, projectId);
+      "UPDATE projects SET analysis_json = ?, status = 'draft', updated_at = ? WHERE id = ?"
+    ).run(nextAnalysis ? JSON.stringify(nextAnalysis) : null, now, projectId);
 
     db.prepare("UPDATE external_ai_imports SET undone_at = ? WHERE id = ?").run(now, row.id);
   });
@@ -610,6 +687,19 @@ function undoLastImport(userDataPath, projectId) {
     project: workspace.getProject(userDataPath, projectId),
     canUndo: canUndoImport(db, projectId)
   };
+}
+
+function projectForInternalAi(project) {
+  const external = externalFieldsFromProject(project);
+  if (!Object.keys(external).length || !project || !project.template) return project;
+
+  const clone = Object.assign({}, project);
+  clone.template = Object.assign({}, project.template);
+  clone.template.aiFields = ((project.template && project.template.aiFields) || []).filter((field) => {
+    const value = external[field.name];
+    return value == null || String(value).trim() === "";
+  });
+  return clone;
 }
 
 function mergeExternalGeneratedFields(project, analysis) {
@@ -645,5 +735,6 @@ module.exports = {
   previewResponse,
   applyResponse,
   undoLastImport,
+  projectForInternalAi,
   mergeExternalGeneratedFields
 };
