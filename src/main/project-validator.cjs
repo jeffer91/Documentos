@@ -128,6 +128,30 @@ function validateSystemFields(project, values) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
+function validateExtractedData(project, sources) {
+  const errors = [];
+  const warnings = [];
+  const tables = Array.isArray(sources && sources.tables) ? sources.tables : [];
+  const extractionWarnings = Array.isArray(sources && sources.extractionWarnings) ? sources.extractionWarnings : [];
+
+  ((project.template && project.template.fields) || [])
+    .filter((field) => field.valid && field.type === "DATOS")
+    .forEach((field) => {
+      const hasFile = attachmentCount(project, "data", field.name) > 0;
+      if (!hasFile) return;
+
+      const matching = tables.filter((table) => String(table.markerName || "") === String(field.name));
+      if (field.required && !matching.length) {
+        errors.push(`${field.label}: el archivo fue cargado, pero no se pudo obtener una tabla utilizable para {{${field.raw}}}.`);
+      } else if (!matching.length) {
+        warnings.push(`${field.label}: el archivo no produjo una tabla utilizable.`);
+      }
+    });
+
+  warnings.push(...extractionWarnings);
+  return { ok: errors.length === 0, errors, warnings };
+}
+
 function validateAiFields(project, analysis) {
   const errors = [];
   const generated = analysis && analysis.generatedFields ? analysis.generatedFields : {};
@@ -141,4 +165,4 @@ function validateAiFields(project, analysis) {
   return { ok: errors.length === 0, errors };
 }
 
-module.exports = { validateProject, validateAiFields, validateSystemFields };
+module.exports = { validateProject, validateAiFields, validateSystemFields, validateExtractedData };
