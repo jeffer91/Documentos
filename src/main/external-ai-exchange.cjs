@@ -534,6 +534,12 @@ function validateTable(field, rows) {
   rows.forEach((row, rowIndex) => {
     const normalizedRow = {};
     const keys = Object.keys(row || {});
+    const hasContent = defs.some((column) =>
+      String(row && row[column.name] != null ? row[column.name] : "").trim() !== ""
+    );
+    if (!hasContent) {
+      errors.push("Fila " + (rowIndex + 1) + ": la fila está completamente vacía.");
+    }
     keys.filter((key) => !expected.has(key)).forEach((key) => {
       errors.push("Fila " + (rowIndex + 1) + ": columna no reconocida " + key + ".");
     });
