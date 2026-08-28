@@ -27,8 +27,9 @@ function extractDocx(filePath) {
 }
 
 function summarizeRows(rows) {
-  if (!rows.length) return { headers: [], rows: [], numeric: [] };
-  const headers = Object.keys(rows[0]).slice(0, 30);
+  if (!rows.length) return { headers: [], totalHeaderCount: 0, rows: [], numeric: [] };
+  const allHeaders = Object.keys(rows[0]);
+  const headers = allHeaders.slice(0, 30);
   const numeric = [];
   headers.forEach((header) => {
     const nums = rows.map((row) => Number(row[header])).filter(Number.isFinite);
@@ -42,18 +43,19 @@ function summarizeRows(rows) {
       });
     }
   });
-  return { headers, rows: rows.slice(0, 100), numeric };
+  return { headers, totalHeaderCount: allHeaders.length, rows: rows.slice(0, 100), numeric };
 }
 
 function extractSpreadsheet(filePath) {
   const workbook = XLSX.readFile(filePath, { cellDates: true });
-  return workbook.SheetNames.slice(0, 10).map((name) => {
+  return workbook.SheetNames.map((name) => {
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { defval: "" });
     const summary = summarizeRows(rows);
     return {
       name,
       rowCount: rows.length,
       headers: summary.headers,
+      totalHeaderCount: summary.totalHeaderCount,
       sampleRows: summary.rows,
       calculationRows: rows,
       numeric: summary.numeric
@@ -117,9 +119,10 @@ function tableCandidates(extracted) {
         : sheet.sampleRows || [];
       if (!sheet.headers.length || !sourceRows.length) return;
       const headers = sheet.headers.slice(0, 10);
-      if (sheet.headers.length > 10) {
+      const totalHeaderCount = Number(sheet.totalHeaderCount || sheet.headers.length);
+      if (totalHeaderCount > 10) {
         warnings.push(
-          `${item.name} · ${sheet.name}: el archivo tiene ${sheet.headers.length} columnas; se insertarán las primeras 10 en el Word.`
+          `${item.name} · ${sheet.name}: el archivo tiene ${totalHeaderCount} columnas; se insertarán las primeras 10 en el Word.`
         );
       }
       const rowsForWord = sourceRows.slice(0, MAX_WORD_ROWS);
@@ -184,6 +187,7 @@ async function analyzeAttachments(attachments) {
       name: sheet.name,
       rowCount: sheet.rowCount,
       headers: sheet.headers,
+      totalHeaderCount: Number(sheet.totalHeaderCount || sheet.headers.length),
       sampleRows: sheet.sampleRows,
       numeric: sheet.numeric
     }))
