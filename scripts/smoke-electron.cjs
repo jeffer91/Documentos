@@ -360,6 +360,12 @@ async function run() {
     assert.ok(malformedPreview.summary.errors >= 1);
     assert.ok(malformedPreview.items.some((item) => item.name === "RESULTADOS_EXT" && item.status === "error"));
 
+    assert.throws(
+      () => externalAiExchange.applyResponse(temp, externalProject.id, malformedResponse, "manual_ai", false),
+      /RESULTADOS_EXT|Resultados externos|columna/i,
+      "El backend también debe impedir importar una respuesta con errores."
+    );
+
     const externalPreview = externalAiExchange.previewResponse(temp, externalProject.id, externalResponse, "manual_ai");
     assert.strictEqual(externalPreview.canImport, true);
     assert.strictEqual(externalPreview.summary.valid, 4);
