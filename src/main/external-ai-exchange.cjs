@@ -867,42 +867,6 @@ function analysisFromExternalOnly(project, deterministicSources) {
   return externalAnalysis(external, deterministicSources);
 }
 
-function projectForInternalAi(project) {
-  const external = externalFieldsFromProject(project);
-  if (!Object.keys(external).length || !project || !project.template) return project;
-
-  const clone = Object.assign({}, project);
-  clone.template = Object.assign({}, project.template);
-  clone.template.aiFields = ((project.template && project.template.aiFields) || []).filter((field) => {
-    const value = external[field.name];
-    return value == null || String(value).trim() === "";
-  });
-  return clone;
-}
-
-function mergeExternalGeneratedFields(project, analysis) {
-  const external = externalFieldsFromProject(project);
-  if (!Object.keys(external).length) return analysis;
-
-  const base = analysis && typeof analysis === "object" ? Object.assign({}, analysis) : {};
-  base.generatedFields = Object.assign({}, base.generatedFields || {}, external);
-  base.externalGeneratedFields = external;
-  base.fieldSources = Object.assign({}, base.fieldSources || {});
-  Object.keys(external).forEach((name) => {
-    base.fieldSources[name] = ["IA externa"];
-  });
-  base.provider = base.provider && base.provider !== "IA externa"
-    ? base.provider + " + IA externa"
-    : "IA externa";
-  base.generatedAt = base.generatedAt || new Date().toISOString();
-  base.keyFindings = Array.isArray(base.keyFindings) ? base.keyFindings : [];
-  base.missingData = Array.isArray(base.missingData) ? base.missingData : [];
-  base.tables = Array.isArray(base.tables) ? base.tables : [];
-  base.charts = Array.isArray(base.charts) ? base.charts : [];
-  base.sourceTrace = Array.isArray(base.sourceTrace) ? base.sourceTrace : [];
-  base.notes = String(base.notes || "");
-  return base;
-}
 
 module.exports = {
   PROTOCOL,
@@ -914,7 +878,5 @@ module.exports = {
   previewResponse,
   applyResponse,
   undoLastImport,
-  analysisFromExternalOnly,
-  projectForInternalAi,
-  mergeExternalGeneratedFields
+  analysisFromExternalOnly
 };
