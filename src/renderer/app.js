@@ -631,7 +631,7 @@
 
     const aiFields = template && template.aiFields || [];
     return Array.from(groups.values())
-      .filter((group) => group.indexes.size >= 3 && group.fields.length >= 9)
+      .filter((group) => group.indexes.size >= 5 && group.fields.length >= 15)
       .map((group) => {
         const priority = manual.find((field) => field.name === `CAP_${group.prefix}`) || null;
         const analysis = aiFields.find((field) =>
@@ -639,6 +639,7 @@
           (field.name.endsWith(`_${group.prefix}`) && /diagn[oó]stico/i.test(field.label || ""))
         );
         const relation = aiFields.find((field) => field.name === `RELACION_GENERICA_${group.prefix}`);
+        if (!priority && !analysis) return null;
         let title = group.prefix;
         const sourceLabel = (analysis && analysis.label) || (relation && relation.label) || (priority && priority.label) || "";
         if (sourceLabel.includes(" - ")) title = sourceLabel.split(" - ").pop().trim();
@@ -649,7 +650,8 @@
           fields: priority ? group.fields.concat(priority) : group.fields,
           priority
         };
-      });
+      })
+      .filter(Boolean);
   }
 
   function buildEditorPlan(template) {
