@@ -152,6 +152,23 @@ function calculationCheck() {
   };
 }
 
+function externalOnlyUiCheck() {
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const rendererSource = fs.readFileSync(path.join(ROOT, "src/renderer/app.js"), "utf8");
+  const indexSource = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+
+  return {
+    noInternalGeneration: !mainSource.includes("analyzeWithAi"),
+    usesExternalAnalysis: mainSource.includes("analysisFromExternalOnly"),
+    noAiNav: !indexSource.includes('data-route="ai"'),
+    simpleExternalFlow:
+      rendererSource.includes("Copiar prompt para IA externa") &&
+      rendererSource.includes("Importar respuesta") &&
+      !rendererSource.includes('name="externalAiMode"') &&
+      !rendererSource.includes('<h3>IA</h3><span class="status good"')
+  };
+}
+
 function main() {
   const errors = [];
   const warnings = [];
@@ -217,6 +234,20 @@ function main() {
     errors.push(`No se pudo validar IA externa: ${error.message}`);
   }
 
+  try {
+    const externalOnly = externalOnlyUiCheck();
+    if (
+      !externalOnly.noInternalGeneration ||
+      !externalOnly.usesExternalAnalysis ||
+      !externalOnly.noAiNav ||
+      !externalOnly.simpleExternalFlow
+    ) {
+      errors.push("La app aún conserva elementos activos de IA interna o del flujo antiguo.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
+  }
+
   console.log("Documentos ITSQMET · diagnóstico v2.7");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
@@ -226,7 +257,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: estructura, sintaxis, catálogo, marcadores e IA externa correctos.");
+    console.log("OK: estructura, sintaxis, catálogo, marcadores e IA externa exclusiva correctos.");
   }
 }
 
