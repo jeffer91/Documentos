@@ -8,8 +8,8 @@ const workspace = require("./src/main/workspace-service.cjs");
 const templates = require("./src/main/template-service.cjs");
 const { analyzeAttachments } = require("./src/main/source-service.cjs");
 const aiProviders = require("./src/main/ai-provider-service.cjs");
-const { generateDocument } = require("./src/main/document-composer.cjs");
-const { validateProject, validateAiFields } = require("./src/main/project-validator.cjs");
+const { generateDocument, systemValues } = require("./src/main/document-composer.cjs");
+const { validateProject, validateAiFields, validateSystemFields } = require("./src/main/project-validator.cjs");
 const { readSettings, saveSettings } = require("./src/main/settings-service.cjs");
 const syncService = require("./src/main/sync-service.cjs");
 const backupService = require("./src/main/backup-service.cjs");
@@ -53,6 +53,16 @@ function createWindow() {
 
 function userData() {
   return app.getPath("userData");
+}
+
+function activeTemplateAttachments(project) {
+  if (!project || !project.template) return project && project.attachments || [];
+  const names = new Set((project.template.markers || []).map((marker) => marker.name));
+  return (project.attachments || []).filter((item) => {
+    if (item.kind === "source") return true;
+    if (!item.markerName) return false;
+    return names.has(String(item.markerName));
+  });
 }
 
 function filtersFor(kind) {
@@ -207,7 +217,7 @@ function registerIpc() {
       project.aiMode = mode || project.aiMode || "fallback";
       project = workspace.saveProject(userData(), project);
 
-      const sources = await analyzeAttachments(project.attachments || []);
+      const sources = await analyzeAttachments(activeTemplateAttachments(project));
       const calculated = applyCalculations(project, sources);
       if (!calculated.ok) {
         calculated.errors.forEach((message) => {
@@ -222,7 +232,7 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      const analysis = externalAiExchange.analysisFromExternalOnly(project);
+      const analysis = externalAiExchange.analysisFromExternalOnly(project, sources);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       return { ok: true, analysis, project, validation };
@@ -241,7 +251,7 @@ function registerIpc() {
         return { ok: false, validation, error: validation.errors[0] };
       }
 
-      const sources = await analyzeAttachments(project.attachments || []);
+      const sources = await analyzeAttachments(activeTemplateAttachments(project));
       const calculated = applyCalculations(project, sources);
 
       if (!calculated.ok) {
@@ -269,10 +279,19 @@ function registerIpc() {
       let project = workspace.getProject(userData(), projectId);
       if (!project) throw new Error("No se encontró el documento.");
 
+      const settings = readSettings(userData());
       const validation = validateProject(project);
-      if (!validation.ok) return { ok: false, validation, error: validation.errors[0] };
+      const systemValidation = validateSystemFields(project, systemValues(project, settings.signers));
+      if (!validation.ok || !systemValidation.ok) {
+        const combined = {
+          ok: false,
+          errors: [].concat(validation.errors || [], systemValidation.errors || []),
+          warnings: [].concat(validation.warnings || [], systemValidation.warnings || [])
+        };
+        return { ok: false, validation: combined, error: combined.errors[0] };
+      }
 
-      const sources = await analyzeAttachments(project.attachments || []);
+      const sources = await analyzeAttachments(activeTemplateAttachments(project));
       const calculated = applyCalculations(project, sources);
       if (!calculated.ok) {
         calculated.errors.forEach((message) => {
@@ -287,7 +306,7 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      const analysis = externalAiExchange.analysisFromExternalOnly(project);
+      const analysis = externalAiExchange.analysisFromExternalOnly(project, sources);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       const aiValidation = validateAiFields(project, analysis);
@@ -295,7 +314,6 @@ function registerIpc() {
         return { ok: false, validation: aiValidation, error: aiValidation.errors[0] };
       }
 
-      const settings = readSettings(userData());
       const generationVersion = workspace.nextDocumentVersion(userData(), projectId);
       const result = await generateDocument(userData(), project, analysis, settings.signers, __dirname, generationVersion);
       project = workspace.addGeneration(userData(), projectId, result);
