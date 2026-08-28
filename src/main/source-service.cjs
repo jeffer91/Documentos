@@ -107,23 +107,35 @@ async function extractAttachment(attachment) {
 function tableCandidates(extracted) {
   const tables = [];
   const charts = [];
+  const warnings = [];
+  const MAX_WORD_ROWS = 1000;
 
   extracted.filter((item) => item.type === "spreadsheet").forEach((item) => {
     (item.sheets || []).forEach((sheet) => {
-      if (!sheet.headers.length || !sheet.sampleRows.length) return;
+      const sourceRows = Array.isArray(sheet.calculationRows) && sheet.calculationRows.length
+        ? sheet.calculationRows
+        : sheet.sampleRows || [];
+      if (!sheet.headers.length || !sourceRows.length) return;
       const headers = sheet.headers.slice(0, 10);
+      const rowsForWord = sourceRows.slice(0, MAX_WORD_ROWS);
       tables.push({
         markerName: item.markerName || "",
         source: item.name,
         title: `${item.name} · ${sheet.name}`,
         headers,
-        rows: sheet.sampleRows.slice(0, 40).map((row) => headers.map((header) => cleanText(row[header])))
+        rows: rowsForWord.map((row) => headers.map((header) => cleanText(row[header])))
       });
+
+      if (sourceRows.length > MAX_WORD_ROWS) {
+        warnings.push(
+          `${item.name} · ${sheet.name}: el archivo tiene ${sourceRows.length} filas; se insertarán las primeras ${MAX_WORD_ROWS} en el Word para evitar un documento excesivamente pesado.`
+        );
+      }
 
       const labelHeader = sheet.headers.find((header) => !sheet.numeric.some((n) => n.column === header));
       const numeric = sheet.numeric[0];
       if (labelHeader && numeric) {
-        const data = sheet.sampleRows
+        const data = sourceRows
           .map((row) => ({ label: cleanText(row[labelHeader]), value: Number(row[numeric.column]) }))
           .filter((row) => row.label && Number.isFinite(row.value))
           .slice(0, 15);
@@ -140,7 +152,7 @@ function tableCandidates(extracted) {
     });
   });
 
-  return { tables: tables.slice(0, 12), charts: charts.slice(0, 10) };
+  return { tables: tables.slice(0, 12), charts: charts.slice(0, 10), warnings };
 }
 
 async function analyzeAttachments(attachments) {
@@ -179,7 +191,8 @@ async function analyzeAttachments(attachments) {
     .filter((item) => item.extractionWarning || item.type === "error")
     .map((item) => item.extractionWarning
       ? `${item.name}: ${item.extractionWarning}`
-      : `${item.name}: ${item.error || "No se pudo analizar el archivo."}`);
+      : `${item.name}: ${item.error || "No se pudo analizar el archivo."}`)
+    .concat(candidates.warnings || []);
 
   return {
     extracted,
