@@ -29,8 +29,6 @@ contextBridge.exposeInMainWorld("documentosApp", {
   showFile: (filePath) => ipcRenderer.invoke("files:show", filePath),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
-  getAiProviders: () => ipcRenderer.invoke("ai:get"),
-  saveAiProviders: (providers) => ipcRenderer.invoke("ai:save", providers),
   getSyncStatus: () => ipcRenderer.invoke("sync:get-status"),
   listVersions: (projectId) => ipcRenderer.invoke("versions:list", projectId),
   getVersion: (projectId, version) => ipcRenderer.invoke("versions:get", projectId, version),
