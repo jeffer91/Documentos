@@ -122,6 +122,86 @@ function externalAiProtocolCheck() {
   };
 }
 
+function externalAiRoundTripCheck() {
+  const os = require("os");
+  const database = require(path.join(ROOT, "src/main/database-service.cjs"));
+  const exchange = require(path.join(ROOT, "src/main/external-ai-exchange.cjs"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "documentos-extai-"));
+  const now = new Date().toISOString();
+
+  try {
+    const db = database.openDatabase(tmp);
+    db.prepare("INSERT INTO units(id, short_name, name, full_name, icon, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?)")
+      .run("U", "U", "Unidad", "Unidad", "", now);
+    db.prepare("INSERT INTO processes(id, unit_id, code, name, full_name, manual_note, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)")
+      .run("P", "U", "P-01", "Proceso", "Proceso", "", now);
+    db.prepare("INSERT INTO documents(id, process_id, name, type, code_pattern, mode, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)")
+      .run("D", "P", "Documento prueba", "Informe", "D-01", "template", now);
+    db.prepare(`
+      INSERT INTO templates
+        (id, document_id, unit_id, process_id, name, version, local_path, active, confidence, imported_at, validation_json, sha256, deleted, updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, 1, 100, ?, ?, ?, 0, ?)
+    `).run("TPL", "D", "U", "P", "plantilla.docx", path.join(tmp, "plantilla.docx"), now, JSON.stringify({ errors: [], warnings: [], ok: true }), "abc123", now);
+
+    const insertField = db.prepare(`
+      INSERT INTO template_fields(template_id, type, name, label, required, config, columns_json, raw, valid, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, '[]', ?, 1, ?)
+    `);
+    insertField.run("TPL", "CAMPO", "PERIODO", "Período", 1, "", "CAMPO!:PERIODO|Período", 0);
+    insertField.run("TPL", "LISTA", "MODALIDAD", "Modalidad", 1, "Presencial,En línea", "LISTA!:MODALIDAD|Modalidad|Presencial,En línea", 1);
+    insertField.run("TPL", "IA", "CONCLUSION", "Conclusión", 0, "", "IA:CONCLUSION|Conclusión", 2);
+
+    db.prepare(`
+      INSERT INTO projects
+        (id, document_id, template_id, status, unit_id, unit_name, process_id, process_code, process_name,
+         document_name, document_type, document_version, code_pattern, mode, ai_mode, generated_code, analysis_json, created_at, updated_at)
+      VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, '1.0', ?, 'template', 'fallback', '', NULL, ?, ?)
+    `).run("PRJ", "D", "TPL", "U", "Unidad", "P", "P-01", "Proceso", "Documento prueba", "Informe", "D-01", now, now);
+
+    const guide = exchange.saveGuide(tmp, "PRJ", "Usar lenguaje institucional.");
+    const built = exchange.buildPrompt(tmp, "PRJ", "manual_ai", guide.guide);
+    const response = [
+      "//FORMATO:" + exchange.PROTOCOL + "//",
+      "//DOCUMENTO:D//",
+      "//PLANTILLA:abc123//",
+      "//MODO:MANUALES+IA//",
+      "",
+      "//CAMPO:PERIODO//",
+      "Mayo 2026 - Noviembre 2026",
+      "//FIN:PERIODO//",
+      "",
+      "//CAMPO:MODALIDAD//",
+      "presencial",
+      "//FIN:MODALIDAD//",
+      "",
+      "//CAMPO:CONCLUSION//",
+      "El diagnóstico se completó con la información proporcionada.",
+      "//FIN:CONCLUSION//",
+      "",
+      "//FIN-DOCUMENTO//"
+    ].join("\n");
+
+    const preview = exchange.previewResponse(tmp, "PRJ", response, "manual_ai");
+    const applied = exchange.applyResponse(tmp, "PRJ", response, "manual_ai", false);
+    const importedProject = applied.project;
+    const undone = exchange.undoLastImport(tmp, "PRJ").project;
+
+    return {
+      guideSaved: guide.guide === "Usar lenguaje institucional.",
+      promptHasGuide: built.prompt.includes("Usar lenguaje institucional."),
+      promptHasAi: built.prompt.includes("CONCLUSION"),
+      previewValid: preview.canImport && preview.summary.valid === 3 && preview.summary.errors === 0,
+      period: importedProject.formData.PERIODO,
+      modalidad: importedProject.formData.MODALIDAD,
+      ai: importedProject.analysis && importedProject.analysis.externalGeneratedFields && importedProject.analysis.externalGeneratedFields.CONCLUSION,
+      undoEmpty: !Object.prototype.hasOwnProperty.call(undone.formData || {}, "PERIODO") && !undone.analysis
+    };
+  } finally {
+    database.closeAll();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 function calculationCheck() {
   const { applyCalculations } = require(path.join(ROOT, "src/main/calculation-service.cjs"));
   const project = {
@@ -215,6 +295,24 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar IA externa: ${error.message}`);
+  }
+
+  try {
+    const roundTrip = externalAiRoundTripCheck();
+    if (
+      !roundTrip.guideSaved ||
+      !roundTrip.promptHasGuide ||
+      !roundTrip.promptHasAi ||
+      !roundTrip.previewValid ||
+      roundTrip.period !== "Mayo 2026 - Noviembre 2026" ||
+      roundTrip.modalidad !== "Presencial" ||
+      !roundTrip.ai ||
+      !roundTrip.undoEmpty
+    ) {
+      errors.push("La importación de IA externa no superó la prueba de ida y vuelta.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la importación de IA externa: ${error.message}`);
   }
 
   console.log("Documentos ITSQMET · diagnóstico v2.7");
