@@ -117,6 +117,11 @@ function tableCandidates(extracted) {
         : sheet.sampleRows || [];
       if (!sheet.headers.length || !sourceRows.length) return;
       const headers = sheet.headers.slice(0, 10);
+      if (sheet.headers.length > 10) {
+        warnings.push(
+          `${item.name} · ${sheet.name}: el archivo tiene ${sheet.headers.length} columnas; se insertarán las primeras 10 en el Word.`
+        );
+      }
       const rowsForWord = sourceRows.slice(0, MAX_WORD_ROWS);
       tables.push({
         markerName: item.markerName || "",
@@ -152,6 +157,12 @@ function tableCandidates(extracted) {
     });
   });
 
+  if (tables.length > 12) {
+    warnings.push(`Se detectaron ${tables.length} tablas de datos; se usarán las primeras 12 en la generación.`);
+  }
+  if (charts.length > 10) {
+    warnings.push(`Se detectaron ${charts.length} gráficos candidatos; se usarán los primeros 10.`);
+  }
   return { tables: tables.slice(0, 12), charts: charts.slice(0, 10), warnings };
 }
 
