@@ -187,6 +187,14 @@ function hydrateTemplate(db, row) {
     // La ubicación es informativa; un fallo aquí no invalida la plantilla.
   }
 
+  const storedValidation = parseJson(row.validation_json, { errors: [], warnings: [], ok: true });
+  const liveValidation = validateMarkers(markers);
+  const validation = {
+    errors: Array.from(new Set([].concat(storedValidation.errors || [], liveValidation.errors || []))),
+    warnings: Array.from(new Set([].concat(storedValidation.warnings || [], liveValidation.warnings || [])))
+  };
+  validation.ok = validation.errors.length === 0;
+
   return {
     id: row.id,
     name: row.name,
@@ -203,7 +211,7 @@ function hydrateTemplate(db, row) {
     fields: markers.filter((marker) => marker.valid && (marker.isUserInput || marker.type === "CALC")),
     aiFields: markers.filter((marker) => marker.valid && marker.isAi),
     systemFields: markers.filter((marker) => marker.valid && marker.isSystem),
-    validation: parseJson(row.validation_json, { errors: [], warnings: [], ok: true }),
+    validation,
     sha256: row.sha256 || ""
   };
 }
