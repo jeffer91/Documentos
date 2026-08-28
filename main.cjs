@@ -150,6 +150,11 @@ function registerIpc() {
     template: templates.updateTemplate(userData(), templateId, patch || {})
   })));
 
+  ipcMain.handle("templates:delete", (_event, templateId) => safeResponse(() => ({
+    ok: true,
+    result: templates.deleteTemplate(userData(), templateId)
+  })));
+
   ipcMain.handle("analysis:run", async (_event, projectId, mode) => {
     try {
       let project = workspace.getProject(userData(), projectId);
