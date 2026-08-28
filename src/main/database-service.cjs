@@ -3,7 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 
 const connections = new Map();
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 function workspaceRoot(userDataPath) {
   const dir = path.join(userDataPath, "documentos-workspace");
@@ -70,6 +70,7 @@ function baseSchema(db) {
       confidence INTEGER NOT NULL DEFAULT 0,
       imported_at TEXT NOT NULL,
       validation_json TEXT,
+      deleted INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (document_id) REFERENCES documents(id)
     );
@@ -345,6 +346,11 @@ function migrateToV3(db) {
   `);
 }
 
+function migrateToV4(db) {
+  addColumnIfMissing(db, "templates", "deleted", "INTEGER NOT NULL DEFAULT 0");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_templates_visible ON templates(deleted, document_id, active)");
+}
+
 function applyMigrations(db) {
   baseSchema(db);
   let version = schemaVersion(db);
@@ -365,6 +371,13 @@ function applyMigrations(db) {
     const tx = db.transaction(() => migrateToV3(db));
     tx();
     version = 3;
+    setSchemaVersion(db, version);
+  }
+
+  if (version < 4) {
+    const tx = db.transaction(() => migrateToV4(db));
+    tx();
+    version = 4;
     setSchemaVersion(db, version);
   }
 
