@@ -217,7 +217,8 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      let analysis = await analyzeWithAi(userData(), project, sources, project.aiMode);
+      const internalAiProject = externalAiExchange.projectForInternalAi(project);
+      let analysis = await analyzeWithAi(userData(), internalAiProject, sources, project.aiMode);
       analysis = externalAiExchange.mergeExternalGeneratedFields(project, analysis);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
@@ -283,7 +284,8 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      let analysis = await analyzeWithAi(userData(), project, sources, project.aiMode || "fallback");
+      const internalAiProject = externalAiExchange.projectForInternalAi(project);
+      let analysis = await analyzeWithAi(userData(), internalAiProject, sources, project.aiMode || "fallback");
       analysis = externalAiExchange.mergeExternalGeneratedFields(project, analysis);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
