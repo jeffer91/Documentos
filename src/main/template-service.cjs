@@ -403,8 +403,18 @@ function listTemplates(userDataPath) {
 
 function activeTemplateForDocument(userDataPath, documentId) {
   const db = openDatabase(userDataPath);
-  const row = db.prepare("SELECT * FROM templates WHERE document_id = ? AND active = 1 AND COALESCE(deleted, 0) = 0 ORDER BY version DESC LIMIT 1").get(documentId);
-  return hydrateTemplate(db, row);
+  const rows = db.prepare(
+    "SELECT * FROM templates WHERE document_id = ? AND active = 1 AND COALESCE(deleted, 0) = 0 ORDER BY version DESC"
+  ).all(documentId);
+
+  for (const row of rows) {
+    const template = hydrateTemplate(db, row);
+    const errors = template && template.validation && Array.isArray(template.validation.errors)
+      ? template.validation.errors
+      : [];
+    if (template && !errors.length) return template;
+  }
+  return null;
 }
 
 function updateTemplate(userDataPath, templateId, patch) {
