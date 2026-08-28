@@ -154,6 +154,7 @@ function hydrateTemplate(db, row) {
     localPath: row.local_path,
     importedAt: row.imported_at,
     active: Boolean(row.active),
+    deleted: Boolean(row.deleted),
     version: row.version,
     unitId: row.unit_id || "",
     processId: row.process_id || "",
@@ -249,12 +250,12 @@ function importTemplate(userDataPath, sourcePath, association) {
 
 function listTemplates(userDataPath) {
   const db = openDatabase(userDataPath);
-  return db.prepare("SELECT * FROM templates ORDER BY imported_at DESC").all().map((row) => hydrateTemplate(db, row));
+  return db.prepare("SELECT * FROM templates WHERE COALESCE(deleted, 0) = 0 ORDER BY imported_at DESC").all().map((row) => hydrateTemplate(db, row));
 }
 
 function activeTemplateForDocument(userDataPath, documentId) {
   const db = openDatabase(userDataPath);
-  const row = db.prepare("SELECT * FROM templates WHERE document_id = ? AND active = 1 ORDER BY version DESC LIMIT 1").get(documentId);
+  const row = db.prepare("SELECT * FROM templates WHERE document_id = ? AND active = 1 AND COALESCE(deleted, 0) = 0 ORDER BY version DESC LIMIT 1").get(documentId);
   return hydrateTemplate(db, row);
 }
 
@@ -314,11 +315,29 @@ function updateTemplate(userDataPath, templateId, patch) {
   return hydrateTemplate(db, db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId));
 }
 
+function deleteTemplate(userDataPath, templateId) {
+  const db = openDatabase(userDataPath);
+  const current = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
+  if (!current) throw new Error("No se encontró la plantilla.");
+
+  const now = new Date().toISOString();
+  db.prepare("UPDATE templates SET active = 0, deleted = 1, updated_at = ? WHERE id = ?")
+    .run(now, templateId);
+
+  queueSync(db, "template", templateId, "delete", {
+    documentId: current.document_id || "",
+    version: current.version
+  });
+
+  return { id: templateId, documentId: current.document_id || "", deleted: true };
+}
+
 module.exports = {
   importTemplate,
   listTemplates,
   activeTemplateForDocument,
   updateTemplate,
+  deleteTemplate,
   plainTextFromXml,
   inferAssociation
 };
