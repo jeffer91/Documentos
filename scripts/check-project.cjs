@@ -207,6 +207,25 @@ function externalOnlyUiCheck() {
   };
 }
 
+function releaseConsistencyCheck() {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
+  const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
+  const preloadMatch = preload.match(/version:\s*"([^"]+)"/);
+  const internalFiles = [
+    "src/main/ai-provider-service.cjs",
+    "src/main/ai-service.cjs"
+  ].filter((relative) => fs.existsSync(path.join(ROOT, relative)));
+
+  return {
+    packageVersion: pkg.version,
+    lockVersion: lock.version,
+    lockRootVersion: lock.packages && lock.packages[""] ? lock.packages[""].version : "",
+    preloadVersion: preloadMatch ? preloadMatch[1] : "",
+    internalFiles
+  };
+}
+
 function main() {
   const errors = [];
   const warnings = [];
@@ -223,6 +242,19 @@ function main() {
       if (syntaxError) errors.push(`Sintaxis inválida en ${relative}`);
     }
   });
+
+  try {
+    const release = releaseConsistencyCheck();
+    const versions = [release.packageVersion, release.lockVersion, release.lockRootVersion, release.preloadVersion];
+    if (new Set(versions).size !== 1 || versions.some((value) => !value)) {
+      errors.push(`Versiones inconsistentes: ${versions.join(" / ")}`);
+    }
+    if (release.internalFiles.length) {
+      errors.push(`Persisten servicios obsoletos de IA interna: ${release.internalFiles.join(", ")}`);
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la versión de release: ${error.message}`);
+  }
 
   let catalog = null;
   try {
