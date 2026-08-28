@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("documentosApp", {
   importTemplate: (association) => ipcRenderer.invoke("templates:import", association || null),
   listTemplates: () => ipcRenderer.invoke("templates:list"),
   updateTemplate: (templateId, patch) => ipcRenderer.invoke("templates:update", templateId, patch),
+  deleteTemplate: (templateId) => ipcRenderer.invoke("templates:delete", templateId),
   analyze: (projectId, mode) => ipcRenderer.invoke("analysis:run", projectId, mode),
   calculate: (projectId) => ipcRenderer.invoke("calculations:run", projectId),
   generate: (projectId) => ipcRenderer.invoke("documents:generate", projectId),
