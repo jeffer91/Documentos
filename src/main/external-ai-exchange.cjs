@@ -660,7 +660,7 @@ function previewResponse(userDataPath, projectId, rawText, mode) {
     errors,
     warnings,
     summary,
-    canImport: errors.length === 0 && summary.valid > 0
+    canImport: errors.length === 0 && summary.errors === 0 && summary.valid > 0
   };
 }
 
