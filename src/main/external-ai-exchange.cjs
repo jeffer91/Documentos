@@ -697,8 +697,12 @@ function applyResponse(userDataPath, projectId, rawText, mode, overwrite) {
   const project = projectOrThrow(userDataPath, projectId);
   const db = openDatabase(userDataPath);
   const preview = previewResponse(userDataPath, projectId, rawText, mode);
-  if (preview.errors.length) throw new Error(preview.errors[0]);
-  if (!preview.summary.valid) throw new Error("No hay campos válidos para importar.");
+  if (!preview.canImport) {
+    if (preview.errors.length) throw new Error(preview.errors[0]);
+    const itemError = preview.items.find((item) => item.status === "error");
+    if (itemError) throw new Error((itemError.label || itemError.name) + ": " + (itemError.message || "respuesta no válida."));
+    throw new Error("La respuesta contiene errores y no puede importarse.");
+  }
 
   const accepted = preview.items.filter((item) =>
     item.status === "valid" && (!item.conflict || Boolean(overwrite))
