@@ -528,15 +528,24 @@ function validateTable(field, rows) {
   }
 
   const expected = new Set(defs.map((column) => column.name));
+  const hasRowContent = (row) => defs.some((column) =>
+    String(row && row[column.name] != null ? row[column.name] : "").trim() !== ""
+  );
+  if (!rows.some(hasRowContent)) {
+    return {
+      status: field.required ? "error" : "empty",
+      value: [],
+      message: field.required ? "La tabla obligatoria no contiene información." : "Sin filas con información."
+    };
+  }
+
   const normalizedRows = [];
   const errors = [];
 
   rows.forEach((row, rowIndex) => {
     const normalizedRow = {};
     const keys = Object.keys(row || {});
-    const hasContent = defs.some((column) =>
-      String(row && row[column.name] != null ? row[column.name] : "").trim() !== ""
-    );
+    const hasContent = hasRowContent(row);
     if (!hasContent) {
       errors.push("Fila " + (rowIndex + 1) + ": la fila está completamente vacía.");
     }
