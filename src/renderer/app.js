@@ -1364,7 +1364,7 @@
         ${externalAiIssueList(preview)}
         <div class="button-row end">
           <label class="external-ai-overwrite"><input id="externalAiOverwrite" type="checkbox"> Sobrescribir si ya existe un valor</label>
-          <button class="primary" type="button" data-action="external-ai-import" ${preview.canImport ? "" : "disabled"}>Importar campos válidos</button>
+          <button class="primary" type="button" data-action="external-ai-import" ${preview.canImport ? "" : "disabled"}>Importar respuesta</button>
         </div>
       </div>
     `;
