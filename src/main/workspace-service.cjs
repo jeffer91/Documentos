@@ -2,7 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { workspaceRoot, openDatabase, queueSync } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
-const { enrichMarker } = require("./template-markers.cjs");
+const PizZip = require("pizzip");
+const { enrichMarker, parseMarkerInner } = require("./template-markers.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
@@ -104,7 +105,7 @@ function externalAnalysisOnly(value) {
   const sources = {};
   Object.keys(fields).forEach((name) => { sources[name] = ["IA externa"]; });
   return {
-    provider: "IA externa",
+    provider: "IA externa + procesamiento local",
     generatedAt: new Date().toISOString(),
     generatedFields: fields,
     externalGeneratedFields: fields,
@@ -114,7 +115,7 @@ function externalAnalysisOnly(value) {
     tables: [],
     charts: [],
     sourceTrace: [],
-    notes: "Campos importados mediante ITSQMET-CAMPOS-V1."
+    notes: "Contenido importado mediante ITSQMET-DOCUMENTO-V2."
   };
 }
 
@@ -124,6 +125,61 @@ function invalidateAnalysisPreservingExternal(db, projectId, now) {
   db.prepare(
     "UPDATE projects SET analysis_json = ?, status = 'draft', updated_at = ? WHERE id = ?"
   ).run(externalOnly ? JSON.stringify(externalOnly) : null, now || new Date().toISOString(), projectId);
+}
+
+function decodeTemplateXml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function templatePlainText(xml) {
+  return decodeTemplateXml(String(xml || "")
+    .replace(/<w:tab\/>/g, "\t")
+    .replace(/<w:br[^>]*\/>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<[^>]+>/g, ""))
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function templatePartLocation(name) {
+  if (/^word\/header\d+\.xml$/.test(name)) return "Encabezado";
+  if (/^word\/footer\d+\.xml$/.test(name)) return "Pie de página";
+  return "Cuerpo del documento";
+}
+
+function attachTemplateLocations(filePath, markers) {
+  if (!filePath || !fs.existsSync(filePath) || !Array.isArray(markers) || !markers.length) return markers;
+  const zip = new PizZip(fs.readFileSync(filePath));
+  const byRaw = new Map(markers.map((marker) => [marker.raw, { count: 0, locations: new Set() }]));
+
+  Object.keys(zip.files)
+    .filter((name) => /^word\/(document|header\d+|footer\d+)\.xml$/.test(name))
+    .forEach((name) => {
+      const xml = zip.file(name).asText();
+      const text = templatePlainText(xml);
+      const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+      let match;
+      while ((match = regex.exec(text))) {
+        const parsed = parseMarkerInner(match[1]);
+        if (!parsed || !byRaw.has(parsed.raw)) continue;
+        const meta = byRaw.get(parsed.raw);
+        meta.count += 1;
+        meta.locations.add(templatePartLocation(name));
+      }
+    });
+
+  markers.forEach((marker) => {
+    const meta = byRaw.get(marker.raw);
+    marker.occurrenceCount = meta ? meta.count : 0;
+    marker.locations = meta ? Array.from(meta.locations) : [];
+  });
+  return markers;
 }
 
 function markerFromRow(row) {
@@ -145,9 +201,15 @@ function templateById(db, templateId) {
   const row = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
   if (!row) return null;
 
-  const markers = db.prepare(
+  let markers = db.prepare(
     "SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id"
   ).all(templateId).map(markerFromRow);
+
+  try {
+    markers = attachTemplateLocations(row.local_path, markers);
+  } catch (_error) {
+    // La ubicación es informativa; no debe impedir abrir un proyecto.
+  }
 
   return {
     id: row.id,
