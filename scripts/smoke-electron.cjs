@@ -52,6 +52,20 @@ async function run() {
     assert.ok(locationPeriod && locationPeriod.locations.includes("Cuerpo del documento"));
     assert.strictEqual(locationPeriod.occurrenceCount, 1);
 
+    const mismatchDocx = path.join(temp, "Deteccion_Necesidades_Capacitacion.docx");
+    const mismatchZip = new PizZip();
+    mismatchZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>Detección de Necesidades de Capacitación</w:t></w:r></w:p><w:p><w:r><w:t>{{CAM!:PERIODO|Período}}</w:t></w:r></w:p></w:body></w:document>");
+    fs.writeFileSync(mismatchDocx, mismatchZip.generate({ type: "nodebuffer" }));
+    const mismatchTemplate = templateService.importTemplate(temp, mismatchDocx, {
+      unitId: "UGPA",
+      processId: "ugpa-31",
+      documentId: "ugpa-necesidades-formacion"
+    });
+    assert.ok(
+      (mismatchTemplate.validation.warnings || []).some((warning) => warning.includes("Posible plantilla incorrecta")),
+      "Debe advertir cuando una plantilla de Capacitación se carga en Formación."
+    );
+
     const source = path.join(temp, "fuente.txt");
     fs.writeFileSync(source, "Fuente de prueba", "utf8");
 
