@@ -137,8 +137,17 @@ function inferAssociation(userDataPath, fileName, text) {
     unitId: best.unit.id,
     processId: best.process.id,
     documentId: best.document.id,
+    processCode: best.process.code,
+    documentName: best.document.name,
     confidence: Math.min(100, Math.round(55 + best.score * 1.5 + margin * 2))
   };
+}
+
+function detectAssociationForFile(userDataPath, filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  const parts = xmlParts(filePath);
+  const text = parts.map((part) => plainTextFromXml(part.xml)).join("\n");
+  return inferAssociation(userDataPath, path.basename(filePath), text);
 }
 
 function findStandaloneBlockWarnings(parts, markers) {
@@ -409,5 +418,6 @@ module.exports = {
   updateTemplate,
   deleteTemplate,
   plainTextFromXml,
-  inferAssociation
+  inferAssociation,
+  detectAssociationForFile
 };
