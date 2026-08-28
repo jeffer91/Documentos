@@ -172,6 +172,8 @@ async function run() {
     const builtPrompt = externalAiExchange.buildPrompt(temp, externalProject.id, "manual_ai", savedGuide.guide);
     assert.ok(builtPrompt.prompt.includes("Usar lenguaje institucional."));
     assert.ok(builtPrompt.prompt.includes("CONCLUSION_EXT"));
+    assert.ok(builtPrompt.prompt.includes("//VERSION-PLANTILLA:1//"));
+    assert.ok(builtPrompt.prompt.includes("Tipo: REDACCION"));
     assert.ok(builtPrompt.fieldsText.includes("//CAMPO:PERIODO_EXT//"));
 
     const externalResponse = [
@@ -226,8 +228,11 @@ async function run() {
       "El diagnóstico se completó con la información proporcionada."
     );
 
-    const internalOnly = externalAiExchange.projectForInternalAi(externalProject);
-    assert.strictEqual(internalOnly.template.aiFields.length, 0);
+    const externalOnlyAnalysis = externalAiExchange.analysisFromExternalOnly(externalProject);
+    assert.strictEqual(
+      externalOnlyAnalysis.generatedFields.CONCLUSION_EXT,
+      "El diagnóstico se completó con la información proporcionada."
+    );
 
     externalProject.formData.UNRELATED_EXT = "Debe conservarse";
     externalProject = workspace.saveProject(temp, externalProject);
@@ -265,7 +270,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, cálculos, IA externa, integridad, objetos históricos, versiones informativas, errores y respaldo."
+      "SMOKE OK: Electron, SQLite, catálogo, cálculos, IA externa exclusiva, integridad, objetos históricos, versiones informativas, errores y respaldo."
     );
   } finally {
     database.closeAll();
