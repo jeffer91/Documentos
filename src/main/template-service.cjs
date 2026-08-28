@@ -4,7 +4,7 @@ const PizZip = require("pizzip");
 const { root, copyUnique } = require("./workspace-service.cjs");
 const { openDatabase, queueSync, getCatalog } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
-const { parseMarkersFromText, validateMarkers, enrichMarker } = require("./template-markers.cjs");
+const { parseMarkersFromText, parseMarkerInner, validateMarkers, enrichMarker } = require("./template-markers.cjs");
 const { validateFormulaSyntax } = require("./calculation-service.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
@@ -43,10 +43,39 @@ function plainTextFromXml(xml) {
     .trim();
 }
 
+function partLocation(name) {
+  if (/^word\/header\d+\.xml$/.test(name)) return "Encabezado";
+  if (/^word\/footer\d+\.xml$/.test(name)) return "Pie de página";
+  return "Cuerpo del documento";
+}
+
+function attachMarkerLocations(parts, markers) {
+  const byRaw = new Map((markers || []).map((marker) => [marker.raw, { count: 0, locations: new Set() }]));
+  (parts || []).forEach((part) => {
+    const text = plainTextFromXml(part.xml);
+    const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+    let match;
+    while ((match = regex.exec(text))) {
+      const parsed = parseMarkerInner(match[1]);
+      if (!parsed || !byRaw.has(parsed.raw)) continue;
+      const meta = byRaw.get(parsed.raw);
+      meta.count += 1;
+      meta.locations.add(partLocation(part.name));
+    }
+  });
+
+  (markers || []).forEach((marker) => {
+    const meta = byRaw.get(marker.raw);
+    marker.occurrenceCount = meta ? meta.count : 0;
+    marker.locations = meta ? Array.from(meta.locations) : [];
+  });
+  return markers;
+}
+
 function inspectTemplate(filePath) {
   const parts = xmlParts(filePath);
   const text = parts.map((part) => plainTextFromXml(part.xml)).join("\n");
-  const markers = parseMarkersFromText(text);
+  const markers = attachMarkerLocations(parts, parseMarkersFromText(text));
   const validation = validateMarkers(markers);
   markers.filter((marker) => marker.valid && marker.type === "CALC").forEach((marker) => {
     const formula = validateFormulaSyntax(marker.formula);
@@ -144,9 +173,17 @@ function markerFromRow(row) {
 
 function hydrateTemplate(db, row) {
   if (!row) return null;
-  const markers = db.prepare("SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id")
+  let markers = db.prepare("SELECT * FROM template_fields WHERE template_id = ? ORDER BY sort_order, id")
     .all(row.id)
     .map(markerFromRow);
+
+  try {
+    if (row.local_path && fs.existsSync(row.local_path)) {
+      markers = attachMarkerLocations(xmlParts(row.local_path), markers);
+    }
+  } catch (_error) {
+    // La ubicación es informativa; un fallo aquí no invalida la plantilla.
+  }
 
   return {
     id: row.id,
