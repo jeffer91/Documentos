@@ -207,9 +207,32 @@ function importTemplate(userDataPath, sourcePath, association) {
   const db = openDatabase(userDataPath);
   const stored = copyUnique(sourcePath, templatesDir(userDataPath));
   const inspected = inspectTemplate(stored);
+  const detected = inferAssociation(userDataPath, path.basename(stored), inspected.text);
   const inferred = association && association.documentId
     ? Object.assign({ confidence: 100 }, association)
-    : inferAssociation(userDataPath, path.basename(stored), inspected.text);
+    : detected;
+
+  if (
+    association && association.documentId &&
+    detected && detected.documentId &&
+    detected.documentId !== association.documentId &&
+    Number(detected.confidence || 0) >= 70
+  ) {
+    const catalog = getCatalog(db);
+    const all = allDocumentsFromCatalog(catalog);
+    const selected = all.find((item) => item.document.id === association.documentId);
+    const suggested = all.find((item) => item.document.id === detected.documentId);
+    const selectedLabel = selected
+      ? selected.process.code + " · " + selected.document.name
+      : association.documentId;
+    const suggestedLabel = suggested
+      ? suggested.process.code + " · " + suggested.document.name
+      : detected.documentId;
+    inspected.validation.warnings.unshift(
+      "Posible plantilla incorrecta: el contenido parece corresponder a " + suggestedLabel +
+      ", pero fue cargado en " + selectedLabel + ". Verifica antes de generar."
+    );
+  }
 
   const documentId = inferred && inferred.documentId ? inferred.documentId : null;
   const unitId = inferred && inferred.unitId ? inferred.unitId : null;
