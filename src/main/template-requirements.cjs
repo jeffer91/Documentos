@@ -97,6 +97,10 @@ function statusFor(marker, project, value) {
 function requirementFor(marker, project, sys) {
   const value = valueFor(marker, project, sys);
   const note = marker.type === "SISTEMA" ? systemNote(marker, project, value) : "";
+  const needsDocumentNumber = marker.type === "SISTEMA" &&
+    ["CODIGO", "CODIGO_DOCUMENTO"].includes(marker.name) &&
+    /(0X|XX)/.test(String(project.codePattern || "")) &&
+    !text(project.formData && (project.formData.NUMERO_DOCUMENTO || project.formData.NUMERO));
   return {
     key: marker.type + ":" + marker.name,
     name: marker.name,
@@ -105,6 +109,8 @@ function requirementFor(marker, project, sys) {
     raw: marker.raw,
     literal: "{{" + marker.raw + "}}",
     required: Boolean(marker.required),
+    blocking: Boolean(marker.required) || needsDocumentNumber,
+    blockingReason: needsDocumentNumber ? "Falta el número de documento para construir el código." : "",
     category: categoryFor(marker.type),
     source: sourceFor(marker.type),
     action: actionFor(marker.type),
@@ -125,7 +131,9 @@ function summarize(requirements) {
   requirements.forEach((item) => {
     categories[item.category] = (categories[item.category] || 0) + 1;
   });
-  const blocking = requirements.filter((item) => item.required && item.status === "missing");
+  const blocking = requirements.filter((item) =>
+    item.blocking && ["missing", "warning"].includes(item.status)
+  );
   const warnings = requirements.filter((item) => item.status === "warning");
   const ready = requirements.filter((item) => item.status === "ready" || item.status === "automatic").length;
   return {
