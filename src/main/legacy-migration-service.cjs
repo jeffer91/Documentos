@@ -136,7 +136,7 @@ function migrateProjects(db, rootDir) {
         project.documentType || "",
         project.codePattern || "",
         project.mode || "template",
-        project.aiMode || "fallback",
+        "external",
         project.generatedCode || "",
         project.analysis ? json(project.analysis) : null,
         createdAt,
