@@ -27,8 +27,6 @@ const REQUIRED_FILES = [
   "src/main/external-ai-exchange.cjs",
   "src/main/source-service.cjs",
   "src/main/project-validator.cjs",
-  "src/main/ai-provider-service.cjs",
-  "src/main/ai-service.cjs",
   "src/main/document-composer.cjs",
   "src/main/pdf-service.cjs",
   "src/main/settings-service.cjs",
