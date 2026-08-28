@@ -11,7 +11,7 @@ const { applyCalculations } = require("../src/main/calculation-service.cjs");
 const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
 const templateRequirements = require("../src/main/template-requirements.cjs");
 const templateService = require("../src/main/template-service.cjs");
-const { validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
+const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
 const catalog = require("../src/renderer/catalog.js");
 
@@ -95,6 +95,9 @@ async function run() {
       (invalidBlockTemplate.validation.errors || []).some((error) => error.includes("deben estar en el cuerpo del documento")),
       "Los bloques en encabezado o pie deben bloquear la plantilla."
     );
+    assert.strictEqual(invalidBlockTemplate.active, false);
+    const stillActiveAfterInvalid = templateService.activeTemplateForDocument(temp, "utet-informe-final");
+    assert.strictEqual(stillActiveAfterInvalid.id, locationTemplate.id, "Una plantilla inválida no debe reemplazar la activa.");
 
     const mismatchDocx = path.join(temp, "Deteccion_Necesidades_Capacitacion.docx");
     const mismatchZip = new PizZip();
@@ -456,6 +459,29 @@ async function run() {
       }
     }, { tables: [], charts: [], extractionWarnings: [] });
     assert.strictEqual(requiredGraph.ok, false);
+
+    const emptyManualTable = validateProject({
+      mode: "template",
+      codePattern: "",
+      formData: { TABLA_REQ: [{}] },
+      attachments: [],
+      template: {
+        localPath: locationDocx,
+        sha256: "",
+        validation: { errors: [], warnings: [] },
+        systemFields: [],
+        fields: [{
+          valid: true,
+          required: true,
+          type: "TABLA",
+          name: "TABLA_REQ",
+          label: "Tabla requerida",
+          columnDefs: [{ label: "Dato", type: "CAMPO" }]
+        }]
+      }
+    });
+    assert.strictEqual(emptyManualTable.ok, false);
+    assert.ok(emptyManualTable.errors.some((error) => error.includes("filas vacías")));
 
     const calculation = applyCalculations({
       formData: { APROBADOS: 90, REPROBADOS: 10 },
