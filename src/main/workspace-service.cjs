@@ -162,7 +162,7 @@ function templateHeadingLevel(paragraph) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^A-Za-z0-9]+/g, "")
     .toUpperCase();
-  const heading = normalized.match(/^(?:HEADING|TITULO)([1-6])$/);
+  const heading = normalized.match(/^(?:HEADING|TITULO|TTULO)([1-6])$/);
   return heading ? Number(heading[1]) : 0;
 }
 
