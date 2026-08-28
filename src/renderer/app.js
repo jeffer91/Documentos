@@ -27,6 +27,7 @@
     busy: false,
     editorGuide: null,
     saveState: "saved",
+    requirements: null,
     externalAi: {
       templateId: "",
       guide: "",
@@ -194,6 +195,15 @@
     state.versions = response && response.ok ? response.versions || [] : [];
   }
 
+  async function loadRequirements() {
+    if (!state.project || !state.project.template) {
+      state.requirements = null;
+      return;
+    }
+    const response = await api.getTemplateRequirements(state.project.id);
+    state.requirements = response && response.ok ? response.data || null : null;
+  }
+
   function resetExternalAi() {
     state.externalAi = {
       templateId: state.project && state.project.template ? state.project.template.id : "",
@@ -241,6 +251,7 @@
       state.externalAi.prompt = promptResponse.data.prompt || "";
       state.externalAi.manualCount = Number(promptResponse.data.manualCount || 0);
       state.externalAi.aiCount = Number(promptResponse.data.aiCount || 0);
+      state.externalAi.tableCount = Number(promptResponse.data.tableCount || 0);
       state.externalAi.fieldCount = Number(promptResponse.data.fieldCount || 0);
     }
   }
@@ -327,7 +338,7 @@
       }
 
       setNav("home");
-      await Promise.all([loadVersions(), loadExternalAi()]);
+      await Promise.all([loadVersions(), loadExternalAi(), loadRequirements()]);
       renderEditor();
       return;
     }
@@ -1023,8 +1034,10 @@
   function reviewStepContent(plan, template) {
     const manual = manualTemplateFields(template);
     const stats = completionFor(manual);
-    const requiredMissing = manual.filter((field) => field.required && !fieldIsComplete(field));
-    const incomplete = manual.filter((field) => !fieldIsComplete(field));
+    const requirementData = state.requirements || {};
+    const allRequirements = Array.isArray(requirementData.requirements) ? requirementData.requirements : [];
+    const requiredMissing = allRequirements.filter((item) => item.required && item.status === "missing");
+    const incomplete = allRequirements.filter((item) => !["ready", "automatic"].includes(item.status));
     const aiCount = (template.aiFields || []).length;
     const sysCount = (template.systemFields || []).length;
     const calcCount = (template.fields || []).filter((field) => field.type === "CALC").length;
@@ -1038,15 +1051,15 @@
       </div>
       <div class="review-grid">
         <div class="review-card"><span>Datos manuales</span><b>${stats.completed}/${stats.total}</b><small>${incomplete.length ? `${incomplete.length} pendientes` : "Completo"}</small></div>
-        <div class="review-card"><span>IA</span><b>${aiCount}</b><small>contenidos automáticos</small></div>
+        <div class="review-card"><span>Redacción externa</span><b>${aiCount}</b><small>se importa desde IA externa</small></div>
         <div class="review-card"><span>Sistema</span><b>${sysCount}</b><small>valores automáticos</small></div>
         <div class="review-card"><span>Cálculos</span><b>${calcCount}</b><small>se ejecutan al generar</small></div>
       </div>
-      ${requiredMissing.length ? `<div class="review-alert"><b>Faltan ${requiredMissing.length} campos obligatorios</b><span>${requiredMissing.slice(0, 6).map((field) => escapeHtml(field.label)).join(" · ")}${requiredMissing.length > 6 ? "…" : ""}</span></div>` : '<div class="review-ok"><b>Campos obligatorios completos</b><span>El documento está listo para la generación técnica.</span></div>'}
+      ${requiredMissing.length ? `<div class="review-alert"><b>Faltan ${requiredMissing.length} campos obligatorios</b><span>${requiredMissing.slice(0, 6).map((field) => escapeHtml(field.label + " · " + field.literal)).join(" · ")}${requiredMissing.length > 6 ? "…" : ""}</span></div>` : '<div class="review-ok"><b>Campos obligatorios completos</b><span>El documento está listo para la generación técnica.</span></div>'}
       ${errors.length ? `<div class="notice-error"><b>La plantilla tiene errores</b><span>${escapeHtml(errors[0])}</span></div>` : ""}
       ${!errors.length && warnings.length ? `<div class="notice-warn"><b>Aviso de plantilla</b><span>${escapeHtml(warnings[0])}</span></div>` : ""}
       <button class="primary review-generate" type="button" data-action="generate" ${requiredMissing.length || errors.length ? "disabled" : ""}>Generar documento PDF</button>
-      <small class="review-hint">${requiredMissing.length ? "Completa los campos obligatorios para habilitar la generación." : "La IA, los cálculos y los campos del sistema se procesarán automáticamente."}</small>
+      <small class="review-hint">${requiredMissing.length ? "Completa los campos obligatorios para habilitar la generación." : "Los campos del sistema y cálculos son automáticos; la redacción proviene de la IA externa."}</small>
     `;
   }
 
@@ -1185,6 +1198,123 @@
       </div>`;
   }
 
+  const REQUIREMENT_CATEGORY_LABELS = {
+    system: "Sistema / automáticos",
+    data: "Datos",
+    writing: "Redacción externa",
+    tables: "Tablas",
+    files: "Archivos de datos",
+    evidence: "Evidencias",
+    calculations: "Cálculos",
+    charts: "Gráficos",
+    other: "Otros"
+  };
+
+  function requirementStatusLabel(item) {
+    if (item.status === "ready") return "Listo";
+    if (item.status === "automatic") return "Automático";
+    if (item.status === "warning") return "Revisar";
+    if (item.status === "missing") return "Falta";
+    return item.required ? "Falta" : "Pendiente";
+  }
+
+  function requirementActionHtml(item) {
+    if (item.type === "SISTEMA" && ["CODIGO", "CODIGO_DOCUMENTO"].includes(item.name) && item.status === "warning") {
+      const current = state.project && state.project.formData && (state.project.formData.NUMERO_DOCUMENTO || state.project.formData.NUMERO) || "";
+      return `<div class="requirement-code-input"><label>Número del documento</label><input data-field="NUMERO_DOCUMENTO" type="number" min="1" value="${escapeHtml(current)}" placeholder="01"></div>`;
+    }
+    if (item.action === "upload_data") {
+      return `<button class="ghost small-inline" type="button" data-action="add-files" data-kind="data" data-marker="${escapeHtml(item.name)}" data-multiple="false">Cargar Excel / CSV</button>`;
+    }
+    if (item.action === "upload_evidence") {
+      return `<button class="ghost small-inline" type="button" data-action="add-files" data-kind="evidence" data-marker="${escapeHtml(item.name)}" data-multiple="${item.multiple ? "true" : "false"}">Cargar evidencia</button>`;
+    }
+    if (item.action === "table") {
+      return `<button class="ghost small-inline" type="button" data-action="add-table-row" data-marker="${escapeHtml(item.name)}">+ Fila manual</button>`;
+    }
+    return "";
+  }
+
+  function requirementValueHtml(item) {
+    if (item.type === "TABLA") {
+      const rows = Array.isArray(item.value) ? item.value.length : 0;
+      return rows ? `<span class="requirement-value">${rows} fila(s) cargadas</span>` : "";
+    }
+    if (["DATOS", "IMAGEN", "IMAGENES"].includes(item.type)) {
+      const count = Number(item.value || 0);
+      return count ? `<span class="requirement-value">${count} archivo(s)</span>` : "";
+    }
+    if (item.value != null && String(item.value).trim() !== "") {
+      const value = String(item.value);
+      return `<span class="requirement-value" title="${escapeHtml(value)}">${escapeHtml(value.length > 120 ? value.slice(0, 117) + "…" : value)}</span>`;
+    }
+    return "";
+  }
+
+  function requirementItemHtml(item) {
+    const columns = Array.isArray(item.columns) && item.columns.length
+      ? `<div class="requirement-columns">${item.columns.map((column) => `<span><b>${escapeHtml(column.name)}</b> · ${escapeHtml(column.type)}</span>`).join("")}</div>`
+      : "";
+    return `
+      <article class="requirement-item status-${escapeHtml(item.status)}">
+        <div class="requirement-item-main">
+          <div class="requirement-item-title">
+            <b>${escapeHtml(item.label)}</b>
+            ${item.required ? '<span class="req-required">Obligatorio</span>' : '<span class="req-optional">Opcional</span>'}
+          </div>
+          <code>${escapeHtml(item.literal)}</code>
+          <div class="requirement-meta">
+            <span>${escapeHtml(item.type === "IA" ? "REDACCION" : item.type)}</span>
+            <span>Fuente: ${escapeHtml(item.source)}</span>
+          </div>
+          ${columns}
+          ${item.note ? `<p class="requirement-note">${escapeHtml(item.note)}</p>` : ""}
+          ${requirementValueHtml(item)}
+        </div>
+        <div class="requirement-item-side">
+          <span class="requirement-status">${escapeHtml(requirementStatusLabel(item))}</span>
+          ${requirementActionHtml(item)}
+        </div>
+      </article>
+    `;
+  }
+
+  function templateRequirementsHtml() {
+    const data = state.requirements;
+    if (!data || !Array.isArray(data.requirements)) return "";
+    const summary = data.summary || {};
+    const categories = Object.keys(REQUIREMENT_CATEGORY_LABELS)
+      .map((key) => ({
+        key,
+        label: REQUIREMENT_CATEGORY_LABELS[key],
+        items: data.requirements.filter((item) => item.category === key)
+      }))
+      .filter((group) => group.items.length);
+
+    return `
+      <section class="panel requirements-panel">
+        <div class="panel-title requirements-title">
+          <div>
+            <h2>Requisitos de la plantilla</h2>
+            <small>La app muestra el marcador exacto del Word, quién lo llena y su estado actual.</small>
+          </div>
+          <span class="status ${Number(summary.blocking || 0) ? "warn" : "good"}">${Number(summary.ready || 0)}/${Number(summary.total || 0)} resueltos</span>
+        </div>
+        <div class="requirements-summary">
+          <span><b>${Number(summary.total || 0)}</b> requisitos únicos</span>
+          <span><b>${Number(summary.blocking || 0)}</b> obligatorios faltantes</span>
+          <span><b>${Number(summary.warnings || 0)}</b> por revisar</span>
+        </div>
+        ${categories.map((group) => `
+          <details class="requirements-group" ${["system","data","files","evidence"].includes(group.key) ? "open" : ""}>
+            <summary><span>${escapeHtml(group.label)}</span><b>${group.items.length}</b></summary>
+            <div class="requirements-list">${group.items.map(requirementItemHtml).join("")}</div>
+          </details>
+        `).join("")}
+      </section>
+    `;
+  }
+
   function externalAiIssueList(preview) {
     if (!preview) return "";
     const problemItems = (preview.items || []).filter((item) => item.status === "error" || item.conflict);
@@ -1229,7 +1359,8 @@
     const data = state.externalAi || {};
     const aiCount = Number(data.aiCount || 0);
     const manualCount = Number(data.manualCount || 0);
-    const total = Number(data.fieldCount || (manualCount + aiCount));
+    const tableCount = Number(data.tableCount || 0);
+    const total = Number(data.fieldCount || (manualCount + aiCount + tableCount));
 
     return `
       <section class="panel external-ai-panel external-ai-simple">
@@ -1238,22 +1369,23 @@
             <h2>IA externa</h2>
             <small>La app prepara el prompt. Tú lo usas en ChatGPT, Claude, Gemini u otra IA y pegas aquí el resultado.</small>
           </div>
-          <span class="status good">Documento completo · ${total} campos</span>
+          <span class="status good">IA externa · ${total} elementos</span>
         </div>
 
         <div class="external-ai-simple-flow">
           <div class="external-ai-section">
             <div class="external-ai-section-head">
-              <div><span>1</span><div><h3>Preparar prompt</h3><p>Incluye automáticamente todos los campos de datos y de redacción de la plantilla.</p></div></div>
+              <div><span>1</span><div><h3>Preparar prompt</h3><p>Incluye los datos, las redacciones y las tablas que puede devolver la IA. Sistema, archivos y evidencias se resuelven aparte en la app.</p></div></div>
             </div>
 
             <label class="external-ai-label" for="externalAiGuide">Instrucciones adicionales <small>(opcional)</small></label>
             <textarea id="externalAiGuide" class="external-ai-textarea guide compact-guide" placeholder="Solo si este documento necesita una indicación especial. Puedes dejarlo vacío.">${escapeHtml(data.guide || "")}</textarea>
 
             <div class="external-ai-counts">
-              <span>${total} campos del documento</span>
-              <span>${manualCount} datos manuales</span>
-              <span>${aiCount} campos de redacción</span>
+              <span>${total} elementos para IA externa</span>
+              <span>${manualCount} datos</span>
+              <span>${aiCount} redacciones</span>
+              <span>${tableCount} tablas</span>
             </div>
 
             <div class="external-ai-main-action">
@@ -1278,7 +1410,7 @@
               ${data.canUndo ? '<button class="ghost small-inline" type="button" data-action="external-ai-undo">Deshacer última importación</button>' : ""}
             </div>
 
-            <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-CAMPOS-V1//&#10;//DOCUMENTO:...//&#10;//PLANTILLA:...//&#10;//VERSION-PLANTILLA:...//&#10;//MODO:MANUALES+IA//&#10;&#10;//CAMPO:...//&#10;contenido&#10;//FIN:...//&#10;&#10;//FIN-DOCUMENTO//">${escapeHtml(data.response || "")}</textarea>
+            <textarea id="externalAiResponse" class="external-ai-textarea response" placeholder="//FORMATO:ITSQMET-DOCUMENTO-V2//&#10;//DOCUMENTO:...//&#10;//PLANTILLA:...//&#10;//VERSION-PLANTILLA:...//&#10;//MODO:DOCUMENTO-COMPLETO//&#10;&#10;//CAMPO:...//&#10;contenido&#10;//FIN:...//&#10;&#10;//FIN-DOCUMENTO//">${escapeHtml(data.response || "")}</textarea>
 
             <div class="button-row end external-ai-analyze-row">
               <button class="secondary" type="button" data-action="external-ai-preview">Analizar respuesta</button>
@@ -1316,6 +1448,7 @@
     const guide = ensureEditorGuide(plan);
 
     view.innerHTML = `
+      ${templateRequirementsHtml()}
       <div class="editor-grid guided-editor-grid">
         <section class="panel guide-main-panel">
           ${templateStatus(template)}
@@ -1552,7 +1685,7 @@
       tables: [],
       charts: [],
       sourceTrace: [],
-      notes: "Campos importados mediante ITSQMET-CAMPOS-V1."
+      notes: "Contenido importado mediante ITSQMET-DOCUMENTO-V2."
     };
   }
 
@@ -1569,6 +1702,7 @@
       state.project = response.project;
       state.saveState = "saved";
       updateSaveStateLabel();
+      await loadRequirements();
     }
   }
 
@@ -1613,6 +1747,7 @@
     state.externalAi.prompt = data.prompt || "";
     state.externalAi.manualCount = Number(data.manualCount || 0);
     state.externalAi.aiCount = Number(data.aiCount || 0);
+    state.externalAi.tableCount = Number(data.tableCount || 0);
     state.externalAi.fieldCount = Number(data.fieldCount || 0);
     state.externalAi.preview = null;
     renderEditor();
@@ -1642,6 +1777,7 @@
     state.externalAi.prompt = built.data.prompt || "";
     state.externalAi.manualCount = Number(built.data.manualCount || 0);
     state.externalAi.aiCount = Number(built.data.aiCount || 0);
+    state.externalAi.tableCount = Number(built.data.tableCount || 0);
     state.externalAi.fieldCount = Number(built.data.fieldCount || 0);
     state.externalAi.canUndo = Boolean(saved.data && saved.data.canUndo);
 
@@ -1682,7 +1818,7 @@
     state.project = result.project || state.project;
     state.externalAi.canUndo = Boolean(result.canUndo);
     state.externalAi.preview = null;
-    await loadVersions();
+    await Promise.all([loadVersions(), loadRequirements()]);
     renderEditor();
     showToast(String(result.imported || 0) + " campos importados.");
   }
@@ -1695,6 +1831,7 @@
     state.project = result.project || state.project;
     state.externalAi.canUndo = Boolean(result.canUndo);
     state.externalAi.preview = null;
+    await loadRequirements();
     renderEditor();
     showToast("Última importación deshecha.");
   }
@@ -1789,7 +1926,7 @@
       state.project.status = "draft";
       const saved = await api.saveProject(state.project);
       if (saved && saved.ok) state.project = saved.project;
-      await loadExternalAi();
+      await Promise.all([loadExternalAi(), loadRequirements()]);
       renderEditor();
     } else {
       renderTemplates();
@@ -1826,6 +1963,7 @@
     if (!response || response.canceled) return;
     if (!response.ok) return showToast(response.error || "No se pudo agregar.");
     state.project = response.project;
+    await loadRequirements();
     renderEditor();
   }
 
@@ -1833,6 +1971,7 @@
     const response = await api.removeFile(state.project.id, id);
     if (response && response.ok) {
       state.project = response.project;
+      await loadRequirements();
       renderEditor();
     }
   }
@@ -1850,6 +1989,7 @@
     }
 
     state.project = response.project;
+    await loadRequirements();
     renderEditor();
     showToast("Campos calculados.");
   }
@@ -1869,7 +2009,7 @@
     }
 
     state.project = response.project;
-    await loadVersions();
+    await Promise.all([loadVersions(), loadRequirements()]);
     renderEditor();
     const warnings = state.project.analysis && Array.isArray(state.project.analysis.missingData) ? state.project.analysis.missingData.length : 0;
     showToast(warnings ? `PDF generado. ${warnings} aviso(s) de información.` : `PDF generado con ${response.result.engine}.`);
@@ -1909,8 +2049,12 @@
     state.project.analysis = preservedExternalAnalysis();
     clearCalculatedValues();
     api.saveProject(state.project).then((response) => {
-      if (response && response.ok) state.project = response.project;
-      renderEditor();
+      if (response && response.ok) {
+        state.project = response.project;
+        loadRequirements().then(() => renderEditor());
+      } else {
+        renderEditor();
+      }
     });
   }
 
