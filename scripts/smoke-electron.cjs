@@ -11,7 +11,7 @@ const { applyCalculations } = require("../src/main/calculation-service.cjs");
 const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
 const templateRequirements = require("../src/main/template-requirements.cjs");
 const templateService = require("../src/main/template-service.cjs");
-const { validateSystemFields } = require("../src/main/project-validator.cjs");
+const { validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
 const catalog = require("../src/renderer/catalog.js");
 
@@ -51,6 +51,26 @@ async function run() {
     assert.strictEqual(locationCode.occurrenceCount, 2);
     assert.ok(locationPeriod && locationPeriod.locations.includes("Cuerpo del documento"));
     assert.strictEqual(locationPeriod.occurrenceCount, 1);
+
+    const locationProject = workspace.createProject(temp, {
+      unitId: "UTET",
+      unitName: "Unidad de Titulación y Eficiencia Terminal",
+      processId: "utet-95",
+      processCode: "UTET-PRO-95",
+      processName: "Evaluación semestral del proceso de titulación",
+      documentId: "utet-informe-final",
+      documentName: "Informe Final del Proceso de Titulación",
+      documentType: "INF",
+      documentVersion: "1.0",
+      codePattern: "UTET-INF-0X-PRO-95-AÑO-MES",
+      mode: "template",
+      aiMode: "external",
+      template: { id: locationTemplate.id }
+    });
+    const locationRequirements = templateRequirements.getRequirements(temp, locationProject.id);
+    const hydratedCodeRequirement = locationRequirements.requirements.find((item) => item.name === "CODIGO");
+    assert.ok(hydratedCodeRequirement.locations.includes("Encabezado"));
+    assert.strictEqual(hydratedCodeRequirement.occurrenceCount, 2);
 
     const mismatchDocx = path.join(temp, "Deteccion_Necesidades_Capacitacion.docx");
     const mismatchZip = new PizZip();
@@ -282,8 +302,9 @@ async function run() {
 
     const malformedResponse = externalResponse.replace("//DATO:CARRERA//", "//DATO:CARRERA_MAL//").replace("//FIN-DATO:CARRERA//", "//FIN-DATO:CARRERA_MAL//");
     const malformedPreview = externalAiExchange.previewResponse(temp, externalProject.id, malformedResponse, "manual_ai");
-    assert.strictEqual(malformedPreview.canImport, false);
+    assert.strictEqual(malformedPreview.canImport, true);
     assert.ok(malformedPreview.summary.errors >= 1);
+    assert.ok(malformedPreview.items.some((item) => item.name === "RESULTADOS_EXT" && item.status === "error"));
 
     const externalPreview = externalAiExchange.previewResponse(temp, externalProject.id, externalResponse, "manual_ai");
     assert.strictEqual(externalPreview.canImport, true);
@@ -368,6 +389,20 @@ async function run() {
     }, {});
     assert.strictEqual(systemRequired.ok, false);
     assert.ok(systemRequired.errors[0].includes("{{SYS!:ELABORADO_POR}}"));
+
+    const dataValidationProject = {
+      attachments: [{ kind: "data", markerName: "BASE", name: "base.xlsx" }],
+      template: {
+        fields: [{ valid: true, required: true, type: "DATOS", name: "BASE", label: "Base", raw: "DAT!:BASE|Base" }]
+      }
+    };
+    const unreadableData = validateExtractedData(dataValidationProject, { tables: [], extractionWarnings: ["base.xlsx: error de lectura"] });
+    assert.strictEqual(unreadableData.ok, false);
+    const readableData = validateExtractedData(dataValidationProject, {
+      tables: [{ markerName: "BASE", headers: ["A"], rows: [["1"]] }],
+      extractionWarnings: []
+    });
+    assert.strictEqual(readableData.ok, true);
 
     const calculation = applyCalculations({
       formData: { APROBADOS: 90, REPROBADOS: 10 },
