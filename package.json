@@ -1,6 +1,6 @@
 {
   "name": "documentos",
-  "version": "2.7.1",
+  "version": "2.8.0",
   "description": "Generador documental ITSQMET con SQLite local, plantillas Word y salida PDF",
   "main": "main.cjs",
   "author": "Jefferson Villarreal",
