@@ -9,6 +9,7 @@ const backupService = require("../src/main/backup-service.cjs");
 const errorService = require("../src/main/error-service.cjs");
 const { applyCalculations } = require("../src/main/calculation-service.cjs");
 const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
+const templateRequirements = require("../src/main/template-requirements.cjs");
 const catalog = require("../src/renderer/catalog.js");
 
 async function run() {
@@ -150,6 +151,33 @@ async function run() {
     insertExternalField.run(extTemplateId, "CAMPO", "PERIODO_EXT", "Período externo", 1, "", "CAMPO!:PERIODO_EXT|Período externo", 0);
     insertExternalField.run(extTemplateId, "LISTA", "MODALIDAD_EXT", "Modalidad externa", 1, "Presencial,En línea", "LISTA!:MODALIDAD_EXT|Modalidad externa|Presencial,En línea", 1);
     insertExternalField.run(extTemplateId, "IA", "CONCLUSION_EXT", "Conclusión externa", 0, "", "IA:CONCLUSION_EXT|Conclusión externa", 2);
+    db.prepare(`
+      INSERT INTO template_fields(template_id, type, name, label, required, config, columns_json, raw, valid, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(
+      extTemplateId,
+      "TABLA",
+      "RESULTADOS_EXT",
+      "Resultados externos",
+      0,
+      "Carrera:CAMPO,Porcentaje:NUMERO",
+      JSON.stringify(["Carrera", "Porcentaje"]),
+      "TAB:RESULTADOS_EXT|Resultados externos|Carrera:CAMPO,Porcentaje:NUMERO",
+      3
+    );
+    db.prepare(`
+      INSERT INTO template_fields(template_id, type, name, label, required, config, columns_json, raw, valid, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, '[]', ?, 1, ?)
+    `).run(
+      extTemplateId,
+      "SISTEMA",
+      "CODIGO",
+      "Codigo",
+      0,
+      "",
+      "SYS:CODIGO",
+      4
+    );
 
     let externalProject = workspace.createProject(temp, {
       unitId: "UTET",
@@ -175,13 +203,15 @@ async function run() {
     assert.ok(builtPrompt.prompt.includes("//VERSION-PLANTILLA:1//"));
     assert.ok(builtPrompt.prompt.includes("Tipo: REDACCION"));
     assert.ok(builtPrompt.fieldsText.includes("//CAMPO:PERIODO_EXT//"));
+    assert.ok(builtPrompt.fieldsText.includes("//TABLA:RESULTADOS_EXT//"));
+    assert.strictEqual(builtPrompt.tableCount, 1);
 
     const externalResponse = [
       "//FORMATO:" + externalAiExchange.PROTOCOL + "//",
       "//DOCUMENTO:utet-informe-final//",
       "//PLANTILLA:abc123//",
       "//VERSION-PLANTILLA:1//",
-      "//MODO:MANUALES+IA//",
+      "//MODO:DOCUMENTO-COMPLETO//",
       "",
       "//CAMPO:PERIODO_EXT//",
       "Mayo 2026 - Noviembre 2026",
@@ -195,12 +225,23 @@ async function run() {
       "El diagnóstico se completó con la información proporcionada.",
       "//FIN:CONCLUSION_EXT//",
       "",
+      "//TABLA:RESULTADOS_EXT//",
+      "//FILA//",
+      "//DATO:CARRERA//",
+      "Administración",
+      "//FIN-DATO:CARRERA//",
+      "//DATO:PORCENTAJE//",
+      "82",
+      "//FIN-DATO:PORCENTAJE//",
+      "//FIN-FILA//",
+      "//FIN-TABLA:RESULTADOS_EXT//",
+      "",
       "//FIN-DOCUMENTO//"
     ].join("\n");
 
     const externalPreview = externalAiExchange.previewResponse(temp, externalProject.id, externalResponse, "manual_ai");
     assert.strictEqual(externalPreview.canImport, true);
-    assert.strictEqual(externalPreview.summary.valid, 3);
+    assert.strictEqual(externalPreview.summary.valid, 4);
     assert.strictEqual(externalPreview.summary.errors, 0);
 
     const externalApplied = externalAiExchange.applyResponse(temp, externalProject.id, externalResponse, "manual_ai", false);
@@ -211,6 +252,23 @@ async function run() {
       externalProject.analysis.externalGeneratedFields.CONCLUSION_EXT,
       "El diagnóstico se completó con la información proporcionada."
     );
+    assert.strictEqual(externalProject.formData.RESULTADOS_EXT.length, 1);
+    assert.strictEqual(externalProject.formData.RESULTADOS_EXT[0].Carrera, "Administración");
+    assert.strictEqual(externalProject.formData.RESULTADOS_EXT[0].Porcentaje, 82);
+
+    const reqBeforeNumber = templateRequirements.getRequirements(temp, externalProject.id);
+    const codeReqBefore = reqBeforeNumber.requirements.find((item) => item.name === "CODIGO");
+    assert.ok(codeReqBefore);
+    assert.strictEqual(codeReqBefore.literal, "{{SYS:CODIGO}}");
+    assert.strictEqual(codeReqBefore.status, "warning");
+    assert.ok(reqBeforeNumber.summary.blocking >= 1);
+
+    externalProject.formData.NUMERO_DOCUMENTO = "07";
+    externalProject = workspace.saveProject(temp, externalProject);
+    const reqAfterNumber = templateRequirements.getRequirements(temp, externalProject.id);
+    const codeReqAfter = reqAfterNumber.requirements.find((item) => item.name === "CODIGO");
+    assert.strictEqual(codeReqAfter.status, "ready");
+    assert.ok(String(codeReqAfter.value).includes("07"));
 
     const mergedExternal = externalAiExchange.mergeExternalGeneratedFields(externalProject, {
       provider: "Local",
@@ -270,7 +328,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, cálculos, IA externa exclusiva, integridad, objetos históricos, versiones informativas, errores y respaldo."
+      "SMOKE OK: Electron, SQLite, catálogo, requisitos, SYS, tablas IA externa V2, cálculos, integridad, versiones, errores y respaldo."
     );
   } finally {
     database.closeAll();
