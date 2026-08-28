@@ -122,7 +122,7 @@ function fieldSkeleton(field) {
 function buildPrompt(userDataPath, projectId, mode, guideText) {
   const project = projectOrThrow(userDataPath, projectId);
   const db = openDatabase(userDataPath);
-  const normalizedMode = mode === "manual_ai" ? "manual_ai" : "manual";
+  const normalizedMode = mode === "manual" ? "manual" : "manual_ai";
   const guide = guideText == null
     ? guideForTemplate(db, project.template.id, project.template.version)
     : String(guideText || "").trim();
@@ -156,8 +156,8 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     "PROCESO: " + project.processName + (project.processCode ? " (" + project.processCode + ")" : ""),
     "PLANTILLA: versión " + Number(project.template.version || 1),
     "",
-    "GUÍA ESPECÍFICA PARA LLENAR ESTE DOCUMENTO:",
-    guide || "No se proporcionó una guía adicional. Usa únicamente la información que el usuario entregue.",
+    "INSTRUCCIONES ADICIONALES (OPCIONAL):",
+    guide || "No hay instrucciones adicionales. Completa los campos únicamente con la información que el usuario te proporcione.",
     "",
     "REGLAS OBLIGATORIAS:",
     "- No inventes información, cifras, nombres, fechas, normas ni resultados.",
@@ -168,6 +168,7 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     "- En NUMERO escribe únicamente el valor numérico.",
     "- En FECHA usa preferentemente AAAA-MM-DD.",
     "- TEXTO e IA pueden contener varios párrafos.",
+    "- Los campos IA de esta plantilla deben ser redactados por ti; la aplicación no llamará a otra IA para completarlos.",
     "- No escribas comentarios, explicaciones ni Markdown fuera del formato solicitado.",
     "- CALC, SISTEMA, imágenes, archivos, datos y gráficos son responsabilidad de la aplicación y no deben incluirse.",
     "",
@@ -351,7 +352,7 @@ function existingValue(project, field) {
 
 function previewResponse(userDataPath, projectId, rawText, mode) {
   const project = projectOrThrow(userDataPath, projectId);
-  const normalizedMode = mode === "manual_ai" ? "manual_ai" : "manual";
+  const normalizedMode = mode === "manual" ? "manual" : "manual_ai";
   const allowed = requestedFields(project, normalizedMode);
   const allowedByName = new Map(allowed.map((field) => [field.name, field]));
   const parsed = parseResponse(rawText);
@@ -557,7 +558,7 @@ function applyResponse(userDataPath, projectId, rawText, mode, overwrite) {
       projectId,
       project.template.id,
       Number(project.template.version || 1),
-      mode === "manual_ai" ? "manual_ai" : "manual",
+      mode === "manual" ? "manual" : "manual_ai",
       String(rawText || ""),
       JSON.stringify(previousForm),
       previousAnalysis ? JSON.stringify(previousAnalysis) : null,
@@ -689,6 +690,11 @@ function undoLastImport(userDataPath, projectId) {
   };
 }
 
+function analysisFromExternalOnly(project) {
+  const external = externalFieldsFromProject(project);
+  return externalAnalysis(external);
+}
+
 function projectForInternalAi(project) {
   const external = externalFieldsFromProject(project);
   if (!Object.keys(external).length || !project || !project.template) return project;
@@ -735,6 +741,7 @@ module.exports = {
   previewResponse,
   applyResponse,
   undoLastImport,
+  analysisFromExternalOnly,
   projectForInternalAi,
   mergeExternalGeneratedFields
 };
