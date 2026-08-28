@@ -86,6 +86,27 @@ async function run() {
       "Debe advertir cuando una plantilla de Capacitación se carga en Formación."
     );
 
+    const mismatchProject = workspace.createProject(temp, {
+      unitId: "UGPA",
+      unitName: "Unidad de Gestión de Procesos Académicos",
+      processId: "ugpa-31",
+      processCode: "UGPA-PRO-31",
+      processName: "Formación Docente",
+      documentId: "ugpa-necesidades-formacion",
+      documentName: "Detección de Necesidades de Formación",
+      documentType: "RGI",
+      documentVersion: "1.0",
+      codePattern: "UGPA-RGI1-0X-PRO-31-AÑO-MES",
+      mode: "template",
+      aiMode: "external",
+      template: { id: mismatchTemplate.id }
+    });
+    const mismatchRequirements = templateRequirements.getRequirements(temp, mismatchProject.id);
+    assert.ok(
+      String(mismatchRequirements.associationWarning || "").includes("UGPA-PRO-70"),
+      "La advertencia debe seguir apareciendo al abrir una plantilla ya guardada."
+    );
+
     const source = path.join(temp, "fuente.txt");
     fs.writeFileSync(source, "Fuente de prueba", "utf8");
 
@@ -300,6 +321,12 @@ async function run() {
       "//FIN-DOCUMENTO//"
     ].join("\n");
 
+    const emptyTableResponse = externalResponse
+      .replace("Administración", "")
+      .replace("82", "");
+    const emptyTablePreview = externalAiExchange.previewResponse(temp, externalProject.id, emptyTableResponse, "manual_ai");
+    assert.ok(emptyTablePreview.items.some((item) => item.name === "RESULTADOS_EXT" && item.status === "error"));
+
     const malformedResponse = externalResponse.replace("//DATO:CARRERA//", "//DATO:CARRERA_MAL//").replace("//FIN-DATO:CARRERA//", "//FIN-DATO:CARRERA_MAL//");
     const malformedPreview = externalAiExchange.previewResponse(temp, externalProject.id, malformedResponse, "manual_ai");
     assert.strictEqual(malformedPreview.canImport, true);
@@ -388,6 +415,15 @@ async function run() {
       extractionWarnings: []
     });
     assert.strictEqual(readableData.ok, true);
+
+    const requiredGraph = validateExtractedData({
+      attachments: [],
+      template: {
+        fields: [{ valid: true, type: "DATOS", name: "BASE", label: "Base", required: false }],
+        markers: [{ valid: true, required: true, type: "GRAFICO", name: "RESUMEN", label: "Gráfico resumen", raw: "GRA!:RESUMEN|Gráfico resumen" }]
+      }
+    }, { tables: [], charts: [], extractionWarnings: [] });
+    assert.strictEqual(requiredGraph.ok, false);
 
     const calculation = applyCalculations({
       formData: { APROBADOS: 90, REPROBADOS: 10 },
