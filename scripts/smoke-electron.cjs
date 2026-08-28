@@ -34,10 +34,16 @@ async function run() {
       Number(db.pragma("user_version", { simple: true })),
       database.CURRENT_SCHEMA_VERSION
     );
+    assert.strictEqual(database.CURRENT_SCHEMA_VERSION, 6);
+    assert.strictEqual(
+      db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name = 'ai_providers'").get().total,
+      0,
+      "La base no debe conservar la tabla de proveedores de IA interna."
+    );
 
     const locationDocx = path.join(temp, "ubicaciones.docx");
     const locationZip = new PizZip();
-    locationZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>{{CAM!:PERIODO|Período}}</w:t></w:r></w:p></w:body></w:document>");
+    locationZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Heading2\"/></w:pPr><w:r><w:t>5. Resultados del Diagnóstico</w:t></w:r></w:p><w:p><w:r><w:t>{{CAM!:PERIODO|Período}}</w:t></w:r></w:p></w:body></w:document>");
     locationZip.file("word/header1.xml", "<w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:r><w:t>{{SYS:CODIGO}} {{SYS:CODIGO}}</w:t></w:r></w:p></w:hdr>");
     fs.writeFileSync(locationDocx, locationZip.generate({ type: "nodebuffer" }));
     const locationTemplate = templateService.importTemplate(temp, locationDocx, {
@@ -51,6 +57,7 @@ async function run() {
     assert.strictEqual(locationCode.occurrenceCount, 2);
     assert.ok(locationPeriod && locationPeriod.locations.includes("Cuerpo del documento"));
     assert.strictEqual(locationPeriod.occurrenceCount, 1);
+    assert.ok(locationPeriod.contexts.includes("5. Resultados del Diagnóstico"));
 
     const locationProject = workspace.createProject(temp, {
       unitId: "UTET",
@@ -71,6 +78,23 @@ async function run() {
     const hydratedCodeRequirement = locationRequirements.requirements.find((item) => item.name === "CODIGO");
     assert.ok(hydratedCodeRequirement.locations.includes("Encabezado"));
     assert.strictEqual(hydratedCodeRequirement.occurrenceCount, 2);
+    const hydratedPeriodRequirement = locationRequirements.requirements.find((item) => item.name === "PERIODO");
+    assert.ok(hydratedPeriodRequirement.contexts.includes("5. Resultados del Diagnóstico"));
+
+    const invalidBlockDocx = path.join(temp, "bloque-en-encabezado.docx");
+    const invalidBlockZip = new PizZip();
+    invalidBlockZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>Plantilla de prueba</w:t></w:r></w:p></w:body></w:document>");
+    invalidBlockZip.file("word/header1.xml", "<w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:r><w:t>{{IMG!:FIRMA|Firma}}</w:t></w:r></w:p></w:hdr>");
+    fs.writeFileSync(invalidBlockDocx, invalidBlockZip.generate({ type: "nodebuffer" }));
+    const invalidBlockTemplate = templateService.importTemplate(temp, invalidBlockDocx, {
+      unitId: "UTET",
+      processId: "utet-95",
+      documentId: "utet-informe-final"
+    });
+    assert.ok(
+      (invalidBlockTemplate.validation.errors || []).some((error) => error.includes("deben estar en el cuerpo del documento")),
+      "Los bloques en encabezado o pie deben bloquear la plantilla."
+    );
 
     const mismatchDocx = path.join(temp, "Deteccion_Necesidades_Capacitacion.docx");
     const mismatchZip = new PizZip();
@@ -416,6 +440,14 @@ async function run() {
     });
     assert.strictEqual(readableData.ok, true);
 
+    const truncatedRequiredData = validateExtractedData(dataValidationProject, {
+      tables: [{ markerName: "BASE", headers: ["A"], rows: [["1"]] }],
+      truncations: [{ markerName: "BASE", message: "base.xlsx excede el límite seguro." }],
+      extractionWarnings: []
+    });
+    assert.strictEqual(truncatedRequiredData.ok, false);
+    assert.ok(truncatedRequiredData.errors[0].includes("información incompleta"));
+
     const requiredGraph = validateExtractedData({
       attachments: [],
       template: {
@@ -453,7 +485,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, ubicaciones, requisitos, SYS, tablas IA externa V2, datos locales, cálculos, integridad, versiones, errores y respaldo."
+      "SMOKE OK: Electron, SQLite v6, catálogo, secciones Word, requisitos, SYS, IA externa V2, DATOS completos, cálculos, integridad, versiones, errores y respaldo."
     );
   } finally {
     database.closeAll();
