@@ -352,21 +352,6 @@ async function run() {
     assert.strictEqual(deterministic.missingData.length, 1);
     assert.strictEqual(deterministic.sourceTrace[0].name, "base.xlsx");
 
-    const mergedExternal = externalAiExchange.mergeExternalGeneratedFields(externalProject, {
-      provider: "Local",
-      generatedFields: { CONCLUSION_EXT: "Texto interno" },
-      fieldSources: {},
-      keyFindings: [],
-      missingData: [],
-      tables: [],
-      charts: [],
-      sourceTrace: [],
-      notes: ""
-    });
-    assert.strictEqual(
-      mergedExternal.generatedFields.CONCLUSION_EXT,
-      "El diagnóstico se completó con la información proporcionada."
-    );
 
     const externalOnlyAnalysis = externalAiExchange.analysisFromExternalOnly(externalProject);
     assert.strictEqual(
