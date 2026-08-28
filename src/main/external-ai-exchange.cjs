@@ -92,7 +92,7 @@ function fieldDescription(field, index) {
   const lines = [
     String(index + 1) + ". " + field.name,
     "Etiqueta: " + (field.label || field.name),
-    "Tipo: " + field.type,
+    "Tipo: " + (field.type === "IA" ? "REDACCION" : field.type),
     "Obligatorio: " + (field.required ? "Sí" : "No")
   ];
 
@@ -106,7 +106,7 @@ function fieldDescription(field, index) {
     lines.push("Formato recomendado: AAAA-MM-DD.");
   }
   if (field.type === "IA") {
-    lines.push("Contenido: redacta este campo con base únicamente en la guía y la información que te proporcione el usuario.");
+    lines.push("Contenido: redacta este campo únicamente con las instrucciones y la información que te proporcione el usuario.");
   }
   return lines.join("\n");
 }
