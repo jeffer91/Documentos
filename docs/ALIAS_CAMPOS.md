@@ -12,7 +12,7 @@ Esta guía define los tipos de campo que la app entiende y sus alias cortos. Se 
 | `CALC` | `CAL` | Valor calculado a partir de otros campos/datos |
 | `BUSCAR` | `BUS` | Valor asociado a una fuente de búsqueda |
 | `SISTEMA` | `SYS` | Valor automático del sistema |
-| `IA` | `AI` | Texto generado por IA |
+| `IA` | `AI` | Campo de redacción completado mediante IA externa |
 | `DATOS` | `DAT` | Excel/CSV |
 | `TABLA` | `TAB` | Tabla manual editable |
 | `IMAGEN` | `IMG` | Una imagen |
@@ -106,22 +106,24 @@ La app no usa `eval()`. Las fórmulas se procesan con un motor controlado.
 ## Regla de cálculo
 
 ```text
-Datos directos
+Plantilla Word
       ↓
-Tablas / Excel
+Mapa de requisitos
       ↓
-CALC
+Usuario / IA externa / archivos
       ↓
-Gráficos
+Importación estructurada
       ↓
-IA interpreta
+CALC + SYS
+      ↓
+Gráficos locales
       ↓
 Word
       ↓
 PDF
 ```
 
-La IA no debe recalcular cifras determinísticas. Los resultados de `CALC` se incorporan a los datos que recibe la IA.
+La IA externa no debe sustituir cálculos determinísticos. `CALC` se ejecuta dentro de la aplicación.
 
 ## Errores bloqueantes
 
@@ -145,3 +147,12 @@ Para mostrar el símbolo en el documento, colócalo fuera del marcador:
 ```text
 {{CAL:APROBACION|Aprobación|ROUND(PERCENT(APROBADOS,TOTAL),2)}} %
 ```
+
+
+## IA externa y tablas
+
+Los campos `IA/AI` son campos de redacción externa. La aplicación no llama a proveedores internos.
+
+El formato vigente para intercambio es `ITSQMET-DOCUMENTO-V2`. Las tablas `TAB/TABLA` pueden devolverse mediante bloques `//TABLA//`, `//FILA//` y `//DATO//`.
+
+Los tipos `SYS`, `CALC`, `DATOS`, `IMAGEN/IMAGENES` y `GRAFICO/GRAFICOS` no se solicitan como texto a la IA externa.
