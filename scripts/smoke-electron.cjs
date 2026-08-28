@@ -178,6 +178,7 @@ async function run() {
       "//FORMATO:" + externalAiExchange.PROTOCOL + "//",
       "//DOCUMENTO:utet-informe-final//",
       "//PLANTILLA:abc123//",
+      "//VERSION-PLANTILLA:1//",
       "//MODO:MANUALES+IA//",
       "",
       "//CAMPO:PERIODO_EXT//",
@@ -225,8 +226,15 @@ async function run() {
       "El diagnóstico se completó con la información proporcionada."
     );
 
+    const internalOnly = externalAiExchange.projectForInternalAi(externalProject);
+    assert.strictEqual(internalOnly.template.aiFields.length, 0);
+
+    externalProject.formData.UNRELATED_EXT = "Debe conservarse";
+    externalProject = workspace.saveProject(temp, externalProject);
+
     externalProject = externalAiExchange.undoLastImport(temp, externalProject.id).project;
     assert.strictEqual(Object.prototype.hasOwnProperty.call(externalProject.formData, "PERIODO_EXT"), false);
+    assert.strictEqual(externalProject.formData.UNRELATED_EXT, "Debe conservarse");
     assert.strictEqual(externalProject.analysis, null);
 
     const calculation = applyCalculations({
