@@ -16,6 +16,7 @@ const backupService = require("./src/main/backup-service.cjs");
 const errorService = require("./src/main/error-service.cjs");
 const { applyCalculations } = require("./src/main/calculation-service.cjs");
 const externalAiExchange = require("./src/main/external-ai-exchange.cjs");
+const templateRequirements = require("./src/main/template-requirements.cjs");
 
 let mainWindow = null;
 
@@ -153,6 +154,11 @@ function registerIpc() {
   ipcMain.handle("templates:delete", (_event, templateId) => safeResponse(() => ({
     ok: true,
     result: templates.deleteTemplate(userData(), templateId)
+  })));
+
+  ipcMain.handle("requirements:get", (_event, projectId) => safeResponse(() => ({
+    ok: true,
+    data: templateRequirements.getRequirements(userData(), projectId)
   })));
 
   ipcMain.handle("external-ai:guide-get", (_event, projectId) => safeResponse(() => ({
