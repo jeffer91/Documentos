@@ -1301,6 +1301,7 @@
           </div>
           <span class="status ${Number(summary.blocking || 0) ? "warn" : "good"}">${Number(summary.ready || 0)}/${Number(summary.total || 0)} resueltos</span>
         </div>
+        ${data.associationWarning ? `<div class="notice-warn requirements-association-warning"><b>Revisa la plantilla</b><span>${escapeHtml(data.associationWarning)}</span></div>` : ""}
         <div class="requirements-summary">
           <span><b>${Number(summary.total || 0)}</b> requisitos únicos</span>
           <span><b>${Number(summary.blocking || 0)}</b> obligatorios faltantes</span>
