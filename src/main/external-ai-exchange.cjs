@@ -127,8 +127,10 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     ? guideForTemplate(db, project.template.id, project.template.version)
     : String(guideText || "").trim();
   const fields = requestedFields(project, normalizedMode);
-  const manualCount = fields.filter((field) => field.type !== "IA").length;
-  const aiCount = fields.filter((field) => field.type === "IA").length;
+  const manualCount = ((project.template && project.template.fields) || [])
+    .filter((field) => field.valid !== false && MANUAL_TYPES.has(field.type)).length;
+  const aiCount = ((project.template && project.template.aiFields) || [])
+    .filter((field) => field.valid !== false).length;
   const fingerprint = templateFingerprint(project);
 
   const responseHeader = [
