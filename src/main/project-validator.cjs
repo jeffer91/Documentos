@@ -57,6 +57,8 @@ function validateProject(project) {
   const documentNumber = project.formData && (project.formData.NUMERO_DOCUMENTO || project.formData.NUMERO);
   if (needsDocumentNumber && !hasText(documentNumber)) {
     errors.push("Falta el número de documento necesario para construir {{SYS:CODIGO}}.");
+  } else if (needsDocumentNumber && !/^\d+$/.test(String(documentNumber).trim())) {
+    errors.push("El número de documento para {{SYS:CODIGO}} debe contener únicamente dígitos enteros.");
   }
 
   (template.fields || []).forEach((field) => {
@@ -111,6 +113,21 @@ function validateProject(project) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
+function validateSystemFields(project, values) {
+  const errors = [];
+  const warnings = [];
+  const system = values && typeof values === "object" ? values : {};
+
+  ((project.template && project.template.systemFields) || []).forEach((field) => {
+    if (!field.valid || !field.required) return;
+    if (!hasText(system[field.name])) {
+      errors.push(`Falta el valor automático requerido: ${field.label || field.name} · {{${field.raw}}}.`);
+    }
+  });
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+
 function validateAiFields(project, analysis) {
   const errors = [];
   const generated = analysis && analysis.generatedFields ? analysis.generatedFields : {};
@@ -124,4 +141,4 @@ function validateAiFields(project, analysis) {
   return { ok: errors.length === 0, errors };
 }
 
-module.exports = { validateProject, validateAiFields };
+module.exports = { validateProject, validateAiFields, validateSystemFields };
