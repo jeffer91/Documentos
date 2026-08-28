@@ -9,16 +9,18 @@ Plantilla Word
       ↓
 Marcadores {{...}}
       ↓
-Formulario automático
+Mapa de requisitos
       ↓
-IA / datos / evidencias
+Datos / evidencias + IA externa
+      ↓
+Validación + CALC + SYS
       ↓
 Word completado
       ↓
 PDF final
 ```
 
-## Datos: arquitectura v2.4
+## Datos: arquitectura v2.8
 
 La app utiliza **SQLite como base local principal**.
 
@@ -57,7 +59,7 @@ documentos-workspace/
 - `ai_analyses`
 - `generations`
 - `settings`
-- `ai_providers`
+- `ai_providers` (compatibilidad histórica; no se usa para generación)
 
 ### Preparación para base externa
 
@@ -111,7 +113,7 @@ Campo obligatorio:
 {{SISTEMA:APROBADO_POR}}
 ```
 
-### IA
+### Redacción mediante IA externa
 
 ```text
 {{IA:INTRODUCCION|Introducción}}
@@ -249,6 +251,39 @@ Ejemplo:
 {{AI:ANALISIS|Análisis}}
 ```
 
-Los cálculos se ejecutan antes de la IA. La IA interpreta resultados, pero no sustituye el motor matemático.
+La app no llama a una IA interna. Los marcadores `IA/AI` representan campos de redacción que se completan mediante el flujo de IA externa. Los cálculos siguen siendo determinísticos y nunca se delegan a la IA.
 
 La referencia completa de tipos y alias está en `docs/ALIAS_CAMPOS.md`.
+
+
+## Requisitos de plantilla
+
+Al abrir un documento, la app muestra un mapa de todos los marcadores únicos de la plantilla, incluyendo el marcador literal, su origen, estado, ubicación general en Word y número de apariciones.
+
+Ejemplo:
+
+```text
+{{SYS:CODIGO}}
+Ubicación: Encabezado
+Fuente: Catálogo + número de documento
+
+{{DAT!:BASE_DIAGNOSTICO|Base consolidada}}
+Fuente: Excel / CSV
+
+{{AI:CONCLUSIONES|Conclusiones}}
+Fuente: IA externa
+```
+
+Los marcadores obligatorios y las dependencias necesarias bloquean la generación hasta quedar resueltos.
+
+## IA externa · protocolo V2
+
+La app genera un único prompt para ChatGPT, Claude, Gemini u otra IA externa. La respuesta se importa usando:
+
+```text
+//FORMATO:ITSQMET-DOCUMENTO-V2//
+```
+
+El protocolo admite campos/redacciones y tablas estructuradas. `SYS`, `CALC`, archivos `DATOS`, imágenes y gráficos permanecen bajo control de la aplicación.
+
+Las respuestas antiguas `ITSQMET-CAMPOS-V1` se pueden leer por compatibilidad, pero las tablas requieren V2.
