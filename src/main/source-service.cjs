@@ -110,7 +110,9 @@ function tableCandidates(extracted) {
   const tables = [];
   const charts = [];
   const warnings = [];
+  const truncations = [];
   const MAX_WORD_ROWS = 1000;
+  const MAX_WORD_COLUMNS = 10;
 
   extracted.filter((item) => item.type === "spreadsheet").forEach((item) => {
     (item.sheets || []).forEach((sheet) => {
@@ -118,12 +120,17 @@ function tableCandidates(extracted) {
         ? sheet.calculationRows
         : sheet.sampleRows || [];
       if (!sheet.headers.length || !sourceRows.length) return;
-      const headers = sheet.headers.slice(0, 10);
+      const headers = sheet.headers.slice(0, MAX_WORD_COLUMNS);
       const totalHeaderCount = Number(sheet.totalHeaderCount || sheet.headers.length);
-      if (totalHeaderCount > 10) {
-        warnings.push(
-          `${item.name} · ${sheet.name}: el archivo tiene ${totalHeaderCount} columnas; se insertarán las primeras 10 en el Word.`
-        );
+      if (totalHeaderCount > MAX_WORD_COLUMNS) {
+        const message = `${item.name} · ${sheet.name}: el archivo tiene ${totalHeaderCount} columnas y el límite de inserción segura es ${MAX_WORD_COLUMNS}.`;
+        warnings.push(message);
+        truncations.push({
+          markerName: item.markerName || "",
+          source: item.name,
+          sheet: sheet.name,
+          message
+        });
       }
       const rowsForWord = sourceRows.slice(0, MAX_WORD_ROWS);
       tables.push({
@@ -135,9 +142,14 @@ function tableCandidates(extracted) {
       });
 
       if (sourceRows.length > MAX_WORD_ROWS) {
-        warnings.push(
-          `${item.name} · ${sheet.name}: el archivo tiene ${sourceRows.length} filas; se insertarán las primeras ${MAX_WORD_ROWS} en el Word para evitar un documento excesivamente pesado.`
-        );
+        const message = `${item.name} · ${sheet.name}: el archivo tiene ${sourceRows.length} filas y el límite de inserción segura es ${MAX_WORD_ROWS}.`;
+        warnings.push(message);
+        truncations.push({
+          markerName: item.markerName || "",
+          source: item.name,
+          sheet: sheet.name,
+          message
+        });
       }
 
       const labelHeader = sheet.headers.find((header) => !sheet.numeric.some((n) => n.column === header));
@@ -160,13 +172,7 @@ function tableCandidates(extracted) {
     });
   });
 
-  if (tables.length > 12) {
-    warnings.push(`Se detectaron ${tables.length} tablas de datos; se usarán las primeras 12 en la generación.`);
-  }
-  if (charts.length > 10) {
-    warnings.push(`Se detectaron ${charts.length} gráficos candidatos; se usarán los primeros 10.`);
-  }
-  return { tables: tables.slice(0, 12), charts: charts.slice(0, 10), warnings };
+  return { tables, charts, warnings, truncations };
 }
 
 async function analyzeAttachments(attachments) {
@@ -216,6 +222,7 @@ async function analyzeAttachments(attachments) {
     calculationData,
     tables: candidates.tables,
     charts: candidates.charts,
+    truncations: candidates.truncations || [],
     extractionWarnings
   };
 }
