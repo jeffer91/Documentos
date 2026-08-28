@@ -23,6 +23,7 @@ const REQUIRED_FILES = [
   "src/main/workspace-service.cjs",
   "src/main/template-markers.cjs",
   "src/main/template-service.cjs",
+  "src/main/template-requirements.cjs",
   "src/main/external-ai-exchange.cjs",
   "src/main/source-service.cjs",
   "src/main/project-validator.cjs",
@@ -95,7 +96,8 @@ function externalAiProtocolCheck() {
     "//FORMATO:" + PROTOCOL + "//",
     "//DOCUMENTO:doc-test//",
     "//PLANTILLA:abc123//",
-    "//MODO:MANUALES+IA//",
+    "//VERSION-PLANTILLA:2//",
+    "//MODO:DOCUMENTO-COMPLETO//",
     "",
     "//CAMPO:PERIODO//",
     "Mayo 2026 - Noviembre 2026",
@@ -106,6 +108,17 @@ function externalAiProtocolCheck() {
     "Segunda línea.",
     "//FIN:CONCLUSIONES//",
     "",
+    "//TABLA:RESULTADOS//",
+    "//FILA//",
+    "//DATO:CARRERA//",
+    "Administración",
+    "//FIN-DATO:CARRERA//",
+    "//DATO:PORCENTAJE//",
+    "82",
+    "//FIN-DATO:PORCENTAJE//",
+    "//FIN-FILA//",
+    "//FIN-TABLA:RESULTADOS//",
+    "",
     "//FIN-DOCUMENTO//"
   ].join("\n"));
 
@@ -114,10 +127,13 @@ function externalAiProtocolCheck() {
     format: parsed.metadata.format,
     documentId: parsed.metadata.documentId,
     template: parsed.metadata.template,
+    templateVersion: parsed.metadata.templateVersion,
     mode: parsed.metadata.mode,
     blockCount: parsed.blocks.length,
     period: parsed.blocks[0] && parsed.blocks[0].value,
     multiline: parsed.blocks[1] && parsed.blocks[1].value,
+    tableRows: parsed.blocks[2] && parsed.blocks[2].rows ? parsed.blocks[2].rows.length : 0,
+    tableCareer: parsed.blocks[2] && parsed.blocks[2].rows && parsed.blocks[2].rows[0] ? parsed.blocks[2].rows[0].CARRERA : "",
     ended: parsed.ended
   };
 }
@@ -218,14 +234,17 @@ function main() {
   try {
     const exchange = externalAiProtocolCheck();
     if (
-      exchange.protocol !== "ITSQMET-CAMPOS-V1" ||
+      exchange.protocol !== "ITSQMET-DOCUMENTO-V2" ||
       exchange.format !== exchange.protocol ||
       exchange.documentId !== "doc-test" ||
       exchange.template !== "abc123" ||
-      exchange.mode !== "MANUALES+IA" ||
-      exchange.blockCount !== 2 ||
+      String(exchange.templateVersion) !== "2" ||
+      exchange.mode !== "DOCUMENTO-COMPLETO" ||
+      exchange.blockCount !== 3 ||
       exchange.period !== "Mayo 2026 - Noviembre 2026" ||
       exchange.multiline !== "Primera línea.\nSegunda línea." ||
+      exchange.tableRows !== 1 ||
+      exchange.tableCareer !== "Administración" ||
       !exchange.ended
     ) {
       errors.push("El protocolo de IA externa no superó la prueba interna.");
@@ -248,7 +267,7 @@ function main() {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.7");
+  console.log("Documentos ITSQMET · diagnóstico v2.8");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
@@ -257,7 +276,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: estructura, sintaxis, catálogo, marcadores e IA externa exclusiva correctos.");
+    console.log("OK: estructura, sintaxis, catálogo, requisitos de plantilla e IA externa V2 correctos.");
   }
 }
 
