@@ -1,6 +1,7 @@
 const workspace = require("./workspace-service.cjs");
 const settingsService = require("./settings-service.cjs");
 const { systemValues } = require("./document-composer.cjs");
+const templateService = require("./template-service.cjs");
 
 const SCALAR_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR"]);
 
@@ -170,13 +171,33 @@ function getRequirements(userDataPath, projectId) {
     .filter((marker) => marker.valid !== false)
     .map((marker) => requirementFor(marker, project, sys));
 
+  let associationWarning = "";
+  try {
+    const detected = templateService.detectAssociationForFile(userDataPath, project.template.localPath);
+    if (
+      detected && detected.documentId &&
+      detected.documentId !== project.documentId &&
+      Number(detected.confidence || 0) >= 70
+    ) {
+      associationWarning =
+        "Posible plantilla incorrecta: el Word parece corresponder a " +
+        (detected.processCode ? detected.processCode + " · " : "") +
+        (detected.documentName || detected.documentId) +
+        ", pero este borrador pertenece a " + (project.processCode ? project.processCode + " · " : "") +
+        (project.documentName || project.documentId) + ".";
+    }
+  } catch (_error) {
+    // La detección es informativa y no debe impedir abrir el borrador.
+  }
+
   return {
     templateId: project.template.id,
     templateVersion: Number(project.template.version || 1),
     requirements,
     summary: summarize(requirements),
     systemValues: sys,
-    codePattern: project.codePattern || ""
+    codePattern: project.codePattern || "",
+    associationWarning
   };
 }
 
