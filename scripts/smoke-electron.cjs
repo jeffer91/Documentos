@@ -43,7 +43,7 @@ async function run() {
 
     const locationDocx = path.join(temp, "ubicaciones.docx");
     const locationZip = new PizZip();
-    locationZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Heading2\"/></w:pPr><w:r><w:t>5. Resultados del Diagnóstico</w:t></w:r></w:p><w:p><w:r><w:t>{{CAM!:PERIODO|Período}}</w:t></w:r></w:p></w:body></w:document>");
+    locationZip.file("word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Ttulo2\"/></w:pPr><w:r><w:t>5. Resultados del Diagnóstico</w:t></w:r></w:p><w:p><w:r><w:t>{{CAM!:PERIODO|Período}}</w:t></w:r></w:p></w:body></w:document>");
     locationZip.file("word/header1.xml", "<w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:r><w:t>{{SYS:CODIGO}} {{SYS:CODIGO}}</w:t></w:r></w:p></w:hdr>");
     fs.writeFileSync(locationDocx, locationZip.generate({ type: "nodebuffer" }));
     const locationTemplate = templateService.importTemplate(temp, locationDocx, {
