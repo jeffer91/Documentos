@@ -20,7 +20,7 @@ Word completado
 PDF final
 ```
 
-## Datos: arquitectura v2.8
+## Datos: arquitectura v2.8.1
 
 La app utiliza **SQLite como base local principal**.
 
@@ -59,7 +59,6 @@ documentos-workspace/
 - `ai_analyses`
 - `generations`
 - `settings`
-- `ai_providers` (compatibilidad histórica; no se usa para generación)
 
 ### Preparación para base externa
 
