@@ -10,7 +10,7 @@ La aplicación trabaja con un modelo **local-first**:
 4. Los archivos pesados permanecen en disco.
 5. La base externa se añadirá después mediante sincronización.
 
-## SQLite
+## SQLite · esquema v6
 
 Archivo:
 
@@ -138,3 +138,8 @@ Cada plantilla se interpreta como un conjunto completo de requisitos, no solo co
 ## Protocolo de IA externa
 
 El protocolo vigente es `ITSQMET-DOCUMENTO-V2`. Permite importar campos/redacciones y tablas. Los valores `SYS`, `CALC`, archivos `DATOS`, evidencias y gráficos permanecen bajo control local.
+
+
+## Limpieza de IA interna
+
+Desde la versión 2.8.1 la generación funciona exclusivamente con IA externa. La migración de esquema v6 normaliza los modos históricos a `external` y elimina la antigua tabla de proveedores internos, incluida cualquier credencial que hubiera quedado almacenada allí.
