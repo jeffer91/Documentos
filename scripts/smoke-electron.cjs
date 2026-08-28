@@ -356,7 +356,7 @@ async function run() {
 
     const malformedResponse = externalResponse.replace("//DATO:CARRERA//", "//DATO:CARRERA_MAL//").replace("//FIN-DATO:CARRERA//", "//FIN-DATO:CARRERA_MAL//");
     const malformedPreview = externalAiExchange.previewResponse(temp, externalProject.id, malformedResponse, "manual_ai");
-    assert.strictEqual(malformedPreview.canImport, true);
+    assert.strictEqual(malformedPreview.canImport, false);
     assert.ok(malformedPreview.summary.errors >= 1);
     assert.ok(malformedPreview.items.some((item) => item.name === "RESULTADOS_EXT" && item.status === "error"));
 
