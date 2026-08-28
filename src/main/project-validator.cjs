@@ -86,12 +86,30 @@ function validateProject(project) {
       }
 
       const defs = field.columnDefs || [];
+      const hasUsefulRow = rows.some((row) =>
+        defs.length
+          ? defs.some((column) => hasText(row && row[column.label]))
+          : Object.values(row || {}).some(hasText)
+      );
+      if (!hasUsefulRow) {
+        errors.push(`${field.label}: la tabla obligatoria no puede contener únicamente filas vacías.`);
+        return;
+      }
+
       rows.forEach((row, rowIndex) => {
         defs.forEach((column) => {
           const value = row && Object.keys(row).find((key) => String(key).toUpperCase() === String(column.label).toUpperCase());
           const raw = value ? row[value] : row && row[column.label];
+
           if (column.type === "NUMERO" && hasText(raw) && !Number.isFinite(Number(String(raw).replace(",", ".")))) {
             errors.push(`${field.label}, fila ${rowIndex + 1}, ${column.label}: debe ser numérico.`);
+          }
+
+          if (column.type === "FECHA" && hasText(raw)) {
+            const date = String(raw).trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date) && !/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}$/.test(date)) {
+              errors.push(`${field.label}, fila ${rowIndex + 1}, ${column.label}: fecha no válida.`);
+            }
           }
         });
       });
