@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS = {
     aprobadoPor: { nombre: "Dr. Alex León", cargo: "Vicerrector" }
   },
   generation: {
-    defaultAiMode: "fallback",
+    defaultAiMode: "external",
     includeSourceTrace: false,
     openAfterGenerate: true
   }
@@ -38,7 +38,7 @@ function merge(input) {
       }
     },
     generation: {
-      defaultAiMode: generation.defaultAiMode === "deep" ? "deep" : "fallback",
+      defaultAiMode: "external",
       includeSourceTrace: generation.includeSourceTrace === true,
       openAfterGenerate: generation.openAfterGenerate !== false
     }
