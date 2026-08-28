@@ -108,6 +108,9 @@ function fieldDescription(field, index) {
   if (field.type === "FECHA") {
     lines.push("Formato recomendado: AAAA-MM-DD.");
   }
+  if (field.type === "BUSCAR" && field.lookupSource) {
+    lines.push("Fuente de referencia: " + field.lookupSource + ".");
+  }
   if (field.type === "IA") {
     lines.push("Contenido: redacta este campo únicamente con las instrucciones y la información que te proporcione el usuario.");
   }
