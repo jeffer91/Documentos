@@ -2,7 +2,8 @@ const { openDatabase, queueSync } = require("./database-service.cjs");
 const workspace = require("./workspace-service.cjs");
 const { normalizeName } = require("./template-markers.cjs");
 
-const PROTOCOL = "ITSQMET-CAMPOS-V1";
+const PROTOCOL = "ITSQMET-DOCUMENTO-V2";
+const LEGACY_PROTOCOL = "ITSQMET-CAMPOS-V1";
 const MANUAL_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR"]);
 
 function newId(prefix) {
@@ -74,14 +75,16 @@ function saveGuide(userDataPath, projectId, guideText) {
 function requestedFields(project, mode) {
   const manual = ((project.template && project.template.fields) || [])
     .filter((field) => field.valid !== false && MANUAL_TYPES.has(field.type));
-  if (mode !== "manual_ai") return manual;
+  const tables = ((project.template && project.template.fields) || [])
+    .filter((field) => field.valid !== false && field.type === "TABLA");
+  if (mode !== "manual_ai") return manual.concat(tables);
   const ai = ((project.template && project.template.aiFields) || [])
     .filter((field) => field.valid !== false);
-  return manual.concat(ai);
+  return manual.concat(ai, tables);
 }
 
 function protocolMode(mode) {
-  return mode === "manual_ai" ? "MANUALES+IA" : "MANUALES";
+  return mode === "manual_ai" ? "DOCUMENTO-COMPLETO" : "DATOS+TABLAS";
 }
 
 function templateFingerprint(project) {
@@ -108,10 +111,31 @@ function fieldDescription(field, index) {
   if (field.type === "IA") {
     lines.push("Contenido: redacta este campo únicamente con las instrucciones y la información que te proporcione el usuario.");
   }
+  if (field.type === "TABLA") {
+    const defs = Array.isArray(field.columnDefs) ? field.columnDefs : [];
+    lines.push("Columnas obligatorias de la tabla:");
+    defs.forEach((column) => lines.push("- " + column.name + " (" + column.type + "): " + column.label));
+    lines.push("Puedes devolver cero, una o varias filas según la información disponible.");
+  }
   return lines.join("\n");
 }
 
 function fieldSkeleton(field) {
+  if (field.type === "TABLA") {
+    const defs = Array.isArray(field.columnDefs) ? field.columnDefs : [];
+    return [
+      "//TABLA:" + field.name + "//",
+      "//FILA//",
+      ...defs.flatMap((column) => [
+        "//DATO:" + column.name + "//",
+        "",
+        "//FIN-DATO:" + column.name + "//"
+      ]),
+      "//FIN-FILA//",
+      "//FIN-TABLA:" + field.name + "//"
+    ].join("\n");
+  }
+
   return [
     "//CAMPO:" + field.name + "//",
     "",
@@ -131,6 +155,8 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     .filter((field) => field.valid !== false && MANUAL_TYPES.has(field.type)).length;
   const aiCount = ((project.template && project.template.aiFields) || [])
     .filter((field) => field.valid !== false).length;
+  const tableCount = ((project.template && project.template.fields) || [])
+    .filter((field) => field.valid !== false && field.type === "TABLA").length;
   const fingerprint = templateFingerprint(project);
 
   const responseHeader = [
@@ -167,17 +193,19 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     "- Respeta exactamente las opciones permitidas en los campos LISTA.",
     "- En NUMERO escribe únicamente el valor numérico.",
     "- En FECHA usa preferentemente AAAA-MM-DD.",
-    "- TEXTO e IA pueden contener varios párrafos.",
-    "- Los campos IA de esta plantilla deben ser redactados por ti; la aplicación no llamará a otra IA para completarlos.",
+    "- TEXTO y REDACCION pueden contener varios párrafos.",
+    "- Los campos de REDACCION deben ser redactados por ti; la aplicación no llamará a otra IA para completarlos.",
+    "- Las TABLAS deben respetar exactamente sus nombres de columna y el formato //FILA// + //DATO:COLUMNA//.",
     "- No escribas comentarios, explicaciones ni Markdown fuera del formato solicitado.",
-    "- CALC, SISTEMA, imágenes, archivos, datos y gráficos son responsabilidad de la aplicación y no deben incluirse.",
+    "- SISTEMA, CALC, DATOS, IMAGEN, IMAGENES, GRAFICO y GRAFICOS son responsabilidad de la aplicación y no deben incluirse en la respuesta.",
     "",
-    "CAMPOS QUE DEBES COMPLETAR:",
+    "DATOS, REDACCIONES Y TABLAS QUE DEBES COMPLETAR:",
     fields.map(fieldDescription).join("\n\n"),
     "",
     "FORMATO DE RESPUESTA OBLIGATORIO:",
-    "Copia exactamente la cabecera y devuelve cada campo entre su apertura y su cierre.",
-    "El cierre debe repetir el mismo nombre del campo.",
+    "Copia exactamente la cabecera.",
+    "Para campos y redacciones usa //CAMPO:NOMBRE// ... //FIN:NOMBRE//.",
+    "Para tablas usa //TABLA:NOMBRE//, una o varias //FILA// y dentro //DATO:COLUMNA// ... //FIN-DATO:COLUMNA//.",
     "",
     fieldsText
   ].join("\n");
@@ -187,6 +215,7 @@ function buildPrompt(userDataPath, projectId, mode, guideText) {
     mode: normalizedMode,
     manualCount,
     aiCount,
+    tableCount,
     fieldCount: fields.length,
     guide,
     fieldsText,
@@ -201,7 +230,7 @@ function parseMetadataLine(line, prefix) {
   return line.slice(start.length, -2).trim();
 }
 
-function parseResponse(rawText) {
+function parseLegacyResponse(rawText) {
   const lines = String(rawText || "").replace(/\r/g, "").split("\n");
   const metadata = {};
   const blocks = [];
@@ -285,6 +314,145 @@ function parseResponse(rawText) {
   return { metadata, blocks, ended, outside };
 }
 
+
+function parseV2Response(rawText) {
+  const lines = String(rawText || "").replace(/\r/g, "").split("\n");
+  const metadata = {};
+  const blocks = [];
+  const outside = [];
+  let ended = false;
+  let i = 0;
+
+  function meta(line, key) {
+    const value = parseMetadataLine(line, key);
+    if (value != null) metadata[key === "FORMATO" ? "format" : key === "DOCUMENTO" ? "documentId" : key === "PLANTILLA" ? "template" : key === "VERSION-PLANTILLA" ? "templateVersion" : key === "MODO" ? "mode" : key] = value;
+    return value != null;
+  }
+
+  while (i < lines.length) {
+    const raw = lines[i];
+    const line = raw.trim();
+
+    if (!line) { i += 1; continue; }
+    if (meta(line, "FORMATO") || meta(line, "DOCUMENTO") || meta(line, "PLANTILLA") || meta(line, "VERSION-PLANTILLA") || meta(line, "MODO")) {
+      i += 1;
+      continue;
+    }
+    if (line === "//FIN-DOCUMENTO//") { ended = true; i += 1; continue; }
+
+    const fieldStart = line.match(/^\/\/CAMPO:([A-Za-z0-9_.-]+)\/\/$/);
+    if (fieldStart) {
+      const name = normalizeName(fieldStart[1]);
+      const content = [];
+      let closed = false;
+      i += 1;
+      while (i < lines.length) {
+        const close = lines[i].trim().match(/^\/\/FIN:([A-Za-z0-9_.-]+)\/\/$/);
+        if (close) {
+          const closeName = normalizeName(close[1]);
+          blocks.push({
+            kind: "field",
+            name,
+            value: content.join("\n").trim(),
+            closed: closeName === name,
+            parseError: closeName === name ? "" : "El cierre corresponde a " + closeName + " y no a " + name + "."
+          });
+          closed = true;
+          i += 1;
+          break;
+        }
+        content.push(lines[i]);
+        i += 1;
+      }
+      if (!closed) {
+        blocks.push({ kind: "field", name, value: content.join("\n").trim(), closed: false, parseError: "Falta //FIN:" + name + "//." });
+      }
+      continue;
+    }
+
+    const tableStart = line.match(/^\/\/TABLA:([A-Za-z0-9_.-]+)\/\/$/);
+    if (tableStart) {
+      const name = normalizeName(tableStart[1]);
+      const rows = [];
+      const tableErrors = [];
+      let tableClosed = false;
+      i += 1;
+
+      while (i < lines.length) {
+        const current = lines[i].trim();
+        const tableClose = current.match(/^\/\/FIN-TABLA:([A-Za-z0-9_.-]+)\/\/$/);
+        if (tableClose) {
+          const closeName = normalizeName(tableClose[1]);
+          tableClosed = closeName === name;
+          if (!tableClosed) tableErrors.push("El cierre corresponde a " + closeName + " y no a " + name + ".");
+          i += 1;
+          break;
+        }
+
+        if (current === "//FILA//") {
+          const row = {};
+          let rowClosed = false;
+          i += 1;
+          while (i < lines.length) {
+            const rowLine = lines[i].trim();
+            if (rowLine === "//FIN-FILA//") { rowClosed = true; i += 1; break; }
+            const dataStart = rowLine.match(/^\/\/DATO:([A-Za-z0-9_.-]+)\/\/$/);
+            if (dataStart) {
+              const column = normalizeName(dataStart[1]);
+              const content = [];
+              let dataClosed = false;
+              i += 1;
+              while (i < lines.length) {
+                const dataClose = lines[i].trim().match(/^\/\/FIN-DATO:([A-Za-z0-9_.-]+)\/\/$/);
+                if (dataClose) {
+                  const closeColumn = normalizeName(dataClose[1]);
+                  if (closeColumn !== column) tableErrors.push("Cierre de dato incorrecto: " + closeColumn + " para " + column + ".");
+                  dataClosed = true;
+                  i += 1;
+                  break;
+                }
+                content.push(lines[i]);
+                i += 1;
+              }
+              if (!dataClosed) tableErrors.push("Falta //FIN-DATO:" + column + "//.");
+              row[column] = content.join("\n").trim();
+              continue;
+            }
+            if (rowLine) tableErrors.push("Texto no reconocido dentro de FILA: " + rowLine);
+            i += 1;
+          }
+          if (!rowClosed) tableErrors.push("Falta //FIN-FILA//.");
+          rows.push(row);
+          continue;
+        }
+
+        if (current) tableErrors.push("Texto no reconocido dentro de TABLA: " + current);
+        i += 1;
+      }
+
+      blocks.push({
+        kind: "table",
+        name,
+        rows,
+        closed: tableClosed,
+        parseError: tableClosed ? tableErrors.join(" ") : (tableErrors.concat(["Falta //FIN-TABLA:" + name + "//."]).join(" "))
+      });
+      continue;
+    }
+
+    outside.push(raw);
+    i += 1;
+  }
+
+  return { metadata, blocks, ended, outside };
+}
+
+function parseResponse(rawText) {
+  const source = String(rawText || "");
+  if (source.includes("//FORMATO:" + PROTOCOL + "//")) return parseV2Response(source);
+  return parseLegacyResponse(source);
+}
+
 function normalizedComparable(value) {
   return String(value == null ? "" : value)
     .normalize("NFD")
@@ -350,6 +518,33 @@ function existingValue(project, field) {
   return project.formData && project.formData[field.name] != null ? project.formData[field.name] : "";
 }
 
+function validateTable(field, rows) {
+  const defs = Array.isArray(field.columnDefs) ? field.columnDefs : [];
+  if (!Array.isArray(rows) || !rows.length) {
+    return { status: field.required ? "error" : "empty", value: [], message: field.required ? "La tabla obligatoria no contiene filas." : "Sin filas." };
+  }
+
+  const normalizedRows = [];
+  const errors = [];
+
+  rows.forEach((row, rowIndex) => {
+    const normalizedRow = {};
+    defs.forEach((column) => {
+      const raw = row && row[column.name] != null ? row[column.name] : "";
+      const checked = validateValue({ type: column.type, options: [] }, raw);
+      if (checked.status === "error") {
+        errors.push("Fila " + (rowIndex + 1) + ", " + column.label + ": " + checked.message);
+      }
+      normalizedRow[column.label] = checked.status === "valid" ? checked.value : raw;
+    });
+    normalizedRows.push(normalizedRow);
+  });
+
+  return errors.length
+    ? { status: "error", value: normalizedRows, message: errors.slice(0, 3).join(" · ") }
+    : { status: "valid", value: normalizedRows, message: normalizedRows.length + " fila(s)." };
+}
+
 function previewResponse(userDataPath, projectId, rawText, mode) {
   const project = projectOrThrow(userDataPath, projectId);
   const normalizedMode = mode === "manual" ? "manual" : "manual_ai";
@@ -358,30 +553,22 @@ function previewResponse(userDataPath, projectId, rawText, mode) {
   const parsed = parseResponse(rawText);
   const errors = [];
   const warnings = [];
+  const isLegacy = parsed.metadata.format === LEGACY_PROTOCOL;
 
-  if (parsed.metadata.format !== PROTOCOL) {
+  if (parsed.metadata.format !== PROTOCOL && !isLegacy) {
     errors.push("Formato no válido. Se esperaba " + PROTOCOL + ".");
   }
-  if (parsed.metadata.documentId !== project.documentId) {
-    errors.push("La respuesta corresponde a otro documento.");
-  }
-  if (parsed.metadata.template !== templateFingerprint(project)) {
-    errors.push("La respuesta corresponde a otra plantilla o versión.");
-  }
+  if (parsed.metadata.documentId !== project.documentId) errors.push("La respuesta corresponde a otro documento.");
+  if (parsed.metadata.template !== templateFingerprint(project)) errors.push("La respuesta corresponde a otra plantilla.");
   if (
     parsed.metadata.templateVersion != null &&
     Number(parsed.metadata.templateVersion) !== Number(project.template.version || 1)
-  ) {
-    errors.push("La respuesta corresponde a otra versión de la plantilla.");
-  }
-  if (parsed.metadata.templateVersion == null) {
-    warnings.push("La respuesta no incluye VERSION-PLANTILLA; se validó mediante la huella de la plantilla.");
-  }
-  if (parsed.metadata.mode !== protocolMode(normalizedMode)) {
-    errors.push("El modo de la respuesta no coincide con el modo seleccionado.");
-  }
+  ) errors.push("La respuesta corresponde a otra versión de la plantilla.");
+  if (parsed.metadata.templateVersion == null) warnings.push("La respuesta no incluye VERSION-PLANTILLA; se validó mediante la huella.");
+  if (!isLegacy && parsed.metadata.mode !== protocolMode(normalizedMode)) errors.push("El modo de la respuesta no coincide con el documento completo.");
   if (!parsed.ended) warnings.push("No se encontró //FIN-DOCUMENTO//.");
   if (parsed.outside.length) warnings.push("Se encontró texto fuera del formato; será ignorado.");
+  if (isLegacy) warnings.push("Respuesta V1 detectada. Se importarán campos, pero las tablas requieren el formato V2.");
 
   const counts = new Map();
   parsed.blocks.forEach((block) => counts.set(block.name, (counts.get(block.name) || 0) + 1));
@@ -389,49 +576,21 @@ function previewResponse(userDataPath, projectId, rawText, mode) {
   const items = parsed.blocks.map((block) => {
     const field = allowedByName.get(block.name);
     if (!field) {
-      return {
-        name: block.name,
-        label: block.name,
-        type: "DESCONOCIDO",
-        status: "error",
-        message: "Este campo no existe o no está permitido en el modo seleccionado.",
-        value: block.value,
-        normalizedValue: block.value,
-        conflict: false
-      };
+      return { name: block.name, label: block.name, type: "DESCONOCIDO", status: "error", message: "Este elemento no existe en la plantilla.", value: block.value || block.rows || "", normalizedValue: block.value || block.rows || "", conflict: false };
     }
-
     if (counts.get(block.name) > 1) {
-      return {
-        name: field.name,
-        label: field.label,
-        type: field.type,
-        status: "error",
-        message: "El campo aparece más de una vez en la respuesta.",
-        value: block.value,
-        normalizedValue: block.value,
-        conflict: false
-      };
+      return { name: field.name, label: field.label, type: field.type, status: "error", message: "El elemento aparece más de una vez.", value: block.value || block.rows || "", normalizedValue: block.value || block.rows || "", conflict: false };
     }
-
     if (block.parseError || !block.closed) {
-      return {
-        name: field.name,
-        label: field.label,
-        type: field.type,
-        status: "error",
-        message: block.parseError || ("Falta //FIN:" + field.name + "//."),
-        value: block.value,
-        normalizedValue: block.value,
-        conflict: false
-      };
+      return { name: field.name, label: field.label, type: field.type, status: "error", message: block.parseError || "Bloque sin cierre correcto.", value: block.value || block.rows || "", normalizedValue: block.value || block.rows || "", conflict: false };
     }
 
-    const checked = validateValue(field, block.value);
+    const checked = field.type === "TABLA" ? validateTable(field, block.rows) : validateValue(field, block.value);
     const current = existingValue(project, field);
-    const conflict = checked.status === "valid" &&
-      String(current == null ? "" : current).trim() !== "" &&
-      String(current) !== String(checked.value);
+    const hasCurrent = field.type === "TABLA"
+      ? Array.isArray(current) && current.length > 0
+      : String(current == null ? "" : current).trim() !== "";
+    const conflict = checked.status === "valid" && hasCurrent && JSON.stringify(current) !== JSON.stringify(checked.value);
 
     return {
       name: field.name,
@@ -439,21 +598,17 @@ function previewResponse(userDataPath, projectId, rawText, mode) {
       type: field.type,
       status: checked.status,
       message: conflict ? "Ya existe un valor diferente en la app." : checked.message,
-      value: block.value,
+      value: field.type === "TABLA" ? block.rows : block.value,
       normalizedValue: checked.value,
       existingValue: current,
-      conflict
+      conflict,
+      rowCount: field.type === "TABLA" && Array.isArray(checked.value) ? checked.value.length : 0
     };
   });
 
-  const presentNames = new Set(items.map((item) => item.name));
-  const missingRequired = allowed
-    .filter((field) => field.required && !presentNames.has(field.name))
-    .map((field) => field.label || field.name);
-
-  if (missingRequired.length) {
-    warnings.push("Faltan campos obligatorios en la respuesta: " + missingRequired.slice(0, 8).join(", ") + (missingRequired.length > 8 ? "…" : ""));
-  }
+  const presentNames = new Set(items.filter((item) => item.status !== "empty").map((item) => item.name));
+  const missingRequired = allowed.filter((field) => field.required && !presentNames.has(field.name)).map((field) => field.label || field.name);
+  if (missingRequired.length) warnings.push("Faltan elementos obligatorios en la respuesta: " + missingRequired.slice(0, 8).join(", ") + (missingRequired.length > 8 ? "…" : ""));
 
   const summary = {
     totalBlocks: items.length,
@@ -461,11 +616,12 @@ function previewResponse(userDataPath, projectId, rawText, mode) {
     empty: items.filter((item) => item.status === "empty").length,
     errors: items.filter((item) => item.status === "error").length,
     conflicts: items.filter((item) => item.conflict).length,
-    requested: allowed.length
+    requested: allowed.length,
+    tableRows: items.reduce((sum, item) => sum + Number(item.rowCount || 0), 0)
   };
 
   return {
-    protocol: PROTOCOL,
+    protocol: parsed.metadata.format || PROTOCOL,
     mode: normalizedMode,
     metadata: parsed.metadata,
     items,
@@ -497,7 +653,7 @@ function externalAnalysis(externalFields) {
     tables: [],
     charts: [],
     sourceTrace: [],
-    notes: "Campos importados mediante ITSQMET-CAMPOS-V1."
+    notes: "Contenido importado mediante ITSQMET-DOCUMENTO-V2."
   };
 }
 
@@ -734,6 +890,7 @@ function mergeExternalGeneratedFields(project, analysis) {
 
 module.exports = {
   PROTOCOL,
+  LEGACY_PROTOCOL,
   getGuide,
   saveGuide,
   buildPrompt,
