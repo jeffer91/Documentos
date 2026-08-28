@@ -9,6 +9,21 @@ const { validateFormulaSyntax } = require("./calculation-service.cjs");
 
 const BLOCK_TYPES = new Set(["DATOS", "TABLA", "IMAGEN", "IMAGENES", "GRAFICO", "GRAFICOS"]);
 const USER_TYPES = new Set(["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR", "DATOS", "TABLA", "IMAGEN", "IMAGENES"]);
+const markerMetadataCache = new Map();
+const associationCache = new Map();
+
+function boundedCacheSet(cache, key, value, maxEntries) {
+  if (!cache.has(key) && cache.size >= (maxEntries || 100)) {
+    const oldest = cache.keys().next().value;
+    if (oldest != null) cache.delete(oldest);
+  }
+  cache.set(key, value);
+}
+
+function fileCacheKey(filePath) {
+  const stat = fs.statSync(filePath);
+  return path.resolve(filePath) + "|" + stat.size + "|" + Math.round(stat.mtimeMs);
+}
 
 function templatesDir(userDataPath) {
   const dir = path.join(root(userDataPath), "templates");
@@ -66,19 +81,17 @@ function addMarkerOccurrences(text, location, context, byRaw) {
   let match;
   while ((match = regex.exec(String(text || "")))) {
     const parsed = parseMarkerInner(match[1]);
-    if (!parsed || !byRaw.has(parsed.raw)) continue;
-    const meta = byRaw.get(parsed.raw);
+    if (!parsed) continue;
+    const meta = byRaw.get(parsed.raw) || { count: 0, locations: new Set(), contexts: new Set() };
     meta.count += 1;
     meta.locations.add(location);
     if (context) meta.contexts.add(context);
+    byRaw.set(parsed.raw, meta);
   }
 }
 
-function attachMarkerLocations(parts, markers) {
-  const byRaw = new Map((markers || []).map((marker) => [
-    marker.raw,
-    { count: 0, locations: new Set(), contexts: new Set() }
-  ]));
+function scanMarkerMetadata(parts) {
+  const byRaw = new Map();
 
   (parts || []).forEach((part) => {
     const location = partLocation(part.name);
@@ -111,13 +124,40 @@ function attachMarkerLocations(parts, markers) {
     });
   });
 
+  const result = {};
+  byRaw.forEach((meta, raw) => {
+    result[raw] = {
+      count: meta.count,
+      locations: Array.from(meta.locations),
+      contexts: Array.from(meta.contexts)
+    };
+  });
+  return result;
+}
+
+function applyMarkerMetadata(markers, metadata) {
   (markers || []).forEach((marker) => {
-    const meta = byRaw.get(marker.raw);
+    const meta = metadata && metadata[marker.raw];
     marker.occurrenceCount = meta ? meta.count : 0;
-    marker.locations = meta ? Array.from(meta.locations) : [];
-    marker.contexts = meta ? Array.from(meta.contexts) : [];
+    marker.locations = meta ? meta.locations.slice() : [];
+    marker.contexts = meta ? meta.contexts.slice() : [];
   });
   return markers;
+}
+
+function attachMarkerLocations(parts, markers) {
+  return applyMarkerMetadata(markers, scanMarkerMetadata(parts));
+}
+
+function attachMarkerLocationsFromFile(filePath, markers) {
+  if (!filePath || !fs.existsSync(filePath)) return markers;
+  const key = fileCacheKey(filePath);
+  let metadata = markerMetadataCache.get(key);
+  if (!metadata) {
+    metadata = scanMarkerMetadata(xmlParts(filePath));
+    boundedCacheSet(markerMetadataCache, key, metadata, 100);
+  }
+  return applyMarkerMetadata(markers, metadata);
 }
 
 function blockLocationErrors(markers) {
@@ -206,9 +246,14 @@ function inferAssociation(userDataPath, fileName, text) {
 
 function detectAssociationForFile(userDataPath, filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null;
+  const cacheKey = String(userDataPath || "") + "|" + fileCacheKey(filePath);
+  if (associationCache.has(cacheKey)) return associationCache.get(cacheKey);
+
   const parts = xmlParts(filePath);
   const text = parts.map((part) => plainTextFromXml(part.xml)).join("\n");
-  return inferAssociation(userDataPath, path.basename(filePath), text);
+  const detected = inferAssociation(userDataPath, path.basename(filePath), text);
+  boundedCacheSet(associationCache, cacheKey, detected, 100);
+  return detected;
 }
 
 function findStandaloneBlockWarnings(parts, markers) {
@@ -251,7 +296,7 @@ function hydrateTemplate(db, row) {
 
   try {
     if (row.local_path && fs.existsSync(row.local_path)) {
-      markers = attachMarkerLocations(xmlParts(row.local_path), markers);
+      markers = attachMarkerLocationsFromFile(row.local_path, markers);
     }
   } catch (_error) {
     // La ubicación es informativa; un fallo aquí no invalida la plantilla.
