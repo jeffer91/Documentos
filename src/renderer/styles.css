@@ -80,6 +80,37 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .doc-list { display: grid; gap: 10px; }
 .doc-row { box-shadow: none; padding: 14px 16px; display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); text-align: left; }
 button.doc-row:hover { border-color: var(--brand-line); background: #fcfffe; }
+.doc-row-manage { padding: 0; grid-template-columns: minmax(0, 1fr) auto; overflow: hidden; }
+.doc-open-zone {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+}
+.doc-open-zone:hover { background: #fcfffe; }
+.doc-template-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border-left: 1px solid var(--line);
+}
+.doc-arrow-button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+}
+.doc-arrow-button:hover { background: #f1f5f9; color: var(--text); }
+
 .doc-icon { width: 36px; height: 36px; border-radius: 11px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; font-size: 15px; font-weight: 800; }
 .doc-main { min-width: 0; }
 .doc-main h3 { margin: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -418,6 +449,8 @@ textarea.guide-cell-input.multiline { min-height: 42px; resize: vertical; line-h
 .template-card .icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; background: #eef2ff; color: #3730a3; font-weight: 800; }
 .template-card h3 { margin: 0; font-size: 13px; }
 .template-card p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.template-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+
 .assign-row { display: grid; grid-template-columns: 1fr auto; gap: 7px; margin-top: 9px; }
 .assign-row select { padding: 8px 9px; font-size: 10px; }
 
@@ -459,6 +492,8 @@ textarea.guide-cell-input.multiline { min-height: 42px; resize: vertical; line-h
   .guide-footer { grid-template-columns: 1fr 1fr; }
   .guide-footer > span { grid-column: 1 / -1; grid-row: 1; }
   .topbar h1 { font-size: 23px; }
+  .doc-row-manage { grid-template-columns: 1fr; }
+  .doc-template-actions { border-left: 0; border-top: 1px solid var(--line); justify-content: flex-end; }
   .output-main { grid-template-columns: 48px 1fr; }
   .output-main .primary { grid-column: 1 / -1; }
 }
