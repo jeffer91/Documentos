@@ -520,16 +520,28 @@ function existingValue(project, field) {
 
 function validateTable(field, rows) {
   const defs = Array.isArray(field.columnDefs) ? field.columnDefs : [];
+  if (!defs.length) {
+    return { status: "error", value: [], message: "La tabla no define columnas en la plantilla Word." };
+  }
   if (!Array.isArray(rows) || !rows.length) {
     return { status: field.required ? "error" : "empty", value: [], message: field.required ? "La tabla obligatoria no contiene filas." : "Sin filas." };
   }
 
+  const expected = new Set(defs.map((column) => column.name));
   const normalizedRows = [];
   const errors = [];
 
   rows.forEach((row, rowIndex) => {
     const normalizedRow = {};
+    const keys = Object.keys(row || {});
+    keys.filter((key) => !expected.has(key)).forEach((key) => {
+      errors.push("Fila " + (rowIndex + 1) + ": columna no reconocida " + key + ".");
+    });
+
     defs.forEach((column) => {
+      if (!Object.prototype.hasOwnProperty.call(row || {}, column.name)) {
+        errors.push("Fila " + (rowIndex + 1) + ": falta la columna " + column.name + ".");
+      }
       const raw = row && row[column.name] != null ? row[column.name] : "";
       const checked = validateValue({ type: column.type, options: [] }, raw);
       if (checked.status === "error") {
@@ -541,7 +553,7 @@ function validateTable(field, rows) {
   });
 
   return errors.length
-    ? { status: "error", value: normalizedRows, message: errors.slice(0, 3).join(" · ") }
+    ? { status: "error", value: normalizedRows, message: errors.slice(0, 5).join(" · ") }
     : { status: "valid", value: normalizedRows, message: normalizedRows.length + " fila(s)." };
 }
 
@@ -638,22 +650,26 @@ function externalFieldsFromProject(project) {
   return Object.assign({}, analysis.externalGeneratedFields);
 }
 
-function externalAnalysis(externalFields) {
+function externalAnalysis(externalFields, deterministicSources) {
   const fields = Object.assign({}, externalFields || {});
-  const sources = {};
-  Object.keys(fields).forEach((name) => { sources[name] = ["IA externa"]; });
+  const sourceData = deterministicSources && typeof deterministicSources === "object" ? deterministicSources : {};
+  const fieldSources = {};
+  Object.keys(fields).forEach((name) => { fieldSources[name] = ["IA externa"]; });
+
   return {
-    provider: "IA externa",
+    provider: "IA externa + procesamiento local",
     generatedAt: new Date().toISOString(),
     generatedFields: fields,
     externalGeneratedFields: fields,
-    fieldSources: sources,
+    fieldSources,
     keyFindings: [],
-    missingData: [],
-    tables: [],
-    charts: [],
-    sourceTrace: [],
-    notes: "Contenido importado mediante ITSQMET-DOCUMENTO-V2."
+    missingData: Array.isArray(sourceData.extractionWarnings) ? sourceData.extractionWarnings : [],
+    tables: Array.isArray(sourceData.tables) ? sourceData.tables : [],
+    charts: Array.isArray(sourceData.charts) ? sourceData.charts : [],
+    sourceTrace: []
+      .concat(Array.isArray(sourceData.dataSummary) ? sourceData.dataSummary.map((item) => ({ name: item.name, markerName: item.markerName || "", type: "datos" })) : [])
+      .concat(Array.isArray(sourceData.textSources) ? sourceData.textSources.map((item) => ({ name: item.name, markerName: item.markerName || "", type: "texto" })) : []),
+    notes: "Contenido de redacción importado mediante ITSQMET-DOCUMENTO-V2; tablas y gráficos de archivos se procesan localmente."
   };
 }
 
@@ -846,9 +862,9 @@ function undoLastImport(userDataPath, projectId) {
   };
 }
 
-function analysisFromExternalOnly(project) {
+function analysisFromExternalOnly(project, deterministicSources) {
   const external = externalFieldsFromProject(project);
-  return externalAnalysis(external);
+  return externalAnalysis(external, deterministicSources);
 }
 
 function projectForInternalAi(project) {
