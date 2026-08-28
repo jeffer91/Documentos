@@ -148,6 +148,20 @@ function validateExtractedData(project, sources) {
       }
     });
 
+  const charts = Array.isArray(sources && sources.charts) ? sources.charts : [];
+  const dataFields = ((project.template && project.template.fields) || [])
+    .filter((field) => field.valid && field.type === "DATOS");
+
+  ((project.template && project.template.markers) || [])
+    .filter((marker) => marker.valid && marker.required && ["GRAFICO", "GRAFICOS"].includes(marker.type))
+    .forEach((marker) => {
+      let selected = charts.filter((chart) => String(chart.markerName || "") === String(marker.name));
+      if (!selected.length && dataFields.length === 1) selected = charts;
+      if (!selected.length) {
+        errors.push(`${marker.label}: no hay datos suficientes para generar {{${marker.raw}}}.`);
+      }
+    });
+
   warnings.push(...extractionWarnings);
   return { ok: errors.length === 0, errors, warnings };
 }
