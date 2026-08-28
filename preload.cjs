@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("documentosApp", {
   listTemplates: () => ipcRenderer.invoke("templates:list"),
   updateTemplate: (templateId, patch) => ipcRenderer.invoke("templates:update", templateId, patch),
   deleteTemplate: (templateId) => ipcRenderer.invoke("templates:delete", templateId),
+  getTemplateRequirements: (projectId) => ipcRenderer.invoke("requirements:get", projectId),
   getExternalAiGuide: (projectId) => ipcRenderer.invoke("external-ai:guide-get", projectId),
   saveExternalAiGuide: (projectId, guideText) => ipcRenderer.invoke("external-ai:guide-save", projectId, guideText),
   buildExternalAiPrompt: (projectId, mode, guideText) => ipcRenderer.invoke("external-ai:build-prompt", projectId, mode, guideText),
