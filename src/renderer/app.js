@@ -1879,6 +1879,7 @@
   }
 
   async function importTemplate(globalOnly) {
+    clearTimeout(saveTimer);
     const previousTemplateId = !globalOnly && state.project && state.project.template
       ? state.project.template.id
       : null;
@@ -1901,21 +1902,34 @@
     await loadTemplates();
 
     if (!globalOnly && state.project) {
+      const staleAttachments = (state.project.attachments || []).slice();
+      let cleanupFailed = false;
+      for (const attachment of staleAttachments) {
+        const removed = await api.removeFile(state.project.id, attachment.id);
+        if (removed && removed.ok && removed.project) state.project = removed.project;
+        else cleanupFailed = true;
+      }
+
       state.project.template = response.template;
       state.editorGuide = null;
       state.project.formData = {};
       state.project.analysis = null;
       state.project.status = "draft";
+      state.project.generatedCode = "";
       const saved = await api.saveProject(state.project);
       if (saved && saved.ok) state.project = saved.project;
       await Promise.all([loadExternalAi(), loadRequirements()]);
       renderEditor();
+      if (cleanupFailed) {
+        showToast("Plantilla reemplazada, pero uno o más archivos anteriores no pudieron eliminarse. Revisa Sistema.");
+        return;
+      }
     } else {
       renderTemplates();
     }
 
     const errors = response.template.validation && response.template.validation.errors || [];
-    showToast(errors.length ? errors[0] : (!globalOnly && previousTemplateId ? "Plantilla reemplazada. El borrador se reinició para la nueva estructura." : "Plantilla guardada."));
+    showToast(errors.length ? errors[0] : (!globalOnly && previousTemplateId ? "Plantilla reemplazada. Campos y archivos del borrador anterior fueron reiniciados." : "Plantilla guardada."));
   }
 
   async function assignTemplate(templateId) {
