@@ -65,13 +65,27 @@ function validateProject(project) {
   }
 
   (template.fields || []).forEach((field) => {
-    if (!field.valid || !field.required) return;
+    if (!field.valid) return;
 
     if (["CAMPO", "TEXTO", "FECHA", "NUMERO", "LISTA", "BUSCAR"].includes(field.type)) {
       const value = project.formData && project.formData[field.name];
-      if (!hasText(value)) errors.push(`Falta: ${field.label}.`);
-      if (field.type === "LISTA" && hasText(value) && field.options && field.options.length && !field.options.includes(String(value))) {
+      if (field.required && !hasText(value)) {
+        errors.push(`Falta: ${field.label}.`);
+        return;
+      }
+      if (!hasText(value)) return;
+
+      if (field.type === "LISTA" && field.options && field.options.length && !field.options.includes(String(value))) {
         errors.push(`${field.label}: selecciona una opción válida.`);
+      }
+      if (field.type === "NUMERO" && !Number.isFinite(Number(String(value).replace(",", ".")))) {
+        errors.push(`${field.label}: debe ser numérico.`);
+      }
+      if (field.type === "FECHA") {
+        const date = String(value).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) && !/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}$/.test(date)) {
+          errors.push(`${field.label}: fecha no válida.`);
+        }
       }
       return;
     }
@@ -81,7 +95,7 @@ function validateProject(project) {
     if (field.type === "TABLA") {
       const rows = project.formData && project.formData[field.name];
       if (!Array.isArray(rows) || !rows.length) {
-        errors.push(`Falta: ${field.label}.`);
+        if (field.required) errors.push(`Falta: ${field.label}.`);
         return;
       }
 
@@ -92,7 +106,7 @@ function validateProject(project) {
           : Object.values(row || {}).some(hasText)
       );
       if (!hasUsefulRow) {
-        errors.push(`${field.label}: la tabla obligatoria no puede contener únicamente filas vacías.`);
+        if (field.required) errors.push(`${field.label}: la tabla obligatoria no puede contener únicamente filas vacías.`);
         return;
       }
 
@@ -116,11 +130,11 @@ function validateProject(project) {
       return;
     }
 
-    if (field.type === "DATOS" && attachmentCount(project, "data", field.name) === 0) {
+    if (field.type === "DATOS" && field.required && attachmentCount(project, "data", field.name) === 0) {
       errors.push(`Falta: ${field.label}.`);
     }
 
-    if (["IMAGEN", "IMAGENES"].includes(field.type) && attachmentCount(project, "evidence", field.name) === 0) {
+    if (["IMAGEN", "IMAGENES"].includes(field.type) && field.required && attachmentCount(project, "evidence", field.name) === 0) {
       errors.push(`Falta: ${field.label}.`);
     }
   });
