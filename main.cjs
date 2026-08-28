@@ -7,7 +7,6 @@ const { migrateLegacy } = require("./src/main/legacy-migration-service.cjs");
 const workspace = require("./src/main/workspace-service.cjs");
 const templates = require("./src/main/template-service.cjs");
 const { analyzeAttachments } = require("./src/main/source-service.cjs");
-const { analyzeWithAi } = require("./src/main/ai-service.cjs");
 const aiProviders = require("./src/main/ai-provider-service.cjs");
 const { generateDocument } = require("./src/main/document-composer.cjs");
 const { validateProject, validateAiFields } = require("./src/main/project-validator.cjs");
@@ -217,9 +216,7 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      const internalAiProject = externalAiExchange.projectForInternalAi(project);
-      let analysis = await analyzeWithAi(userData(), internalAiProject, sources, project.aiMode);
-      analysis = externalAiExchange.mergeExternalGeneratedFields(project, analysis);
+      const analysis = externalAiExchange.analysisFromExternalOnly(project);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       return { ok: true, analysis, project, validation };
@@ -284,9 +281,7 @@ function registerIpc() {
         return { ok: false, validation: calculated, error: calculated.errors[0] };
       }
       project = workspace.saveProject(userData(), calculated.project);
-      const internalAiProject = externalAiExchange.projectForInternalAi(project);
-      let analysis = await analyzeWithAi(userData(), internalAiProject, sources, project.aiMode || "fallback");
-      analysis = externalAiExchange.mergeExternalGeneratedFields(project, analysis);
+      const analysis = externalAiExchange.analysisFromExternalOnly(project);
       project = workspace.recordAnalysis(userData(), projectId, analysis, "analyzed");
 
       const aiValidation = validateAiFields(project, analysis);
