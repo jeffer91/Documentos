@@ -19,7 +19,6 @@
     projects: [],
     templates: [],
     settings: null,
-    aiProviders: [],
     sync: null,
     errors: [],
     errorCount: 0,
@@ -156,10 +155,6 @@
     if (response && response.ok) state.settings = response.settings;
   }
 
-  async function loadAi() {
-    const response = await api.getAiProviders();
-    state.aiProviders = response && response.ok ? response.providers || [] : [];
-  }
 
   async function loadSync() {
     const response = await api.getSyncStatus();
@@ -354,13 +349,6 @@
       setNav("templates");
       await loadTemplates();
       renderTemplates();
-      return;
-    }
-
-    if (route === "ai") {
-      setNav("ai");
-      await loadAi();
-      renderAi();
       return;
     }
 
@@ -1548,26 +1536,6 @@
     `;
   }
 
-  function renderAi() {
-    setHeader("IA", "Proveedores", false);
-    view.innerHTML = `
-      <div class="section-head"><div><h2>Proveedores</h2><p>Respaldo automático.</p></div><button class="primary" type="button" data-action="save-ai">Guardar</button></div>
-      <div class="provider-list">${state.aiProviders.map((provider) => `
-        <section class="provider-card" data-provider="${escapeHtml(provider.id)}">
-          <div class="provider-head">
-            <div><h3>${escapeHtml(provider.name)}</h3><span class="status ${provider.hasKey ? "good" : ""}">${provider.hasKey ? "Clave guardada" : "Sin clave"}</span></div>
-            <label class="switch"><input data-ai="enabled" type="checkbox" ${provider.enabled ? "checked" : ""}><span class="slider"></span></label>
-          </div>
-          <div class="provider-grid">
-            <div class="field"><label>Modelo</label><input data-ai="model" type="text" value="${escapeHtml(provider.model)}" /></div>
-            <div class="field"><label>Prioridad</label><input data-ai="priority" type="number" min="1" max="9" value="${escapeHtml(provider.priority)}" /></div>
-            <div class="field full"><label>Endpoint</label><input data-ai="endpoint" type="text" value="${escapeHtml(provider.endpoint)}" /></div>
-            <div class="field full"><label>API key</label><input data-ai="apiKey" type="password" placeholder="${provider.hasKey ? "Guardada · deja vacío para conservar" : "Pega tu clave"}" /></div>
-          </div>
-        </section>
-      `).join("")}</div>
-    `;
-  }
 
   function signerFields(key, label, person) {
     return `<div class="panel compact">
@@ -2089,21 +2057,6 @@
     });
   }
 
-  async function saveAi() {
-    const providers = Array.from(document.querySelectorAll("[data-provider]")).map((card) => ({
-      id: card.dataset.provider,
-      enabled: card.querySelector('[data-ai="enabled"]').checked,
-      model: card.querySelector('[data-ai="model"]').value.trim(),
-      priority: Number(card.querySelector('[data-ai="priority"]').value || 9),
-      endpoint: card.querySelector('[data-ai="endpoint"]').value.trim(),
-      apiKey: card.querySelector('[data-ai="apiKey"]').value.trim()
-    }));
-    const response = await api.saveAiProviders(providers);
-    if (!response || !response.ok) return showToast("No se pudieron guardar las IAs.");
-    state.aiProviders = response.providers;
-    renderAi();
-    showToast("IA guardada.");
-  }
 
   async function saveSettingsFromScreen() {
     const signers = { elaboradoPor: {}, revisadoPor: {}, aprobadoPor: {} };
@@ -2186,7 +2139,6 @@
     if (action === "guide-career-next") return changeGuideCareer((state.editorGuide && state.editorGuide.career || 0) + 1);
     if (action === "generate") return generatePdf();
     if (action === "archive-upload") return archiveUpload();
-    if (action === "save-ai") return saveAi();
     if (action === "save-settings") return saveSettingsFromScreen();
     if (action === "open-output") return api.openFile(button.dataset.path);
     if (action === "show-output") return api.showFile(button.dataset.path);
