@@ -3,7 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 
 const connections = new Map();
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 function workspaceRoot(userDataPath) {
   const dir = path.join(userDataPath, "documentos-workspace");
@@ -211,6 +211,35 @@ function baseSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_app_errors_state
       ON app_errors(resolved, created_at);
 
+    CREATE TABLE IF NOT EXISTS external_ai_guides (
+      template_id TEXT NOT NULL,
+      template_version INTEGER NOT NULL,
+      guide_text TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (template_id, template_version),
+      FOREIGN KEY (template_id) REFERENCES templates(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS external_ai_imports (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      template_id TEXT,
+      template_version INTEGER,
+      mode TEXT NOT NULL,
+      raw_response TEXT NOT NULL,
+      previous_form_json TEXT NOT NULL,
+      previous_analysis_json TEXT,
+      previous_status TEXT NOT NULL DEFAULT 'draft',
+      imported_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      undone_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (template_id) REFERENCES templates(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_external_ai_imports_project
+      ON external_ai_imports(project_id, created_at);
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL,
@@ -351,6 +380,39 @@ function migrateToV4(db) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_templates_visible ON templates(deleted, document_id, active)");
 }
 
+function migrateToV5(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS external_ai_guides (
+      template_id TEXT NOT NULL,
+      template_version INTEGER NOT NULL,
+      guide_text TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (template_id, template_version),
+      FOREIGN KEY (template_id) REFERENCES templates(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS external_ai_imports (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      template_id TEXT,
+      template_version INTEGER,
+      mode TEXT NOT NULL,
+      raw_response TEXT NOT NULL,
+      previous_form_json TEXT NOT NULL,
+      previous_analysis_json TEXT,
+      previous_status TEXT NOT NULL DEFAULT 'draft',
+      imported_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      undone_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (template_id) REFERENCES templates(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_external_ai_imports_project
+      ON external_ai_imports(project_id, created_at);
+  `);
+}
+
 function applyMigrations(db) {
   baseSchema(db);
   let version = schemaVersion(db);
@@ -378,6 +440,13 @@ function applyMigrations(db) {
     const tx = db.transaction(() => migrateToV4(db));
     tx();
     version = 4;
+    setSchemaVersion(db, version);
+  }
+
+  if (version < 5) {
+    const tx = db.transaction(() => migrateToV5(db));
+    tx();
+    version = 5;
     setSchemaVersion(db, version);
   }
 
