@@ -8,6 +8,7 @@ const workspace = require("../src/main/workspace-service.cjs");
 const backupService = require("../src/main/backup-service.cjs");
 const errorService = require("../src/main/error-service.cjs");
 const { applyCalculations } = require("../src/main/calculation-service.cjs");
+const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
 const catalog = require("../src/renderer/catalog.js");
 
 async function run() {
@@ -122,6 +123,112 @@ async function run() {
       "Fuente de prueba"
     );
 
+
+    const extTemplateId = "tpl-external-ai-smoke";
+    const extNow = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO templates
+        (id, document_id, unit_id, process_id, name, version, local_path, active, confidence, imported_at, validation_json, sha256, deleted, updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, 1, 100, ?, ?, ?, 0, ?)
+    `).run(
+      extTemplateId,
+      "utet-informe-final",
+      "UTET",
+      "utet-95",
+      "plantilla-ia-externa.docx",
+      path.join(temp, "plantilla-ia-externa.docx"),
+      extNow,
+      JSON.stringify({ errors: [], warnings: [], ok: true }),
+      "abc123",
+      extNow
+    );
+
+    const insertExternalField = db.prepare(`
+      INSERT INTO template_fields(template_id, type, name, label, required, config, columns_json, raw, valid, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, '[]', ?, 1, ?)
+    `);
+    insertExternalField.run(extTemplateId, "CAMPO", "PERIODO_EXT", "Período externo", 1, "", "CAMPO!:PERIODO_EXT|Período externo", 0);
+    insertExternalField.run(extTemplateId, "LISTA", "MODALIDAD_EXT", "Modalidad externa", 1, "Presencial,En línea", "LISTA!:MODALIDAD_EXT|Modalidad externa|Presencial,En línea", 1);
+    insertExternalField.run(extTemplateId, "IA", "CONCLUSION_EXT", "Conclusión externa", 0, "", "IA:CONCLUSION_EXT|Conclusión externa", 2);
+
+    let externalProject = workspace.createProject(temp, {
+      unitId: "UTET",
+      unitName: "Unidad de Titulación y Eficiencia Terminal",
+      processId: "utet-95",
+      processCode: "UTET-PRO-95",
+      processName: "Evaluación semestral del proceso de titulación",
+      documentId: "utet-informe-final",
+      documentName: "Informe Final del Proceso de Titulación",
+      documentType: "INF",
+      documentVersion: "1.0",
+      codePattern: "UTET-INF-0X-PRO-95-AÑO-MES",
+      mode: "template",
+      template: { id: extTemplateId }
+    });
+
+    const savedGuide = externalAiExchange.saveGuide(temp, externalProject.id, "Usar lenguaje institucional.");
+    assert.strictEqual(savedGuide.guide, "Usar lenguaje institucional.");
+
+    const builtPrompt = externalAiExchange.buildPrompt(temp, externalProject.id, "manual_ai", savedGuide.guide);
+    assert.ok(builtPrompt.prompt.includes("Usar lenguaje institucional."));
+    assert.ok(builtPrompt.prompt.includes("CONCLUSION_EXT"));
+    assert.ok(builtPrompt.fieldsText.includes("//CAMPO:PERIODO_EXT//"));
+
+    const externalResponse = [
+      "//FORMATO:" + externalAiExchange.PROTOCOL + "//",
+      "//DOCUMENTO:utet-informe-final//",
+      "//PLANTILLA:abc123//",
+      "//MODO:MANUALES+IA//",
+      "",
+      "//CAMPO:PERIODO_EXT//",
+      "Mayo 2026 - Noviembre 2026",
+      "//FIN:PERIODO_EXT//",
+      "",
+      "//CAMPO:MODALIDAD_EXT//",
+      "presencial",
+      "//FIN:MODALIDAD_EXT//",
+      "",
+      "//CAMPO:CONCLUSION_EXT//",
+      "El diagnóstico se completó con la información proporcionada.",
+      "//FIN:CONCLUSION_EXT//",
+      "",
+      "//FIN-DOCUMENTO//"
+    ].join("\n");
+
+    const externalPreview = externalAiExchange.previewResponse(temp, externalProject.id, externalResponse, "manual_ai");
+    assert.strictEqual(externalPreview.canImport, true);
+    assert.strictEqual(externalPreview.summary.valid, 3);
+    assert.strictEqual(externalPreview.summary.errors, 0);
+
+    const externalApplied = externalAiExchange.applyResponse(temp, externalProject.id, externalResponse, "manual_ai", false);
+    externalProject = externalApplied.project;
+    assert.strictEqual(externalProject.formData.PERIODO_EXT, "Mayo 2026 - Noviembre 2026");
+    assert.strictEqual(externalProject.formData.MODALIDAD_EXT, "Presencial");
+    assert.strictEqual(
+      externalProject.analysis.externalGeneratedFields.CONCLUSION_EXT,
+      "El diagnóstico se completó con la información proporcionada."
+    );
+
+    const mergedExternal = externalAiExchange.mergeExternalGeneratedFields(externalProject, {
+      provider: "Local",
+      generatedFields: { CONCLUSION_EXT: "Texto interno" },
+      fieldSources: {},
+      keyFindings: [],
+      missingData: [],
+      tables: [],
+      charts: [],
+      sourceTrace: [],
+      notes: ""
+    });
+    assert.strictEqual(
+      mergedExternal.generatedFields.CONCLUSION_EXT,
+      "El diagnóstico se completó con la información proporcionada."
+    );
+
+    externalProject = externalAiExchange.undoLastImport(temp, externalProject.id).project;
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(externalProject.formData, "PERIODO_EXT"), false);
+    assert.strictEqual(externalProject.analysis, null);
+
     const calculation = applyCalculations({
       formData: { APROBADOS: 90, REPROBADOS: 10 },
       template: {
@@ -150,7 +257,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite, catálogo, cálculos, integridad, objetos históricos, versiones informativas, errores y respaldo."
+      "SMOKE OK: Electron, SQLite, catálogo, cálculos, IA externa, integridad, objetos históricos, versiones informativas, errores y respaldo."
     );
   } finally {
     database.closeAll();
