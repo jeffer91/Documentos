@@ -1036,7 +1036,7 @@
     const stats = completionFor(manual);
     const requirementData = state.requirements || {};
     const allRequirements = Array.isArray(requirementData.requirements) ? requirementData.requirements : [];
-    const requiredMissing = allRequirements.filter((item) => item.required && item.status === "missing");
+    const requiredMissing = allRequirements.filter((item) => item.blocking && ["missing", "warning"].includes(item.status));
     const incomplete = allRequirements.filter((item) => !["ready", "automatic"].includes(item.status));
     const aiCount = (template.aiFields || []).length;
     const sysCount = (template.systemFields || []).length;
@@ -1260,7 +1260,7 @@
         <div class="requirement-item-main">
           <div class="requirement-item-title">
             <b>${escapeHtml(item.label)}</b>
-            ${item.required ? '<span class="req-required">Obligatorio</span>' : '<span class="req-optional">Opcional</span>'}
+            ${item.blocking ? '<span class="req-required">' + (item.required ? 'Obligatorio' : 'Requiere dato') + '</span>' : '<span class="req-optional">Opcional</span>'}
           </div>
           <code>${escapeHtml(item.literal)}</code>
           <div class="requirement-meta">
@@ -1268,6 +1268,7 @@
             <span>Fuente: ${escapeHtml(item.source)}</span>
           </div>
           ${columns}
+          ${item.blockingReason ? `<p class="requirement-note">${escapeHtml(item.blockingReason)}</p>` : ""}
           ${item.note ? `<p class="requirement-note">${escapeHtml(item.note)}</p>` : ""}
           ${requirementValueHtml(item)}
         </div>
