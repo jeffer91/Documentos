@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "2.6.0",
+  version: "2.7.0",
   getCatalog: () => ipcRenderer.invoke("catalog:get"),
   createProject: (meta) => ipcRenderer.invoke("projects:create", meta),
   listProjects: () => ipcRenderer.invoke("projects:list"),
