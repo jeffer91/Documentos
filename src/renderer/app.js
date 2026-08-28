@@ -1395,7 +1395,7 @@
             </div>
 
             <details class="external-ai-details">
-              <summary>Ver campos que se enviarán</summary>
+              <summary>Ver estructura que se enviará</summary>
               <textarea class="external-ai-textarea fields" readonly>${escapeHtml(data.fieldsText || "")}</textarea>
             </details>
 
@@ -1821,7 +1821,7 @@
     state.externalAi.preview = null;
     await Promise.all([loadVersions(), loadRequirements()]);
     renderEditor();
-    showToast(String(result.imported || 0) + " campos importados.");
+    showToast(String(result.imported || 0) + " elementos importados.");
   }
 
   async function undoExternalAiImport() {
@@ -2024,7 +2024,7 @@
       return showToast(response && response.error ? response.error : "No se pudo cargar la versión.");
     }
     state.project = response.project;
-    await loadVersions();
+    await Promise.all([loadVersions(), loadRequirements(), loadExternalAi()]);
     renderEditor();
     showToast(`Versión ${version} cargada como borrador.`);
   }
@@ -2067,8 +2067,12 @@
     state.project.analysis = preservedExternalAnalysis();
     clearCalculatedValues();
     api.saveProject(state.project).then((response) => {
-      if (response && response.ok) state.project = response.project;
-      renderEditor();
+      if (response && response.ok) {
+        state.project = response.project;
+        loadRequirements().then(() => renderEditor());
+      } else {
+        renderEditor();
+      }
     });
   }
 
