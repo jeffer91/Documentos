@@ -49,27 +49,87 @@ function partLocation(name) {
   return "Cuerpo del documento";
 }
 
+function headingLevelFromParagraph(paragraph) {
+  const match = String(paragraph || "").match(/<w:pStyle\b[^>]*w:val="([^"]+)"/i);
+  if (!match) return 0;
+  const normalized = decodeXml(match[1])
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "")
+    .toUpperCase();
+  const heading = normalized.match(/^(?:HEADING|TITULO)([1-6])$/);
+  return heading ? Number(heading[1]) : 0;
+}
+
+function addMarkerOccurrences(text, location, context, byRaw) {
+  const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  let match;
+  while ((match = regex.exec(String(text || "")))) {
+    const parsed = parseMarkerInner(match[1]);
+    if (!parsed || !byRaw.has(parsed.raw)) continue;
+    const meta = byRaw.get(parsed.raw);
+    meta.count += 1;
+    meta.locations.add(location);
+    if (context) meta.contexts.add(context);
+  }
+}
+
 function attachMarkerLocations(parts, markers) {
-  const byRaw = new Map((markers || []).map((marker) => [marker.raw, { count: 0, locations: new Set() }]));
+  const byRaw = new Map((markers || []).map((marker) => [
+    marker.raw,
+    { count: 0, locations: new Set(), contexts: new Set() }
+  ]));
+
   (parts || []).forEach((part) => {
-    const text = plainTextFromXml(part.xml);
-    const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
-    let match;
-    while ((match = regex.exec(text))) {
-      const parsed = parseMarkerInner(match[1]);
-      if (!parsed || !byRaw.has(parsed.raw)) continue;
-      const meta = byRaw.get(parsed.raw);
-      meta.count += 1;
-      meta.locations.add(partLocation(part.name));
+    const location = partLocation(part.name);
+    const paragraphs = part.xml.match(/<w:p\b[\s\S]*?<\/w:p>/g) || [];
+
+    if (location !== "Cuerpo del documento") {
+      paragraphs.forEach((paragraph) => {
+        addMarkerOccurrences(plainTextFromXml(paragraph), location, location, byRaw);
+      });
+      return;
     }
+
+    const headings = {};
+    paragraphs.forEach((paragraph) => {
+      const paragraphText = plainTextFromXml(paragraph).trim();
+      const level = headingLevelFromParagraph(paragraph);
+      if (level && paragraphText) {
+        headings[level] = paragraphText;
+        for (let deeper = level + 1; deeper <= 6; deeper += 1) delete headings[deeper];
+      }
+
+      let context = "";
+      for (let candidate = 6; candidate >= 1; candidate -= 1) {
+        if (headings[candidate]) {
+          context = headings[candidate];
+          break;
+        }
+      }
+      addMarkerOccurrences(paragraphText, location, context || location, byRaw);
+    });
   });
 
   (markers || []).forEach((marker) => {
     const meta = byRaw.get(marker.raw);
     marker.occurrenceCount = meta ? meta.count : 0;
     marker.locations = meta ? Array.from(meta.locations) : [];
+    marker.contexts = meta ? Array.from(meta.contexts) : [];
   });
   return markers;
+}
+
+function blockLocationErrors(markers) {
+  return (markers || [])
+    .filter((marker) =>
+      marker.valid &&
+      marker.isBlock &&
+      (marker.locations || []).some((location) => location !== "Cuerpo del documento")
+    )
+    .map((marker) =>
+      `{{${marker.raw}}}: los bloques de tablas, datos, imágenes o gráficos deben estar en el cuerpo del documento; no se admiten en encabezados ni pies de página.`
+    );
 }
 
 function inspectTemplate(filePath) {
@@ -81,6 +141,7 @@ function inspectTemplate(filePath) {
     const formula = validateFormulaSyntax(marker.formula);
     if (!formula.ok) validation.errors.push(`{{${marker.raw}}}: fórmula inválida. ${formula.error}`);
   });
+  validation.errors.push(...blockLocationErrors(markers));
   validation.ok = validation.errors.length === 0;
   validation.warnings.push(...findStandaloneBlockWarnings(parts, markers));
   return { parts, text, markers, validation };
@@ -199,7 +260,11 @@ function hydrateTemplate(db, row) {
   const storedValidation = parseJson(row.validation_json, { errors: [], warnings: [], ok: true });
   const liveValidation = validateMarkers(markers);
   const validation = {
-    errors: Array.from(new Set([].concat(storedValidation.errors || [], liveValidation.errors || []))),
+    errors: Array.from(new Set([].concat(
+      storedValidation.errors || [],
+      liveValidation.errors || [],
+      blockLocationErrors(markers)
+    ))),
     warnings: Array.from(new Set([].concat(storedValidation.warnings || [], liveValidation.warnings || [])))
   };
   validation.ok = validation.errors.length === 0;
