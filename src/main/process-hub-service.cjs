@@ -358,6 +358,27 @@ function markInstancesStale(db, dossierId, reason) {
   `).run(String(reason || "Los datos maestros cambiaron."), ts, dossierId);
 }
 
+function markDossierStale(userDataPath, dossierId, reason) {
+  const db = dbFor(userDataPath);
+  markInstancesStale(db, dossierId, reason);
+}
+
+function markEngineDependentsStale(db, dossierId, sourceEngineId, reason) {
+  const dependentIds = registry.allEngines()
+    .filter((engine) => Array.isArray(engine.dependencies) && engine.dependencies.includes(sourceEngineId))
+    .map((engine) => engine.engineId);
+  if (!dependentIds.length) return;
+  const placeholders = dependentIds.map(() => "?").join(",");
+  const ts = now();
+  db.prepare(`
+    UPDATE document_instances_v3
+    SET stale = 1, stale_reason = ?, updated_at = ?
+    WHERE dossier_id = ?
+      AND final_frozen_at IS NULL
+      AND engine_id IN (${placeholders})
+  `).run(String(reason || `Cambió una dependencia: ${sourceEngineId}`), ts, dossierId, ...dependentIds);
+}
+
 function setMasterData(userDataPath, dossierId, input) {
   const db = dbFor(userDataPath);
   const dossier = getDossier(userDataPath, dossierId);
@@ -562,6 +583,7 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   );
   db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
   audit(db, { dossierId: instance.dossierId, instanceId, entityType: "section", entityId: sectionKey, action: "update", detail: { status, locked, alertCount: (alerts || []).length } });
+  markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Cambió ${instance.label}: ${sectionKey}`);
   return getDocumentInstance(userDataPath, instanceId);
 }
 
@@ -587,6 +609,7 @@ function freezeFinal(userDataPath, instanceId) {
     WHERE id = ?
   `).run(ts, JSON.stringify(snapshot), ts, instanceId);
   audit(db, { dossierId: instance.dossierId, instanceId, entityType: "document_instance", entityId: instanceId, action: "freeze_final", detail: { engineVersion: instance.engineVersion } });
+  markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Se aprobó una nueva versión final de ${instance.label}`);
   return getDocumentInstance(userDataPath, instanceId);
 }
 
@@ -643,6 +666,7 @@ module.exports = {
   freezeFinal,
   createWorkingCopy,
   dashboard,
+  markDossierStale,
   audit,
   dbFor
 };
