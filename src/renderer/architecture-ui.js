@@ -10,6 +10,7 @@
     segments: [],
     masterData: [],
     imports: [],
+    knowledgeSources: [],
     instances: [],
     instance: null,
     busy: false,
@@ -71,6 +72,7 @@
     state.segments = response.segments || [];
     state.masterData = response.masterData || [];
     state.imports = response.imports || [];
+    state.knowledgeSources = response.knowledgeSources || [];
     state.instances = response.instances || [];
     const engines = await api.listEngines();
     state.engines = engines && engines.ok ? engines.engines || [] : [];
@@ -231,6 +233,16 @@
     }).join("")}</div>`;
   }
 
+  function knowledgeHtml() {
+    if (!(state.knowledgeSources || []).length) return '<div class="empty compact-empty"><b>Sin fuentes institucionales</b>Agrega reglamentos, manuales, políticas o normativa.</div>';
+    return `<div class="arch-data-list">${state.knowledgeSources.map((item) => `
+      <div class="arch-data-row">
+        <div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.sourceType)} · ${Number(item.textLength || 0)} caracteres · SHA-256 registrado</small></div>
+        <button class="danger-button small-inline" data-arch-action="remove-knowledge" data-id="${escapeHtml(item.id)}">Quitar</button>
+      </div>
+    `).join("")}</div>`;
+  }
+
   function engineCard(engine) {
     const instance = instanceForEngine(engine.engineId);
     const badges = [engine.cardinality, engine.population !== "all" ? engine.population : ""].filter(Boolean).join(" · ");
@@ -269,7 +281,10 @@
           <h2>${escapeHtml(state.dossier.label)}</h2>
           <p>${escapeHtml(state.dossier.periodLabel)} · población: ${escapeHtml(state.dossier.population)}</p>
         </div>
-        <span class="status good">Expediente maestro</span>
+        <div class="button-row">
+          <button class="ghost small-inline" data-arch-action="clone-dossier">Copiar a otro período</button>
+          <span class="status good">Expediente maestro</span>
+        </div>
       </div>
 
       <div class="arch-two-col">
@@ -288,6 +303,14 @@
           ${importsHtml()}
         </section>
       </div>
+
+      <section class="panel compact">
+        <div class="panel-title">
+          <div><h3>Fuentes institucionales</h3><small>Base Legal y Alineación Institucional se sustentan aquí.</small></div>
+          <button class="secondary small-inline" data-arch-action="add-knowledge">+ Fuente</button>
+        </div>
+        ${knowledgeHtml()}
+      </section>
 
       <div class="section-head">
         <div><h2>Motores documentales</h2><p>Cada documento tiene reglas propias aunque comparta datos con otros.</p></div>
@@ -409,6 +432,36 @@
     await renderDossier(state.dossier.id);
   }
 
+  async function addKnowledge() {
+    const response = await api.addKnowledgeSource(state.dossier.id, {
+      sourceType: "institutional",
+      purpose: "base_legal_alignment",
+      tags: ["base legal", "alineación institucional"]
+    });
+    if (!response || response.canceled) return;
+    if (!response.ok) return toast(response.error || "No se pudo agregar la fuente.");
+    toast("Fuente institucional agregada y versionada.");
+    await renderDossier(state.dossier.id);
+  }
+
+  async function cloneDossier() {
+    const periodsResponse = await api.listPeriods();
+    const periods = periodsResponse && periodsResponse.ok ? periodsResponse.periods || [] : [];
+    const choices = periods.filter((item) => item.id !== state.dossier.periodId);
+    if (!choices.length) return toast("Crea primero otro período.");
+    const menu = choices.map((item, index) => `${index + 1}. ${item.label} [${item.code}]`).join("\n");
+    const selected = window.prompt(`¿A qué período copiar la base?\n${menu}\n\nEscribe el número:`, "1");
+    const index = Number(selected) - 1;
+    if (!Number.isInteger(index) || index < 0 || index >= choices.length) return;
+    const target = choices[index];
+    const label = window.prompt("Nombre del nuevo expediente:", `${state.dossier.processKey} · ${target.label}`);
+    if (!label) return;
+    const response = await api.cloneDossier(state.dossier.id, target.id, label);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo copiar el expediente.");
+    toast("Expediente copiado. Los datos heredados quedan pendientes de verificación para el nuevo período.");
+    await renderDossier(response.dossier.id);
+  }
+
   async function createInstance(button) {
     const engine = state.engines.find((item) => item.engineId === button.dataset.engineId);
     if (!engine) return;
@@ -500,6 +553,13 @@
       if (action === "open-dossier") { state.instance = null; return renderDossier(button.dataset.id); }
       if (action === "add-master") return addMaster();
       if (action === "add-data-import") return addDataImport();
+      if (action === "add-knowledge") return addKnowledge();
+      if (action === "clone-dossier") return cloneDossier();
+      if (action === "remove-knowledge") {
+        const response = await api.removeKnowledgeSource(button.dataset.id);
+        if (!response || !response.ok) return toast(response && response.error || "No se pudo quitar la fuente.");
+        return renderDossier(state.dossier.id);
+      }
       if (action === "create-instance") return createInstance(button);
       if (action === "open-instance") return renderInstance(button.dataset.id);
       if (action === "save-section") {
