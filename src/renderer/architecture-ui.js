@@ -1,0 +1,550 @@
+(function () {
+  "use strict";
+
+  const api = window.documentosApp;
+  const state = {
+    dashboard: null,
+    engines: [],
+    providers: [],
+    dossier: null,
+    segments: [],
+    masterData: [],
+    imports: [],
+    instances: [],
+    instance: null,
+    busy: false
+  };
+
+  const view = () => document.getElementById("view");
+  const title = () => document.getElementById("screenTitle");
+  const breadcrumb = () => document.getElementById("breadcrumb");
+  const backButton = () => document.getElementById("backButton");
+
+  const escapeHtml = (value) => String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+  function toast(message) {
+    const element = document.getElementById("toast");
+    if (!element) return;
+    element.textContent = String(message || "");
+    element.classList.add("show");
+    setTimeout(() => element.classList.remove("show"), 3200);
+  }
+
+  function setHeader(screenTitle, crumbs, canBack) {
+    if (title()) title().textContent = screenTitle || "Procesos";
+    if (breadcrumb()) breadcrumb().textContent = crumbs || "Procesos";
+    if (backButton()) backButton().hidden = !canBack;
+  }
+
+  function setBusy(value) {
+    state.busy = Boolean(value);
+    document.querySelectorAll("[data-arch-action]").forEach((button) => { button.disabled = state.busy; });
+  }
+
+  function parseMaybeJson(value) {
+    const text = String(value == null ? "" : value).trim();
+    if (!text) return "";
+    try { return JSON.parse(text); } catch (_error) { return text; }
+  }
+
+  async function loadHome() {
+    const [dashboard, engines, providers] = await Promise.all([
+      api.getArchitectureDashboard(),
+      api.listEngines(),
+      api.listAiProviders()
+    ]);
+    state.dashboard = dashboard && dashboard.ok ? dashboard.dashboard : { periods: [], dossiers: [] };
+    state.engines = engines && engines.ok ? engines.engines || [] : [];
+    state.providers = providers && providers.ok ? providers.providers || [] : [];
+  }
+
+  async function loadDossier(dossierId) {
+    const response = await api.getDossier(dossierId);
+    if (!response || !response.ok || !response.dossier) throw new Error(response && response.error || "No se pudo abrir el expediente.");
+    state.dossier = response.dossier;
+    state.segments = response.segments || [];
+    state.masterData = response.masterData || [];
+    state.imports = response.imports || [];
+    state.instances = response.instances || [];
+    const engines = await api.listEngines();
+    state.engines = engines && engines.ok ? engines.engines || [] : [];
+  }
+
+  async function loadInstance(instanceId) {
+    const response = await api.getDocumentInstance(instanceId);
+    if (!response || !response.ok || !response.instance) throw new Error(response && response.error || "No se pudo abrir el documento.");
+    state.instance = response.instance;
+    return state.instance;
+  }
+
+  function processOptions() {
+    return [
+      ["formacion|all", "Formación docente"],
+      ["capacitacion|all", "Capacitación docente"],
+      ["titulacion_regular|regular", "Titulación · Regulares"],
+      ["titulacion_pvc|pvc", "Titulación · PVC"],
+      ["construccion_curricular|all", "Construcción Curricular Continua"],
+      ["plan_individual|all", "Plan individual"]
+    ].map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+  }
+
+  function periodCard(period) {
+    return `
+      <article class="arch-card">
+        <div class="arch-card-head">
+          <div><b>${escapeHtml(period.label)}</b><small>${escapeHtml(period.code)}</small></div>
+          <span class="status good">${escapeHtml(period.status)}</span>
+        </div>
+        <div class="arch-create-row">
+          <select id="arch-process-${escapeHtml(period.id)}">${processOptions()}</select>
+          <button class="secondary small-inline" data-arch-action="create-dossier" data-period-id="${escapeHtml(period.id)}">+ Expediente</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function dossierCard(dossier) {
+    const population = dossier.population && dossier.population !== "all" ? ` · ${dossier.population.toUpperCase()}` : "";
+    return `
+      <button class="arch-card arch-card-button" data-arch-action="open-dossier" data-id="${escapeHtml(dossier.id)}">
+        <div class="arch-card-head">
+          <div>
+            <b>${escapeHtml(dossier.label)}</b>
+            <small>${escapeHtml(dossier.periodLabel || dossier.periodCode)} · ${escapeHtml(dossier.processKey)}${escapeHtml(population)}</small>
+          </div>
+          <span>→</span>
+        </div>
+      </button>
+    `;
+  }
+
+  function providerPanel() {
+    const items = state.providers || [];
+    return `
+      <section class="panel compact">
+        <div class="panel-title">
+          <div><h3>IA automática</h3><small>Una IA puede redactar y revisarse; las adicionales revisan.</small></div>
+          <span class="status ${items.some((item) => item.enabled) ? "good" : "warn"}">${items.filter((item) => item.enabled).length} activas</span>
+        </div>
+        ${items.length ? `<div class="arch-provider-list">${items.map((item) => `
+          <div class="arch-provider">
+            <div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.kind)} · ${escapeHtml(item.model)} · ${escapeHtml(item.role)}</small></div>
+            <div class="button-row">
+              <button class="ghost small-inline" data-arch-action="test-provider" data-id="${escapeHtml(item.id)}">Probar</button>
+              <button class="danger-button small-inline" data-arch-action="delete-provider" data-id="${escapeHtml(item.id)}">Quitar</button>
+            </div>
+          </div>
+        `).join("")}</div>` : '<div class="notice-warn"><b>Sin IA configurada</b><span>La arquitectura funciona; configura una IA para generación automática.</span></div>'}
+        <details class="arch-details">
+          <summary>+ Agregar IA</summary>
+          <div class="form-grid arch-form">
+            <div class="field"><label>Nombre</label><input id="archProviderName" placeholder="Ej. GPT principal"></div>
+            <div class="field"><label>Tipo</label><select id="archProviderKind"><option value="openai-compatible">OpenAI compatible</option><option value="anthropic">Anthropic</option></select></div>
+            <div class="field full"><label>URL base</label><input id="archProviderUrl" placeholder="https://api.openai.com/v1"></div>
+            <div class="field"><label>Modelo</label><input id="archProviderModel" placeholder="gpt-..."></div>
+            <div class="field"><label>Rol</label><select id="archProviderRole"><option value="both">Redacta y revisa</option><option value="writer">Redacta</option><option value="reviewer">Solo revisa</option></select></div>
+            <div class="field"><label>Clave API (se cifra localmente)</label><input id="archProviderKey" type="password"></div>
+            <div class="field"><label>Variable de entorno (opcional)</label><input id="archProviderEnv" placeholder="OPENAI_API_KEY"></div>
+          </div>
+          <button class="primary" data-arch-action="save-provider">Guardar IA</button>
+        </details>
+      </section>
+    `;
+  }
+
+  async function renderHome() {
+    setHeader("Procesos", "Períodos y expedientes", false);
+    await loadHome();
+    const dashboard = state.dashboard || { periods: [], dossiers: [] };
+    view().innerHTML = `
+      <div class="arch-metrics">
+        <div class="metric"><small>Documentos activos</small><b>${Number(dashboard.documentTypeCount || 0)}</b></div>
+        <div class="metric"><small>Motores</small><b>${Number(dashboard.engineCount || 0)}</b></div>
+        <div class="metric"><small>Períodos</small><b>${(dashboard.periods || []).length}</b></div>
+        <div class="metric"><small>Finales congelados</small><b>${Number(dashboard.finalCount || 0)}</b></div>
+      </div>
+
+      <div class="section-head">
+        <div><h2>Períodos</h2><p>Los datos quedan separados por período y se reutilizan entre documentos del mismo proceso.</p></div>
+        <button class="primary" data-arch-action="new-period">+ Período</button>
+      </div>
+      <div class="arch-grid">
+        ${(dashboard.periods || []).length ? dashboard.periods.map(periodCard).join("") : '<div class="empty"><b>Sin períodos</b>Crea el primer período para comenzar.</div>'}
+      </div>
+
+      <div class="section-head"><div><h2>Expedientes</h2><p>Formación, Capacitación, Regulares y PVC se mantienen separados.</p></div></div>
+      <div class="arch-grid">
+        ${(dashboard.dossiers || []).length ? dashboard.dossiers.map(dossierCard).join("") : '<div class="empty"><b>Sin expedientes</b>Crea uno desde un período.</div>'}
+      </div>
+
+      <div class="section-head"><div><h2>Configuración de IA</h2></div></div>
+      ${providerPanel()}
+    `;
+  }
+
+  function engineMatchesDossier(engine) {
+    if (!state.dossier) return false;
+    if (engine.family === state.dossier.processKey) return true;
+    if (state.dossier.processKey === "titulacion_regular") {
+      return engine.family === "titulacion_regular" || (engine.family === "titulacion" && engine.population !== "pvc");
+    }
+    if (state.dossier.processKey === "titulacion_pvc") {
+      return engine.family === "titulacion_pvc" || (engine.family === "titulacion" && engine.population !== "regular");
+    }
+    return false;
+  }
+
+  function instanceForEngine(engineId) {
+    return (state.instances || []).find((item) => item.engineId === engineId) || null;
+  }
+
+  function masterDataHtml() {
+    if (!(state.masterData || []).length) return '<div class="empty compact-empty"><b>Sin datos maestros</b>Agrega carreras, cronogramas, responsables u otra información compartida.</div>';
+    return `<div class="arch-data-list">${state.masterData.map((item) => `
+      <div class="arch-data-row">
+        <div><b>${escapeHtml(item.key)}</b><small>${escapeHtml(item.scopeType)}${item.scopeKey ? " · " + escapeHtml(item.scopeKey) : ""} · rev. ${item.revision}</small></div>
+        <code>${escapeHtml(typeof item.value === "string" ? item.value : JSON.stringify(item.value))}</code>
+      </div>
+    `).join("")}</div>`;
+  }
+
+  function importsHtml() {
+    if (!(state.imports || []).length) return '<div class="empty compact-empty"><b>Sin archivos de datos</b>El motor está listo para uno o varios Excel/CSV.</div>';
+    return `<div class="arch-data-list">${state.imports.map((item) => {
+      const profile = item.profile || {};
+      const sheets = profile.sheets || [];
+      return `
+        <div class="arch-data-row">
+          <div><b>${escapeHtml(item.sourceName)}</b><small>${Number(profile.totalRows || 0)} filas · ${sheets.length} hoja(s)</small></div>
+          <span class="status good">Validado</span>
+        </div>
+      `;
+    }).join("")}</div>`;
+  }
+
+  function engineCard(engine) {
+    const instance = instanceForEngine(engine.engineId);
+    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : ""].filter(Boolean).join(" · ");
+    if (instance) {
+      return `
+        <article class="arch-engine-card ${instance.stale ? "stale" : ""}">
+          <div class="arch-card-head">
+            <div><b>${escapeHtml(engine.label)}</b><small>${escapeHtml(badges)}</small></div>
+            <span class="status ${instance.status === "final" ? "good" : instance.stale ? "warn" : ""}">${instance.stale ? "Desactualizado" : escapeHtml(instance.status)}</span>
+          </div>
+          <button class="secondary" data-arch-action="open-instance" data-id="${escapeHtml(instance.id)}">Abrir motor</button>
+        </article>
+      `;
+    }
+    return `
+      <article class="arch-engine-card">
+        <div class="arch-card-head">
+          <div><b>${escapeHtml(engine.label)}</b><small>${escapeHtml(badges)}</small></div>
+          <span class="status">Sin crear</span>
+        </div>
+        <button class="ghost" data-arch-action="create-instance" data-engine-id="${escapeHtml(engine.engineId)}" data-cardinality="${escapeHtml(engine.cardinality)}">Crear</button>
+      </article>
+    `;
+  }
+
+  async function renderDossier(dossierId) {
+    await loadDossier(dossierId || state.dossier && state.dossier.id);
+    setHeader(state.dossier.label, `Procesos / ${state.dossier.periodLabel}`, true);
+    const engines = state.engines.filter(engineMatchesDossier);
+    view().innerHTML = `
+      <div class="arch-dossier-head">
+        <div>
+          <span class="process-code">${escapeHtml(state.dossier.processKey)}</span>
+          <h2>${escapeHtml(state.dossier.label)}</h2>
+          <p>${escapeHtml(state.dossier.periodLabel)} · población: ${escapeHtml(state.dossier.population)}</p>
+        </div>
+        <span class="status good">Expediente maestro</span>
+      </div>
+
+      <div class="arch-two-col">
+        <section class="panel compact">
+          <div class="panel-title">
+            <div><h3>Datos maestros</h3><small>Se ingresan una vez y los consumen los motores autorizados.</small></div>
+            <button class="secondary small-inline" data-arch-action="add-master">+ Dato</button>
+          </div>
+          ${masterDataHtml()}
+        </section>
+        <section class="panel compact">
+          <div class="panel-title">
+            <div><h3>Excel / CSV</h3><small>Se conserva el original y una copia normalizada.</small></div>
+            <button class="secondary small-inline" data-arch-action="add-data-import">+ Archivo</button>
+          </div>
+          ${importsHtml()}
+        </section>
+      </div>
+
+      <div class="section-head">
+        <div><h2>Motores documentales</h2><p>Cada documento tiene reglas propias aunque comparta datos con otros.</p></div>
+      </div>
+      <div class="arch-engine-grid">${engines.map(engineCard).join("")}</div>
+    `;
+  }
+
+  function alertBlock(section) {
+    const alerts = section.alerts || [];
+    if (!alerts.length) return "";
+    return `<div class="arch-alerts">${alerts.map((alert) => `
+      <div class="arch-alert ${alert.severity === "error" ? "error" : ""}">
+        <b>${escapeHtml(alert.type || "alerta")}</b>
+        <span>${escapeHtml(alert.message || "")}</span>
+      </div>
+    `).join("")}</div>`;
+  }
+
+  function sectionCard(section) {
+    return `
+      <article class="arch-section-card">
+        <div class="arch-section-head">
+          <label><input type="checkbox" data-arch-section-select value="${escapeHtml(section.key)}"> ${section.order}. ${escapeHtml(section.title)}</label>
+          <div class="button-row">
+            <span class="status ${section.status === "approved" ? "good" : section.alerts && section.alerts.length ? "warn" : ""}">${escapeHtml(section.status)}</span>
+            <button class="ghost small-inline" data-arch-action="generate-section" data-key="${escapeHtml(section.key)}">IA</button>
+            <button class="ghost small-inline" data-arch-action="export-section" data-key="${escapeHtml(section.key)}">Borrador</button>
+            <button class="secondary small-inline" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">${section.locked ? "Aprobada" : "Aprobar"}</button>
+          </div>
+        </div>
+        ${alertBlock(section)}
+        <textarea class="arch-section-text" id="arch-section-${escapeHtml(section.key)}" ${section.locked ? "disabled" : ""}>${escapeHtml(section.content)}</textarea>
+        ${section.locked ? "" : `<button class="ghost small-inline" data-arch-action="save-section" data-key="${escapeHtml(section.key)}">Guardar edición</button>`}
+      </article>
+    `;
+  }
+
+  async function renderInstance(instanceId) {
+    await loadInstance(instanceId || state.instance && state.instance.id);
+    setHeader(state.instance.label, `Procesos / ${state.dossier ? state.dossier.label : "Documento"}`, true);
+    const alerts = state.instance.sections.reduce((sum, section) => sum + (section.alerts || []).length, 0);
+    view().innerHTML = `
+      ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Regenera las secciones no bloqueadas.</span></div>` : ""}
+      <div class="arch-dossier-head">
+        <div>
+          <span class="process-code">${escapeHtml(state.instance.engineId)} · v${escapeHtml(state.instance.engineVersion)}</span>
+          <h2>${escapeHtml(state.instance.label)}</h2>
+          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""}</p>
+        </div>
+        <span class="status ${state.instance.status === "final" ? "good" : alerts ? "warn" : ""}">${state.instance.status === "final" ? "Final congelada" : alerts + " alerta(s)"}</span>
+      </div>
+
+      <div class="button-row arch-toolbar">
+        <button class="primary" data-arch-action="generate-document">Generar / revisar todo</button>
+        <button class="ghost" data-arch-action="export-selected">Borrador seleccionado</button>
+        <button class="ghost" data-arch-action="export-draft">Borrador completo</button>
+        ${state.instance.finalFrozenAt
+          ? '<button class="secondary" data-arch-action="export-final">Versión final limpia</button><button class="ghost" data-arch-action="working-copy">Nueva versión de trabajo</button>'
+          : '<button class="secondary" data-arch-action="freeze-final">Aprobar versión final</button>'}
+      </div>
+
+      <div class="arch-sections">${state.instance.sections.map(sectionCard).join("")}</div>
+    `;
+  }
+
+  async function refreshCurrent() {
+    if (state.instance) return renderInstance(state.instance.id);
+    if (state.dossier) return renderDossier(state.dossier.id);
+    return renderHome();
+  }
+
+  async function newPeriod() {
+    const code = window.prompt("Código del período (ej. FEB-AGO-2026):");
+    if (!code) return;
+    const label = window.prompt("Nombre visible del período:", code);
+    if (!label) return;
+    const startDate = window.prompt("Fecha de inicio (AAAA-MM-DD, opcional):", "") || "";
+    const endDate = window.prompt("Fecha de fin (AAAA-MM-DD, opcional):", "") || "";
+    const response = await api.createPeriod({ code, label, startDate, endDate });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el período.");
+    toast("Período creado.");
+    await renderHome();
+  }
+
+  async function createDossier(button) {
+    const select = document.getElementById(`arch-process-${button.dataset.periodId}`);
+    if (!select) return;
+    const [processKey, population] = String(select.value || "").split("|");
+    const label = window.prompt("Nombre del expediente:", `${select.options[select.selectedIndex].text} · ${button.dataset.periodId}`);
+    if (!label) return;
+    const response = await api.createDossier({ periodId: button.dataset.periodId, processKey, population, label });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el expediente.");
+    toast("Expediente creado.");
+    await renderDossier(response.dossier.id);
+  }
+
+  async function addMaster() {
+    const key = window.prompt("Clave del dato compartido (ej. CARRERAS, CRONOGRAMA, RESPONSABLES):");
+    if (!key) return;
+    const value = window.prompt("Valor. Puedes pegar texto o JSON:");
+    if (value == null) return;
+    const response = await api.setMasterData(state.dossier.id, {
+      key: key.trim().toUpperCase().replace(/\s+/g, "_"),
+      value: parseMaybeJson(value),
+      provenance: { source: "manual", verified: true }
+    });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo guardar.");
+    toast("Dato maestro guardado. Los documentos relacionados quedaron marcados para revisión.");
+    await renderDossier(state.dossier.id);
+  }
+
+  async function addDataImport() {
+    const response = await api.addDataImport(state.dossier.id, { type: "dossier", key: "" });
+    if (!response || response.canceled) return;
+    if (!response.ok) return toast(response.error || "No se pudo importar.");
+    toast("Archivo importado y perfilado.");
+    await renderDossier(state.dossier.id);
+  }
+
+  async function createInstance(button) {
+    const engine = state.engines.find((item) => item.engineId === button.dataset.engineId);
+    if (!engine) return;
+    let scopeKey = "";
+    const cardinality = button.dataset.cardinality || engine.cardinality;
+    if (!["period"].includes(cardinality)) {
+      scopeKey = window.prompt(`Identificador para ${cardinality} (ej. estudiante, carrera, actividad o segmento):`, "") || "";
+      if (!scopeKey && cardinality !== "period_population") return;
+    }
+    if (cardinality === "period_population" && !scopeKey) scopeKey = state.dossier.population || engine.population || "all";
+    const response = await api.ensureDocumentInstance(state.dossier.id, engine.engineId, { type: cardinality, key: scopeKey });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el documento.");
+    await renderInstance(response.instance.id);
+  }
+
+  async function saveSection(key, patch) {
+    const response = await api.updateDocumentSection(state.instance.id, key, patch);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo guardar la sección.");
+    state.instance = response.instance;
+    await renderInstance(state.instance.id);
+  }
+
+  async function generateSection(key) {
+    setBusy(true);
+    const response = await api.generateEngineSection(state.instance.id, key, { reviewers: 2 });
+    setBusy(false);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo generar la sección.");
+    state.instance = response.instance;
+    toast("Sección generada y revisada.");
+    await renderInstance(state.instance.id);
+  }
+
+  async function generateDocument() {
+    setBusy(true);
+    const response = state.instance.stale
+      ? await api.regenerateStaleDocument(state.instance.id, { reviewers: 2 })
+      : await api.generateEngineDocument(state.instance.id, { reviewers: 2 });
+    setBusy(false);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo generar el documento.");
+    state.instance = response.instance;
+    toast("Documento generado y revisado por bloques.");
+    await renderInstance(state.instance.id);
+  }
+
+  function selectedSections() {
+    return Array.from(document.querySelectorAll("[data-arch-section-select]:checked")).map((item) => item.value);
+  }
+
+  async function exportDocument(options) {
+    setBusy(true);
+    const response = await api.exportEngineDocument(state.instance.id, options || {});
+    setBusy(false);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo exportar.");
+    toast("Exportación creada.");
+  }
+
+  async function freezeFinal() {
+    const response = await api.freezeDocumentInstance(state.instance.id);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo aprobar la versión final.");
+    state.instance = response.instance;
+    toast("Versión final congelada. Los cambios futuros no la modificarán.");
+    await renderInstance(state.instance.id);
+  }
+
+  async function saveProvider() {
+    const input = {
+      name: document.getElementById("archProviderName").value,
+      kind: document.getElementById("archProviderKind").value,
+      baseUrl: document.getElementById("archProviderUrl").value,
+      model: document.getElementById("archProviderModel").value,
+      role: document.getElementById("archProviderRole").value,
+      apiKey: document.getElementById("archProviderKey").value,
+      apiKeyEnv: document.getElementById("archProviderEnv").value,
+      enabled: true
+    };
+    const response = await api.saveAiProvider(input);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo guardar la IA.");
+    toast("IA guardada localmente.");
+    await renderHome();
+  }
+
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-arch-action]");
+    if (!button || state.busy) return;
+    const action = button.dataset.archAction;
+    try {
+      if (action === "new-period") return newPeriod();
+      if (action === "create-dossier") return createDossier(button);
+      if (action === "open-dossier") { state.instance = null; return renderDossier(button.dataset.id); }
+      if (action === "add-master") return addMaster();
+      if (action === "add-data-import") return addDataImport();
+      if (action === "create-instance") return createInstance(button);
+      if (action === "open-instance") return renderInstance(button.dataset.id);
+      if (action === "save-section") {
+        const input = document.getElementById(`arch-section-${button.dataset.key}`);
+        return saveSection(button.dataset.key, { content: input ? input.value : "", status: "edited", provenance: { source: "human", editedAt: new Date().toISOString() } });
+      }
+      if (action === "approve-section") {
+        const current = state.instance.sections.find((item) => item.key === button.dataset.key);
+        return saveSection(button.dataset.key, { status: "approved", locked: true, content: current && current.content || "", provenance: Object.assign({}, current && current.provenance || {}, { approvedBy: "human", approvedAt: new Date().toISOString() }) });
+      }
+      if (action === "generate-section") return generateSection(button.dataset.key);
+      if (action === "generate-document") return generateDocument();
+      if (action === "export-section") return exportDocument({ sectionKeys: [button.dataset.key], includeAlerts: true, final: false, formats: ["docx", "pdf"] });
+      if (action === "export-selected") {
+        const keys = selectedSections();
+        if (!keys.length) return toast("Selecciona al menos una sección.");
+        return exportDocument({ sectionKeys: keys, includeAlerts: true, final: false, formats: ["docx", "pdf"] });
+      }
+      if (action === "export-draft") return exportDocument({ includeAlerts: true, final: false, formats: ["docx", "pdf"] });
+      if (action === "freeze-final") return freezeFinal();
+      if (action === "export-final") return exportDocument({ includeAlerts: false, final: true, formats: ["docx", "pdf"] });
+      if (action === "working-copy") {
+        const response = await api.createWorkingCopy(state.instance.id);
+        if (!response || !response.ok) return toast(response && response.error || "No se pudo crear la nueva versión.");
+        return renderInstance(response.instance.id);
+      }
+      if (action === "save-provider") return saveProvider();
+      if (action === "test-provider") {
+        setBusy(true);
+        const response = await api.testAiProvider(button.dataset.id);
+        setBusy(false);
+        return toast(response && response.ok ? "Conexión de IA correcta." : response && response.error || "Falló la prueba.");
+      }
+      if (action === "delete-provider") {
+        if (!window.confirm("¿Quitar esta IA?")) return;
+        const response = await api.deleteAiProvider(button.dataset.id);
+        if (!response || !response.ok) return toast(response && response.error || "No se pudo quitar.");
+        return renderHome();
+      }
+    } catch (error) {
+      setBusy(false);
+      toast(error.message || String(error));
+    }
+  });
+
+  window.DocumentArchitectureUI = {
+    renderHome,
+    renderDossier,
+    renderInstance,
+    refreshCurrent,
+    isActive() {
+      return Boolean(document.querySelector('.nav-item[data-route="architecture"].active'));
+    }
+  };
+})();
