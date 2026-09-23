@@ -12,7 +12,8 @@
     imports: [],
     instances: [],
     instance: null,
-    busy: false
+    busy: false,
+    currentView: "home"
   };
 
   const view = () => document.getElementById("view");
@@ -158,6 +159,9 @@
   }
 
   async function renderHome() {
+    state.currentView = "home";
+    state.instance = null;
+    state.dossier = null;
     setHeader("Procesos", "Períodos y expedientes", false);
     await loadHome();
     const dashboard = state.dashboard || { periods: [], dossiers: [] };
@@ -253,6 +257,8 @@
   }
 
   async function renderDossier(dossierId) {
+    state.currentView = "dossier";
+    state.instance = null;
     await loadDossier(dossierId || state.dossier && state.dossier.id);
     setHeader(state.dossier.label, `Procesos / ${state.dossier.periodLabel}`, true);
     const engines = state.engines.filter(engineMatchesDossier);
@@ -321,6 +327,7 @@
   }
 
   async function renderInstance(instanceId) {
+    state.currentView = "instance";
     await loadInstance(instanceId || state.instance && state.instance.id);
     setHeader(state.instance.label, `Procesos / ${state.dossier ? state.dossier.label : "Documento"}`, true);
     const alerts = state.instance.sections.reduce((sum, section) => sum + (section.alerts || []).length, 0);
@@ -538,11 +545,24 @@
     }
   });
 
+  async function goBack() {
+    if (state.currentView === "instance" && state.dossier) {
+      await renderDossier(state.dossier.id);
+      return true;
+    }
+    if (state.currentView === "dossier") {
+      await renderHome();
+      return true;
+    }
+    return false;
+  }
+
   window.DocumentArchitectureUI = {
     renderHome,
     renderDossier,
     renderInstance,
     refreshCurrent,
+    goBack,
     isActive() {
       return Boolean(document.querySelector('.nav-item[data-route="architecture"].active'));
     }
