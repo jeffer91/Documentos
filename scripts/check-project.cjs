@@ -36,6 +36,7 @@ const REQUIRED_FILES = [
   "src/main/ai-provider-service.cjs",
   "src/main/ai-orchestrator.cjs",
   "src/main/draft-export-service.cjs",
+  "src/main/knowledge-source-service.cjs",
   "src/renderer/architecture-ui.js",
   "scripts/render-word.ps1",
   "scripts/export-draft.ps1",
