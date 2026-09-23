@@ -634,6 +634,59 @@ function createWorkingCopy(userDataPath, instanceId) {
   return getDocumentInstance(userDataPath, copy.id);
 }
 
+
+function cloneDossierToPeriod(userDataPath, sourceDossierId, targetPeriodId, label) {
+  const db = dbFor(userDataPath);
+  const source = getDossier(userDataPath, sourceDossierId);
+  const targetPeriod = getPeriod(userDataPath, targetPeriodId);
+  if (!source) throw new Error("Expediente de origen no válido.");
+  if (!targetPeriod) throw new Error("Período de destino no válido.");
+  const cloned = createDossier(userDataPath, {
+    periodId: targetPeriodId,
+    processKey: source.processKey,
+    population: source.population,
+    label: String(label || `${source.processKey} · ${targetPeriod.label}`),
+    metadata: Object.assign({}, source.metadata || {}, {
+      copiedFromDossierId: source.id,
+      copiedFromPeriodId: source.periodId
+    })
+  });
+
+  listSegments(userDataPath, source.id).forEach((segment) => {
+    upsertSegment(userDataPath, cloned.id, {
+      type: segment.type,
+      key: segment.key,
+      label: segment.label,
+      metadata: Object.assign({}, segment.metadata || {}, { copiedFromSegmentId: segment.id })
+    });
+  });
+
+  listMasterData(userDataPath, source.id).forEach((item) => {
+    setMasterData(userDataPath, cloned.id, {
+      key: item.key,
+      scopeType: item.scopeType,
+      scopeKey: item.scopeKey,
+      value: item.value,
+      reason: "Base copiada de un período anterior",
+      provenance: Object.assign({}, item.provenance || {}, {
+        source: "copied_from_period",
+        sourceDossierId: source.id,
+        sourcePeriodId: source.periodId,
+        verified: false
+      })
+    });
+  });
+
+  audit(db, {
+    dossierId: cloned.id,
+    entityType: "dossier",
+    entityId: cloned.id,
+    action: "clone_from_period",
+    detail: { sourceDossierId: source.id, sourcePeriodId: source.periodId, targetPeriodId }
+  });
+  return getDossier(userDataPath, cloned.id);
+}
+
 function dashboard(userDataPath) {
   const periods = listPeriods(userDataPath);
   const dossiers = listDossiers(userDataPath);
@@ -665,6 +718,7 @@ module.exports = {
   updateSection,
   freezeFinal,
   createWorkingCopy,
+  cloneDossierToPeriod,
   dashboard,
   markDossierStale,
   audit,
