@@ -2,6 +2,7 @@ const hub = require("./process-hub-service.cjs");
 const ingestion = require("./data-ingestion-service.cjs");
 const providers = require("./ai-provider-service.cjs");
 const registry = require("./document-engine-registry.cjs");
+const knowledge = require("./knowledge-source-service.cjs");
 
 function now() {
   return new Date().toISOString();
@@ -69,13 +70,23 @@ function sectionDataContext(userDataPath, instance, section) {
     sourceName: item.sourceName,
     scopeType: item.scopeType,
     scopeKey: item.scopeKey,
-    profile: item.profile,
-    sha256: item.sha256
+    sha256: item.sha256,
+    sheets: ((item.profile && item.profile.sheets) || []).map((sheet) => ({
+      name: sheet.name,
+      headers: (sheet.columns || []).map((column) => column.name)
+    }))
   }));
   let filteredData = null;
   const query = section && section.data && section.data.query;
   if (query) filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, query);
-  return { masterData: compactMasterData(masterData), imports, filteredData };
+  const sourceQuery = `${section && section.title || ""} ${section && section.key || ""} ${instance.label || ""}`;
+  const institutionalSources = knowledge.searchKnowledge(userDataPath, instance.dossierId, sourceQuery, 5);
+  return {
+    masterData: compactMasterData(masterData),
+    imports,
+    filteredData,
+    institutionalSources
+  };
 }
 
 function writerPrompt(instance, engine, section, context) {
@@ -96,6 +107,7 @@ function writerPrompt(instance, engine, section, context) {
       masterData: context.masterData,
       imports: context.imports,
       filteredData: context.filteredData,
+      institutionalSources: context.institutionalSources,
       previousSections: prior
     })
   ].join("\n\n");
@@ -112,7 +124,8 @@ function reviewerPrompt(engine, section, draft, context) {
       section: section.key,
       draft,
       masterData: context.masterData,
-      filteredData: context.filteredData
+      filteredData: context.filteredData,
+      institutionalSources: context.institutionalSources
     })
   ].join("\n\n");
 }
