@@ -30,6 +30,7 @@ function providerSets(userDataPath) {
   const writers = all.filter((item) => item.role === "writer" || item.role === "both");
   const reviewers = all.filter((item) => item.role === "reviewer" || item.role === "both");
   return {
+    writers,
     writer: writers[0] || null,
     reviewers: reviewers.length ? reviewers : writers.slice(0, 1)
   };
@@ -165,32 +166,39 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
   const db = hub.dbFor(userDataPath);
   const system = baseSystem(engine, section);
   const prompt = writerPrompt(instance, engine, section, context);
-  const jobId = createJob(db, instanceId, sectionKey, "writer", set.writer.id, { prompt, engineId: engine.engineId });
 
-  let writerResult;
-  try {
-    const result = await providers.callProvider(userDataPath, set.writer.id, { system, prompt, maxTokens: options && options.maxTokens || 7000 });
-    writerResult = parseJsonObject(result.text);
-    finishJob(db, jobId, { parsed: writerResult, provider: result.provider.name }, null);
-  } catch (error) {
-    finishJob(db, jobId, null, error);
-    throw error;
+  let writerResult = null;
+  let usedWriter = null;
+  let lastWriterError = null;
+  for (const candidate of set.writers || [set.writer]) {
+    const jobId = createJob(db, instanceId, sectionKey, "writer", candidate.id, { prompt, engineId: engine.engineId });
+    try {
+      const result = await providers.callProvider(userDataPath, candidate.id, { system, prompt, maxTokens: options && options.maxTokens || 7000 });
+      writerResult = parseJsonObject(result.text);
+      usedWriter = candidate;
+      finishJob(db, jobId, { parsed: writerResult, provider: result.provider.name }, null);
+      break;
+    } catch (error) {
+      lastWriterError = error;
+      finishJob(db, jobId, null, error);
+    }
   }
+  if (!writerResult || !usedWriter) throw lastWriterError || new Error("Ninguna IA pudo redactar la sección.");
 
   let content = String(writerResult.content || "");
   let alerts = Array.isArray(writerResult.alerts) ? writerResult.alerts : [];
   const provenance = {
     source: "ai",
-    writerProviderId: set.writer.id,
-    writerProvider: set.writer.name,
+    writerProviderId: usedWriter.id,
+    writerProvider: usedWriter.name,
     engineId: engine.engineId,
     engineVersion: engine.version,
     generatedAt: now(),
     claims: Array.isArray(writerResult.claims) ? writerResult.claims : []
   };
 
-  const reviewers = (set.reviewers || []).filter((provider) => provider.id !== set.writer.id)
-    .concat((set.reviewers || []).some((provider) => provider.id === set.writer.id) ? [set.writer] : [])
+  const reviewers = (set.reviewers || []).filter((provider) => provider.id !== usedWriter.id)
+    .concat((set.reviewers || []).some((provider) => provider.id === usedWriter.id) ? [usedWriter] : [])
     .slice(0, Math.max(1, Number(options && options.reviewers || 1)));
 
   for (const reviewer of reviewers) {
@@ -250,6 +258,7 @@ async function generateDocument(userDataPath, instanceId, options) {
     if (section.key === startAt) enabled = true;
     if (!enabled) continue;
     if (section.locked || section.status === "approved") continue;
+    if (!(options && options.force) && section.status === "reviewed") continue;
     instance = await generateSection(userDataPath, instanceId, section.key, options || {});
   }
   return hub.getDocumentInstance(userDataPath, instanceId);
