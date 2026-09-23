@@ -1,7 +1,7 @@
 {
   "name": "documentos",
-  "version": "2.8.1",
-  "description": "Generador documental ITSQMET con SQLite local, plantillas Word y salida PDF",
+  "version": "3.0.0",
+  "description": "Sistema documental ITSQMET por períodos, expedientes, motores independientes e IA por bloques",
   "main": "main.cjs",
   "author": "Jefferson Villarreal",
   "license": "MIT",

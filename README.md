@@ -286,3 +286,79 @@ La app genera un único prompt para ChatGPT, Claude, Gemini u otra IA externa. L
 El protocolo admite campos/redacciones y tablas estructuradas. `SYS`, `CALC`, archivos `DATOS`, imágenes y gráficos permanecen bajo control de la aplicación.
 
 Las respuestas antiguas `ITSQMET-CAMPOS-V1` se pueden leer por compatibilidad, pero las tablas requieren V2.
+
+
+## Arquitectura documental v3.0.0
+
+La app incorpora una capa de procesos por encima de los proyectos tradicionales:
+
+```text
+Período
+  ↓
+Expediente / proceso
+  ↓
+Datos maestros + fuentes institucionales + Excel/CSV
+  ↓
+Motor independiente del documento
+  ↓
+Secciones y subsecciones
+  ↓
+IA automática por bloques
+  ↓
+Revisión automática
+  ↓
+Borrador con alertas
+  ↓
+Versión final congelada y limpia
+```
+
+### Principios
+
+- Los datos se comparten; los motores documentales no.
+- Cada versión final es una fotografía inmutable de sus datos y fuentes.
+- Los cambios en datos o documentos fuente marcan como desactualizados los documentos dependientes.
+- Una sola IA puede redactar y revisar. Si existen varias, pueden actuar como revisores y respaldo.
+- La app filtra y calcula antes de enviar contexto a la IA.
+- Los resultados institucionales priorizan porcentajes y protegen grupos pequeños.
+- Regulares y PVC son flujos separados, con motores independientes para sus informes finales.
+- Los documentos pueden ser uno por período, población, segmento, carrera, nivel, actividad, persona o estudiante.
+
+### Catálogo activo
+
+La interfaz v3 muestra 32 tipos documentales seleccionados. El informe final de titulación tiene dos motores independientes:
+
+- Informe Final del Proceso de Titulación · Regulares.
+- Informe Final del Proceso de Titulación · PVC.
+
+Por esta razón existen 33 motores activos para 32 tipos documentales.
+
+### Excel y CSV
+
+El importador v3 no fija todavía un formato institucional único. Puede recibir uno o varios Excel/CSV, conserva el original, registra SHA-256, perfila hojas y columnas y almacena una copia normalizada. Los adaptadores específicos de Complexivo, PVC, Formación, Capacitación u otros pueden definirse después sin cambiar el núcleo.
+
+### Fuentes institucionales
+
+Cada expediente puede incorporar reglamentos, manuales, políticas, normativa u otras fuentes. Se conserva:
+
+- archivo original;
+- SHA-256;
+- texto extraído;
+- fecha de incorporación;
+- etiquetas;
+- trazabilidad de uso.
+
+Base Legal y Alineación Institucional pueden recuperar fragmentos pertinentes de estas fuentes.
+
+### Generación automática
+
+El apartado **Procesos** permite crear períodos y expedientes, cargar datos, configurar IAs y ejecutar motores por documento. Los documentos largos se procesan sección por sección; las secciones ya revisadas se conservan y la generación puede reanudarse después de un fallo.
+
+### Borrador y final
+
+El borrador puede exportarse por:
+
+- sección;
+- conjunto de secciones;
+- documento completo.
+
+Las alertas aparecen en el borrador. La versión final se congela y se exporta sin alertas visibles, manteniendo internamente la trazabilidad.

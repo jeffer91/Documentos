@@ -30,7 +30,16 @@ const REQUIRED_FILES = [
   "src/main/document-composer.cjs",
   "src/main/pdf-service.cjs",
   "src/main/settings-service.cjs",
+  "src/main/document-engine-registry.cjs",
+  "src/main/process-hub-service.cjs",
+  "src/main/data-ingestion-service.cjs",
+  "src/main/ai-provider-service.cjs",
+  "src/main/ai-orchestrator.cjs",
+  "src/main/draft-export-service.cjs",
+  "src/main/knowledge-source-service.cjs",
+  "src/renderer/architecture-ui.js",
   "scripts/render-word.ps1",
+  "scripts/export-draft.ps1",
   "scripts/smoke-electron.cjs",
   "docs/ARQUITECTURA_DATOS.md",
   "docs/ALIAS_CAMPOS.md"
@@ -226,8 +235,7 @@ function releaseConsistencyCheck() {
   const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
   const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
   const preloadMatch = preload.match(/version:\s*"([^"]+)"/);
-  const internalFiles = [
-    "src/main/ai-provider-service.cjs",
+  const obsoleteFiles = [
     "src/main/ai-service.cjs"
   ].filter((relative) => fs.existsSync(path.join(ROOT, relative)));
 
@@ -236,7 +244,29 @@ function releaseConsistencyCheck() {
     lockVersion: lock.version,
     lockRootVersion: lock.packages && lock.packages[""] ? lock.packages[""].version : "",
     preloadVersion: preloadMatch ? preloadMatch[1] : "",
-    internalFiles
+    obsoleteFiles
+  };
+}
+
+function architectureV3Check() {
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+  const engines = registry.allEngines();
+  const ids = engines.map((item) => item.engineId);
+  const finalVariants = engines.filter((item) => item.documentId === "utet-informe-final");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
+  return {
+    selectedDocuments: registry.SELECTED_DOCUMENT_IDS.length,
+    engineCount: engines.length,
+    duplicateEngineIds: ids.filter((value, index) => ids.indexOf(value) !== index),
+    regularFinal: finalVariants.some((item) => item.engineId === "tit.regular.informe-final"),
+    pvcFinal: finalVariants.some((item) => item.engineId === "tit.pvc.informe-final"),
+    hasStudentCardinality: engines.some((item) => item.cardinality === "student"),
+    hasPeriodSegmentCardinality: engines.some((item) => item.cardinality === "period_segment"),
+    hasProcessUi: renderer.includes("Expediente maestro") && renderer.includes("Generar / revisar todo"),
+    hasIpc: mainSource.includes("architecture:dashboard") && mainSource.includes("ai-engine:generate-document"),
+    hasBridge: preload.includes("getArchitectureDashboard") && preload.includes("generateEngineDocument")
   };
 }
 
@@ -272,8 +302,8 @@ function main() {
     if (new Set(versions).size !== 1 || versions.some((value) => !value)) {
       errors.push(`Versiones inconsistentes: ${versions.join(" / ")}`);
     }
-    if (release.internalFiles.length) {
-      errors.push(`Persisten servicios obsoletos de IA interna: ${release.internalFiles.join(", ")}`);
+    if (release.obsoleteFiles.length) {
+      errors.push(`Persisten servicios obsoletos de IA: ${release.obsoleteFiles.join(", ")}`);
     }
   } catch (error) {
     errors.push(`No se pudo validar la versión de release: ${error.message}`);
@@ -288,6 +318,26 @@ function main() {
     if (catalog.duplicateIds.length) errors.push(`Catálogo: IDs duplicados ${catalog.duplicateIds.join(", ")}`);
   } catch (error) {
     errors.push(`No se pudo validar el catálogo: ${error.message}`);
+  }
+
+  try {
+    const architecture = architectureV3Check();
+    if (
+      architecture.selectedDocuments !== 32 ||
+      architecture.engineCount !== 33 ||
+      architecture.duplicateEngineIds.length ||
+      !architecture.regularFinal ||
+      !architecture.pvcFinal ||
+      !architecture.hasStudentCardinality ||
+      !architecture.hasPeriodSegmentCardinality ||
+      !architecture.hasProcessUi ||
+      !architecture.hasIpc ||
+      !architecture.hasBridge
+    ) {
+      errors.push("La arquitectura documental v3 no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar arquitectura v3: ${error.message}`);
   }
 
   try {
@@ -353,7 +403,7 @@ function main() {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v2.8.1");
+  console.log("Documentos ITSQMET · diagnóstico v3.0.0");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
@@ -362,7 +412,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: estructura, sintaxis, catálogo, requisitos, ubicaciones, datos locales e IA externa V2 correctos.");
+    console.log("OK: arquitectura v3, 32 documentos activos, 33 motores, datos por expediente, IA automática y compatibilidad V2 correctos.");
   }
 }
 

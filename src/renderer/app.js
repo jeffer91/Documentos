@@ -345,6 +345,17 @@
       return;
     }
 
+    if (route === "architecture") {
+      state.unit = null;
+      state.process = null;
+      state.document = null;
+      state.project = null;
+      setNav("architecture");
+      if (!window.DocumentArchitectureUI) throw new Error("No se pudo cargar el módulo de procesos.");
+      await window.DocumentArchitectureUI.renderHome();
+      return;
+    }
+
     if (route === "library") {
       setNav("library");
       await loadProjects();
@@ -2219,7 +2230,13 @@
     }
   });
 
-  backButton.addEventListener("click", goBack);
+  backButton.addEventListener("click", async () => {
+    if (state.route === "architecture" && window.DocumentArchitectureUI) {
+      const handled = await window.DocumentArchitectureUI.goBack();
+      if (handled) return;
+    }
+    await goBack();
+  });
 
   async function init() {
     if (!api) {

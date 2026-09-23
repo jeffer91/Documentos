@@ -16,6 +16,13 @@ const errorService = require("./src/main/error-service.cjs");
 const { applyCalculations } = require("./src/main/calculation-service.cjs");
 const externalAiExchange = require("./src/main/external-ai-exchange.cjs");
 const templateRequirements = require("./src/main/template-requirements.cjs");
+const engineRegistry = require("./src/main/document-engine-registry.cjs");
+const processHub = require("./src/main/process-hub-service.cjs");
+const dataIngestion = require("./src/main/data-ingestion-service.cjs");
+const aiProviders = require("./src/main/ai-provider-service.cjs");
+const aiOrchestrator = require("./src/main/ai-orchestrator.cjs");
+const draftExport = require("./src/main/draft-export-service.cjs");
+const knowledgeSources = require("./src/main/knowledge-source-service.cjs");
 
 let mainWindow = null;
 
@@ -93,7 +100,208 @@ function safeResponse(action, moduleName, actionName) {
 }
 
 function registerIpc() {
-  ipcMain.handle("catalog:get", () => ({ ok: true, catalog: database.getCatalog(database.openDatabase(userData())) }));
+  ipcMain.handle("catalog:get", () => ({ ok: true, catalog: engineRegistry.filterCatalog(database.getCatalog(database.openDatabase(userData()))) }));
+
+  ipcMain.handle("architecture:dashboard", () => safeResponse(
+    () => ({ ok: true, dashboard: processHub.dashboard(userData()) }),
+    "architecture",
+    "dashboard"
+  ));
+
+  ipcMain.handle("engines:list", () => ({ ok: true, engines: engineRegistry.allEngines() }));
+
+  ipcMain.handle("periods:list", () => ({ ok: true, periods: processHub.listPeriods(userData()) }));
+  ipcMain.handle("periods:create", (_event, input) => safeResponse(
+    () => ({ ok: true, period: processHub.createPeriod(userData(), input || {}) }),
+    "periods",
+    "create"
+  ));
+
+  ipcMain.handle("dossiers:list", (_event, periodId) => safeResponse(
+    () => ({ ok: true, dossiers: processHub.listDossiers(userData(), periodId || "") }),
+    "dossiers",
+    "list"
+  ));
+  ipcMain.handle("dossiers:get", (_event, dossierId) => safeResponse(
+    () => ({
+      ok: true,
+      dossier: processHub.getDossier(userData(), dossierId),
+      segments: processHub.listSegments(userData(), dossierId),
+      masterData: processHub.listMasterData(userData(), dossierId),
+      imports: dataIngestion.listImports(userData(), dossierId),
+      knowledgeSources: knowledgeSources.listKnowledgeSources(userData(), dossierId),
+      instances: processHub.listDocumentInstances(userData(), dossierId)
+    }),
+    "dossiers",
+    "get"
+  ));
+  ipcMain.handle("dossiers:create", (_event, input) => safeResponse(
+    () => ({ ok: true, dossier: processHub.createDossier(userData(), input || {}) }),
+    "dossiers",
+    "create"
+  ));
+  ipcMain.handle("dossiers:clone", (_event, sourceDossierId, targetPeriodId, label) => safeResponse(
+    () => ({ ok: true, dossier: processHub.cloneDossierToPeriod(userData(), sourceDossierId, targetPeriodId, label || "") }),
+    "dossiers",
+    "clone"
+  ));
+  ipcMain.handle("segments:upsert", (_event, dossierId, input) => safeResponse(
+    () => ({ ok: true, segment: processHub.upsertSegment(userData(), dossierId, input || {}) }),
+    "segments",
+    "upsert"
+  ));
+
+  ipcMain.handle("master-data:set", (_event, dossierId, input) => safeResponse(
+    () => ({ ok: true, item: processHub.setMasterData(userData(), dossierId, input || {}) }),
+    "master-data",
+    "set"
+  ));
+
+  ipcMain.handle("data-imports:add", async (_event, dossierId, scope) => {
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "Importar datos al expediente",
+      properties: ["openFile"],
+      filters: filtersFor("data")
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      return { ok: true, dataImport: dataIngestion.importDataFile(userData(), dossierId, selected.filePaths[0], scope || {}) };
+    } catch (error) {
+      return failure("data-imports", "add", error);
+    }
+  });
+  ipcMain.handle("data-imports:list", (_event, dossierId) => safeResponse(
+    () => ({ ok: true, imports: dataIngestion.listImports(userData(), dossierId) }),
+    "data-imports",
+    "list"
+  ));
+  ipcMain.handle("knowledge:add", async (_event, dossierId, options) => {
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "Agregar fuente institucional",
+      properties: ["openFile"],
+      filters: [{ name: "Fuentes institucionales", extensions: ["pdf", "docx", "txt", "md", "json"] }]
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      return { ok: true, source: await knowledgeSources.importKnowledgeSource(userData(), dossierId, selected.filePaths[0], options || {}) };
+    } catch (error) {
+      return failure("knowledge", "add", error);
+    }
+  });
+  ipcMain.handle("knowledge:list", (_event, dossierId) => safeResponse(
+    () => ({ ok: true, sources: knowledgeSources.listKnowledgeSources(userData(), dossierId) }),
+    "knowledge",
+    "list"
+  ));
+  ipcMain.handle("knowledge:remove", (_event, sourceId) => safeResponse(
+    () => ({ ok: true, result: knowledgeSources.deactivateSource(userData(), sourceId) }),
+    "knowledge",
+    "remove"
+  ));
+  ipcMain.handle("data-imports:mapping", (_event, importId, mapping) => safeResponse(
+    () => ({ ok: true, dataImport: dataIngestion.setMapping(userData(), importId, mapping || {}) }),
+    "data-imports",
+    "mapping"
+  ));
+  ipcMain.handle("data-query", (_event, dossierId, query) => safeResponse(
+    () => ({ ok: true, result: dataIngestion.queryData(userData(), dossierId, query || {}) }),
+    "data",
+    "query"
+  ));
+  ipcMain.handle("data-summary", (_event, dossierId, query) => safeResponse(
+    () => ({ ok: true, result: dataIngestion.summarize(userData(), dossierId, query || {}) }),
+    "data",
+    "summary"
+  ));
+
+  ipcMain.handle("instances:ensure", (_event, dossierId, engineId, scope) => safeResponse(
+    () => ({ ok: true, instance: processHub.ensureDocumentInstance(userData(), dossierId, engineId, scope || {}) }),
+    "instances",
+    "ensure"
+  ));
+  ipcMain.handle("instances:get", (_event, instanceId) => safeResponse(
+    () => ({ ok: true, instance: processHub.getDocumentInstance(userData(), instanceId) }),
+    "instances",
+    "get"
+  ));
+  ipcMain.handle("instances:list", (_event, dossierId) => safeResponse(
+    () => ({ ok: true, instances: processHub.listDocumentInstances(userData(), dossierId) }),
+    "instances",
+    "list"
+  ));
+  ipcMain.handle("instances:update-section", (_event, instanceId, sectionKey, patch) => safeResponse(
+    () => ({ ok: true, instance: processHub.updateSection(userData(), instanceId, sectionKey, patch || {}) }),
+    "instances",
+    "update-section"
+  ));
+  ipcMain.handle("instances:freeze", (_event, instanceId) => safeResponse(
+    () => ({ ok: true, instance: processHub.freezeFinal(userData(), instanceId) }),
+    "instances",
+    "freeze"
+  ));
+  ipcMain.handle("instances:working-copy", (_event, instanceId) => safeResponse(
+    () => ({ ok: true, instance: processHub.createWorkingCopy(userData(), instanceId) }),
+    "instances",
+    "working-copy"
+  ));
+
+  ipcMain.handle("ai-providers:list", () => safeResponse(
+    () => ({ ok: true, providers: aiProviders.listProviders(userData(), true) }),
+    "ai-providers",
+    "list"
+  ));
+  ipcMain.handle("ai-providers:save", (_event, input) => safeResponse(
+    () => ({ ok: true, provider: aiProviders.saveProvider(userData(), input || {}) }),
+    "ai-providers",
+    "save"
+  ));
+  ipcMain.handle("ai-providers:delete", (_event, providerId) => safeResponse(
+    () => ({ ok: true, result: aiProviders.deleteProvider(userData(), providerId) }),
+    "ai-providers",
+    "delete"
+  ));
+  ipcMain.handle("ai-providers:test", async (_event, providerId) => {
+    try {
+      return { ok: true, result: await aiProviders.testProvider(userData(), providerId) };
+    } catch (error) {
+      return failure("ai-providers", "test", error);
+    }
+  });
+
+  ipcMain.handle("ai-engine:generate-section", async (_event, instanceId, sectionKey, options) => {
+    try {
+      return { ok: true, instance: await aiOrchestrator.generateSection(userData(), instanceId, sectionKey, options || {}) };
+    } catch (error) {
+      return failure("ai-engine", "generate-section", error);
+    }
+  });
+  ipcMain.handle("ai-engine:generate-document", async (_event, instanceId, options) => {
+    try {
+      return { ok: true, instance: await aiOrchestrator.generateDocument(userData(), instanceId, options || {}) };
+    } catch (error) {
+      return failure("ai-engine", "generate-document", error);
+    }
+  });
+  ipcMain.handle("ai-engine:regenerate-stale", async (_event, instanceId, options) => {
+    try {
+      return { ok: true, instance: await aiOrchestrator.regenerateStale(userData(), instanceId, options || {}) };
+    } catch (error) {
+      return failure("ai-engine", "regenerate-stale", error);
+    }
+  });
+
+  ipcMain.handle("document-export:v3", async (_event, instanceId, options) => {
+    try {
+      const result = draftExport.exportInstance(userData(), instanceId, options || {}, __dirname);
+      const preferred = result.outputs.find((item) => item.type === "pdf")
+        || result.outputs.find((item) => item.type === "docx")
+        || result.outputs[0];
+      if (preferred && preferred.path) await shell.openPath(preferred.path);
+      return { ok: true, result };
+    } catch (error) {
+      return failure("document-export", "v3", error);
+    }
+  });
 
   ipcMain.handle("projects:create", (_event, meta) => safeResponse(() => {
     const input = Object.assign({}, meta || {});
@@ -438,6 +646,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   const db = database.openDatabase(userData());
   database.seedCatalogIfEmpty(db, catalog);
+  processHub.ensureSchema(db);
   try {
     migrateLegacy(db, database.workspaceRoot(userData()));
     workspace.backfillObjectStore(userData());
