@@ -286,13 +286,38 @@ function summarize(userDataPath, dossierId, query) {
 }
 
 function aiSlice(userDataPath, dossierId, query) {
-  const summary = summarize(userDataPath, dossierId, query || {});
-  const sample = queryData(userDataPath, dossierId, Object.assign({}, query || {}, { limit: Math.min(Number(query && query.sampleLimit || 30), 100) }));
+  const input = query || {};
+  const summary = summarize(userDataPath, dossierId, input);
+  const privacyMinGroup = Math.max(2, Number(input.privacyMinGroup || 5));
+  const safePercentages = {};
+  Object.entries(summary.percentages || {}).forEach(([field, items]) => {
+    safePercentages[field] = (items || []).map((item) => ({
+      value: item.count < privacyMinGroup ? "Grupo protegido" : item.value,
+      percentage: item.count < privacyMinGroup ? null : item.percentage,
+      suppressed: item.count < privacyMinGroup
+    }));
+  });
+  const safeNumeric = {};
+  Object.entries(summary.numeric || {}).forEach(([field, item]) => {
+    safeNumeric[field] = {
+      min: item.count < privacyMinGroup ? null : item.min,
+      max: item.count < privacyMinGroup ? null : item.max,
+      average: item.count < privacyMinGroup ? null : item.average,
+      suppressed: item.count < privacyMinGroup
+    };
+  });
+  const sample = input.includeSampleRows === true
+    ? queryData(userDataPath, dossierId, Object.assign({}, input, { limit: Math.min(Number(input.sampleLimit || 20), 50) }))
+    : { rows: [] };
   return {
-    filters: query && query.where || [],
-    summary,
+    filters: input.where || [],
+    summary: {
+      percentages: safePercentages,
+      numeric: safeNumeric,
+      protectedMinimumGroupSize: privacyMinGroup
+    },
     sampleRows: sample.rows,
-    note: "Las métricas fueron calculadas por la aplicación. La IA debe interpretarlas, no recalcularlas."
+    note: "Las métricas fueron calculadas por la aplicación. La IA debe interpretarlas, no recalcularlas. Los grupos pequeños están protegidos."
   };
 }
 
