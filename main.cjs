@@ -22,6 +22,7 @@ const dataIngestion = require("./src/main/data-ingestion-service.cjs");
 const aiProviders = require("./src/main/ai-provider-service.cjs");
 const aiOrchestrator = require("./src/main/ai-orchestrator.cjs");
 const draftExport = require("./src/main/draft-export-service.cjs");
+const knowledgeSources = require("./src/main/knowledge-source-service.cjs");
 
 let mainWindow = null;
 
@@ -128,6 +129,7 @@ function registerIpc() {
       segments: processHub.listSegments(userData(), dossierId),
       masterData: processHub.listMasterData(userData(), dossierId),
       imports: dataIngestion.listImports(userData(), dossierId),
+      knowledgeSources: knowledgeSources.listKnowledgeSources(userData(), dossierId),
       instances: processHub.listDocumentInstances(userData(), dossierId)
     }),
     "dossiers",
@@ -137,6 +139,11 @@ function registerIpc() {
     () => ({ ok: true, dossier: processHub.createDossier(userData(), input || {}) }),
     "dossiers",
     "create"
+  ));
+  ipcMain.handle("dossiers:clone", (_event, sourceDossierId, targetPeriodId, label) => safeResponse(
+    () => ({ ok: true, dossier: processHub.cloneDossierToPeriod(userData(), sourceDossierId, targetPeriodId, label || "") }),
+    "dossiers",
+    "clone"
   ));
   ipcMain.handle("segments:upsert", (_event, dossierId, input) => safeResponse(
     () => ({ ok: true, segment: processHub.upsertSegment(userData(), dossierId, input || {}) }),
@@ -167,6 +174,29 @@ function registerIpc() {
     () => ({ ok: true, imports: dataIngestion.listImports(userData(), dossierId) }),
     "data-imports",
     "list"
+  ));
+  ipcMain.handle("knowledge:add", async (_event, dossierId, options) => {
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "Agregar fuente institucional",
+      properties: ["openFile"],
+      filters: [{ name: "Fuentes institucionales", extensions: ["pdf", "docx", "txt", "md", "json"] }]
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      return { ok: true, source: await knowledgeSources.importKnowledgeSource(userData(), dossierId, selected.filePaths[0], options || {}) };
+    } catch (error) {
+      return failure("knowledge", "add", error);
+    }
+  });
+  ipcMain.handle("knowledge:list", (_event, dossierId) => safeResponse(
+    () => ({ ok: true, sources: knowledgeSources.listKnowledgeSources(userData(), dossierId) }),
+    "knowledge",
+    "list"
+  ));
+  ipcMain.handle("knowledge:remove", (_event, sourceId) => safeResponse(
+    () => ({ ok: true, result: knowledgeSources.deactivateSource(userData(), sourceId) }),
+    "knowledge",
+    "remove"
   ));
   ipcMain.handle("data-imports:mapping", (_event, importId, mapping) => safeResponse(
     () => ({ ok: true, dataImport: dataIngestion.setMapping(userData(), importId, mapping || {}) }),
