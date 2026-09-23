@@ -141,6 +141,7 @@ function importDataFile(userDataPath, dossierId, sourcePath, scope) {
     action: "import",
     detail: { sourceName: path.basename(sourcePath), sha256: hash, sheets: profiles }
   });
+  hub.markDossierStale(userDataPath, dossierId, `Se importaron datos nuevos: ${path.basename(sourcePath)}`);
   return getImport(userDataPath, importId);
 }
 
@@ -184,6 +185,7 @@ function setMapping(userDataPath, importId, mapping) {
     action: "map",
     detail: { mapping: mapping || {} }
   });
+  hub.markDossierStale(userDataPath, current.dossierId, `Cambió el mapeo de datos: ${current.sourceName}`);
   return getImport(userDataPath, importId);
 }
 
