@@ -143,3 +143,157 @@ El protocolo vigente es `ITSQMET-DOCUMENTO-V2`. Permite importar campos/redaccio
 ## Limpieza de IA interna
 
 Desde la versión 2.8.1 la generación funciona exclusivamente con IA externa. La migración de esquema v6 normaliza los modos históricos a `external` y elimina la antigua tabla de proveedores internos, incluida cualquier credencial que hubiera quedado almacenada allí.
+
+
+# Arquitectura v3 · Períodos, expedientes y motores
+
+## Capas
+
+La arquitectura v3 no elimina `projects → project_fields`; la mantiene para compatibilidad con las plantillas existentes. Añade una capa superior:
+
+```text
+periods_v3
+  └── dossiers_v3
+       ├── dossier_segments_v3
+       ├── master_data_v3
+       ├── data_imports_v3 → data_sheets_v3
+       ├── knowledge_sources_v3
+       └── document_instances_v3
+            ├── document_sections_v3
+            └── ai_jobs_v3
+```
+
+La auditoría se guarda en `audit_events_v3`.
+
+## Período
+
+Representa el marco temporal. Los datos de un período nunca se mezclan automáticamente con otro.
+
+## Expediente
+
+Un expediente representa un proceso dentro de un período. Ejemplos:
+
+- Formación docente.
+- Capacitación docente.
+- Titulación · Regulares.
+- Titulación · PVC.
+- Construcción Curricular Continua.
+- Plan individual.
+
+PVC y Regulares tienen expedientes separados.
+
+## Datos maestros
+
+`master_data_v3` contiene información que varios documentos reutilizan, como carreras, sedes, responsables, reglas o cronogramas. Cada modificación incrementa su revisión y conserva el valor anterior en `master_data_history_v3`.
+
+Un cambio de dato maestro marca los borradores relacionados como desactualizados. Las versiones finales congeladas no se modifican.
+
+## Cardinalidad
+
+Cada motor declara su cardinalidad:
+
+- `period`
+- `period_population`
+- `period_segment`
+- `student`
+- `career`
+- `career_level`
+- `career_session`
+- `activity`
+- `person`
+
+Esto permite convivir, por ejemplo, con un cronograma de Superiores y otro de Universitarios en el mismo período, o con un reporte de antiplagio por estudiante.
+
+## Motores independientes
+
+`document-engine-registry.cjs` define cada motor con:
+
+- documento asociado;
+- versión;
+- familia;
+- población;
+- cardinalidad;
+- dependencias;
+- reglas;
+- puntos y subpuntos/secciones.
+
+Compartir datos no implica compartir reglas de construcción.
+
+## Secciones
+
+Cada sección tiene estado independiente:
+
+- `pending`
+- `generated`
+- `reviewed`
+- `edited`
+- `approved`
+
+Una sección aprobada queda bloqueada frente a regeneraciones automáticas. La edición humana prevalece.
+
+## Dependencias
+
+Los motores declaran dependencias. Cuando cambia una sección de un documento fuente o se aprueba una nueva versión final, solo los documentos dependientes no congelados quedan marcados como desactualizados.
+
+## Importación universal
+
+`data-ingestion-service.cjs` acepta Excel/CSV sin exigir todavía una plantilla de columnas. Conserva el archivo original y SHA-256, detecta hojas, columnas, tipos y filas y permite consultas determinísticas.
+
+Los cálculos y filtros se ejecutan en la aplicación; la IA recibe únicamente un subconjunto preparado.
+
+## Privacidad
+
+Los resúmenes enviados a IA:
+
+- omiten conteos absolutos por defecto;
+- priorizan porcentajes;
+- suprimen grupos menores al umbral de privacidad;
+- no incluyen filas individuales salvo que un motor lo solicite explícitamente.
+
+## Fuentes institucionales
+
+`knowledge-source-service.cjs` conserva fuentes institucionales por expediente. Base Legal y Alineación Institucional recuperan contexto desde estas fuentes antes de redactar.
+
+## IA
+
+`ai-provider-service.cjs` admite:
+
+- OpenAI-compatible;
+- Anthropic.
+
+Las claves se cifran con `safeStorage` de Electron o pueden leerse desde variables de entorno.
+
+`ai-orchestrator.cjs`:
+
+1. elige una IA redactora;
+2. intenta una alternativa si falla;
+3. genera una sección;
+4. ejecuta revisión;
+5. incorpora correcciones y alertas;
+6. guarda trazabilidad;
+7. continúa con la siguiente sección.
+
+Una sola IA puede actuar como redactora y revisora. IAs adicionales pueden funcionar como revisores.
+
+## Versiones finales
+
+Al aprobar una versión final se guarda un snapshot con:
+
+- versión del motor;
+- ámbito;
+- datos maestros;
+- secciones;
+- trazabilidad;
+- fecha.
+
+Los cambios posteriores no alteran el snapshot final.
+
+## Exportaciones
+
+`draft-export-service.cjs` genera borradores por sección, selección o documento completo. Los borradores incluyen alertas. La versión final no las muestra.
+
+En Windows se utiliza Microsoft Word mediante PowerShell para producir DOCX/PDF. Si Word no está disponible, HTML queda como salida segura y LibreOffice puede actuar como conversor cuando esté instalado.
+
+## Reutilización entre períodos
+
+Un expediente puede copiar su estructura y datos maestros al período siguiente. Los valores copiados quedan marcados como heredados y no verificados para evitar que información histórica se tome automáticamente como vigente.
