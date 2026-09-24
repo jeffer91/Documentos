@@ -4,6 +4,7 @@ const { workspaceRoot } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
 const { extractAttachment } = require("./source-service.cjs");
 const hub = require("./process-hub-service.cjs");
+const citations = require("./citation-service.cjs");
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -115,7 +116,9 @@ async function importKnowledgeSource(userDataPath, dossierId, sourcePath, option
     detail: { name: path.basename(target), sha256: hash, sourceType: options && options.sourceType || "institutional", tags }
   });
   hub.markDossierStale(userDataPath, dossierId, `Se agregó una fuente institucional: ${path.basename(target)}`);
-  return getKnowledgeSource(userDataPath, sourceId);
+  const source = getKnowledgeSource(userDataPath, sourceId);
+  citations.ensureCitationForSource(userDataPath, dossierId, source);
+  return source;
 }
 
 function getKnowledgeSource(userDataPath, sourceId) {
@@ -157,15 +160,20 @@ function searchKnowledge(userDataPath, dossierId, query, limit) {
     return { row, score };
   }).sort((a, b) => b.score - a.score || String(b.row.created_at).localeCompare(String(a.row.created_at)));
 
-  return ranked.slice(0, Math.max(1, Math.min(Number(limit || 5), 10))).map(({ row, score }) => ({
-    id: row.id,
-    name: row.name,
-    sourceType: row.source_type,
-    sha256: row.sha256,
-    tags: (() => { try { return JSON.parse(row.tags_json || "[]"); } catch (_error) { return []; } })(),
-    score,
-    excerpt: snippet(row.extracted_text, terms)
-  }));
+  return ranked.slice(0, Math.max(1, Math.min(Number(limit || 5), 10))).map(({ row, score }) => {
+    const citation = citations.getCitationBySource(userDataPath, dossierId, row.id);
+    return {
+      id: row.id,
+      name: row.name,
+      sourceType: row.source_type,
+      sha256: row.sha256,
+      tags: (() => { try { return JSON.parse(row.tags_json || "[]"); } catch (_error) { return []; } })(),
+      citationKey: citation ? citation.citationKey : `SRC:${row.id}`,
+      citationComplete: Boolean(citation && citation.complete),
+      score,
+      excerpt: snippet(row.extracted_text, terms)
+    };
+  });
 }
 
 function deactivateSource(userDataPath, sourceId) {

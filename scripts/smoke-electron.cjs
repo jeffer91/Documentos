@@ -11,6 +11,10 @@ const { applyCalculations } = require("../src/main/calculation-service.cjs");
 const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
 const templateRequirements = require("../src/main/template-requirements.cjs");
 const templateService = require("../src/main/template-service.cjs");
+const processHub = require("../src/main/process-hub-service.cjs");
+const editorial = require("../src/main/editorial-structure-service.cjs");
+const visualRenderer = require("../src/main/visual-renderer-service.cjs");
+const citationService = require("../src/main/citation-service.cjs");
 const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
 const catalog = require("../src/renderer/catalog.js");
@@ -535,6 +539,72 @@ async function run() {
     assert.strictEqual(calculation.project.formData.TOTAL, 100);
     assert.strictEqual(calculation.project.formData.APROBACION, 90);
 
+    // Arquitectura editorial v4
+    processHub.ensureSchema(db);
+    const sectionColumns = db.prepare("PRAGMA table_info(document_sections_v3)").all().map((item) => item.name);
+    assert.ok(sectionColumns.includes("parent_key"));
+    assert.ok(sectionColumns.includes("section_level"));
+    assert.ok(sectionColumns.includes("numbering"));
+    assert.strictEqual(
+      db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='document_blocks_v4'").get().total,
+      1
+    );
+
+    const periodV4 = processHub.createPeriod(temp, { code: "SMOKE-V4", label: "Smoke V4" });
+    const dossierV4 = processHub.createDossier(temp, {
+      periodId: periodV4.id,
+      processKey: "titulacion_regular",
+      population: "regular",
+      label: "Titulación Regular Smoke"
+    });
+    let instanceV4 = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
+      type: "period_population",
+      key: "regular"
+    });
+    assert.ok(instanceV4.sections.some((item) => item.key === "ANALISIS_RESULTADOS"));
+    assert.ok(instanceV4.sections.some((item) => item.key === "RESUMEN_EJECUTIVO"));
+    assert.ok(instanceV4.sections.every((item) => Number(item.level || 0) >= 1));
+    assert.ok(instanceV4.sections.filter((item) => item.level === 1).every((item) => item.pageBreakBefore === true));
+
+    const blockResult = processHub.setSectionBlocks(temp, instanceV4.id, "RESULTADOS", [
+      { type: "prose", role: "context", text: "La tabla siguiente presenta el resultado consolidado del período analizado." },
+      { type: "table", title: "Resultado consolidado", data: { headers: ["Indicador", "Porcentaje"], rows: [["Cumplimiento", "85%"]] } },
+      { type: "prose", role: "analysis", text: "El porcentaje evidencia un nivel de cumplimiento alto respecto del criterio observado." }
+    ]);
+    assert.strictEqual(blockResult.validation.ok, true);
+    instanceV4 = processHub.getDocumentInstance(temp, instanceV4.id);
+    const resultsSection = instanceV4.sections.find((item) => item.key === "RESULTADOS");
+    assert.strictEqual(resultsSection.blocks.length, 3);
+    assert.strictEqual(resultsSection.blocks[1].type, "table");
+
+    const orphanValidation = editorial.validateSectionBlocks(
+      { title: "Prueba", type: "data_ai", allowedVisuals: [] },
+      [{ type: "table", title: "Tabla aislada", data: { headers: ["A"], rows: [["1"]] } }]
+    );
+    assert.strictEqual(orphanValidation.ok, false);
+
+    const visualSvg = visualRenderer.renderSvg("cards", {
+      title: "Núcleos",
+      items: [
+        { title: "Núcleo 1", value: "85%" },
+        { title: "Núcleo 2", value: "88%" },
+        { title: "Núcleo 3", value: "91%" },
+        { title: "Núcleo 4", value: "87%" }
+      ]
+    });
+    assert.ok(visualSvg.includes("<svg"));
+    assert.ok(visualSvg.includes("Núcleo 4"));
+
+    const citationV4 = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "SRC:SMOKE",
+      sourceType: "institutional",
+      corporateAuthor: "Institución de prueba",
+      year: "2026",
+      title: "Reglamento de prueba"
+    });
+    assert.strictEqual(citationV4.complete, true);
+    assert.ok(citationService.formatReference(citationV4).includes("2026"));
+
     errorService.record(temp, {
       module: "smoke",
       action: "test",
@@ -550,7 +620,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite v6, catálogo, secciones Word, requisitos, SYS, IA externa V2, DATOS completos, cálculos, integridad, versiones, errores y respaldo."
+      "SMOKE OK: Electron, SQLite v6, catálogo, arquitectura v4, jerarquía, bloques, visuales, APA/citas, IA, cálculos, integridad, versiones y respaldo."
     );
   } finally {
     database.closeAll();

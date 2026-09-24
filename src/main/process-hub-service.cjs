@@ -1,6 +1,8 @@
 const crypto = require("crypto");
 const { openDatabase, queueSync } = require("./database-service.cjs");
 const registry = require("./document-engine-registry.cjs");
+const editorial = require("./editorial-structure-service.cjs");
+const citations = require("./citation-service.cjs");
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -14,6 +16,11 @@ function json(value, fallback) {
   if (value == null || value === "") return fallback;
   if (typeof value === "object") return value;
   try { return JSON.parse(value); } catch (_error) { return fallback; }
+}
+
+function ensureColumn(db, table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((item) => item.name);
+  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function ensureSchema(db) {
@@ -156,6 +163,32 @@ function ensureSchema(db) {
       FOREIGN KEY(import_id) REFERENCES data_imports_v3(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS document_blocks_v4 (
+      id TEXT PRIMARY KEY,
+      section_id TEXT NOT NULL,
+      block_key TEXT NOT NULL,
+      block_order INTEGER NOT NULL DEFAULT 0,
+      block_type TEXT NOT NULL DEFAULT 'prose',
+      role TEXT NOT NULL DEFAULT 'body',
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      caption TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      visual_type TEXT NOT NULL DEFAULT '',
+      data_json TEXT NOT NULL DEFAULT '{}',
+      provenance_json TEXT NOT NULL DEFAULT '{}',
+      alerts_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'generated',
+      locked INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(section_id) REFERENCES document_sections_v3(id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_document_blocks_v4_unique
+      ON document_blocks_v4(section_id, block_key);
+    CREATE INDEX IF NOT EXISTS idx_document_blocks_v4_order
+      ON document_blocks_v4(section_id, block_order);
+
     CREATE TABLE IF NOT EXISTS ai_jobs_v3 (
       id TEXT PRIMARY KEY,
       instance_id TEXT NOT NULL,
@@ -188,6 +221,14 @@ function ensureSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_ai_jobs_v3_instance
       ON ai_jobs_v3(instance_id, created_at);
   `);
+
+  ensureColumn(db, "document_sections_v3", "parent_key", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "section_level", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "document_sections_v3", "sort_path", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "numbering", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "page_break_before", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "document_sections_v3", "keep_with_next", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "document_sections_v3", "layout_json", "TEXT NOT NULL DEFAULT '{}'");
 }
 
 function dbFor(userDataPath) {
@@ -465,13 +506,40 @@ function listMasterData(userDataPath, dossierId) {
 
 function ensureSections(db, instanceId, engine) {
   const ts = now();
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO document_sections_v3
-      (id, instance_id, section_key, section_order, title, section_type, status, content, data_json, provenance_json, alerts_json, locked, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?)
+  const sections = editorial.flattenSections(engine.sections || []);
+  const upsert = db.prepare(`
+    INSERT INTO document_sections_v3
+      (id, instance_id, section_key, section_order, title, section_type, status, content, data_json, provenance_json, alerts_json, locked,
+       parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next, layout_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(instance_id, section_key) DO UPDATE SET
+      section_order = excluded.section_order,
+      title = excluded.title,
+      section_type = excluded.section_type,
+      parent_key = excluded.parent_key,
+      section_level = excluded.section_level,
+      sort_path = excluded.sort_path,
+      numbering = excluded.numbering,
+      page_break_before = excluded.page_break_before,
+      keep_with_next = excluded.keep_with_next,
+      layout_json = excluded.layout_json,
+      updated_at = excluded.updated_at
   `);
-  (engine.sections || []).forEach((sectionItem) => {
-    insert.run(id("section"), instanceId, sectionItem.key, sectionItem.order || 0, sectionItem.title, sectionItem.type, ts, ts);
+  sections.forEach((sectionItem, index) => {
+    const layout = {
+      required: sectionItem.required !== false,
+      allowedVisuals: sectionItem.allowedVisuals || [],
+      derivedFrom: sectionItem.derivedFrom || [],
+      maxWords: sectionItem.maxWords || null,
+      compact: Boolean(sectionItem.compact),
+      layout: sectionItem.layout || {}
+    };
+    upsert.run(
+      id("section"), instanceId, sectionItem.key, index + 1, sectionItem.title, sectionItem.type,
+      sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
+      sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0, sectionItem.keepWithNext === false ? 0 : 1,
+      JSON.stringify(layout), ts, ts
+    );
   });
 }
 
@@ -504,18 +572,59 @@ function ensureDocumentInstance(userDataPath, dossierId, engineId, scope) {
   return getDocumentInstance(userDataPath, row.id);
 }
 
-function rowToSection(row) {
+function rowToBlock(row) {
+  return {
+    id: row.id,
+    key: row.block_key,
+    order: row.block_order,
+    type: row.block_type,
+    role: row.role,
+    title: row.title || "",
+    text: row.content || "",
+    caption: row.caption || "",
+    note: row.note || "",
+    visualType: row.visual_type || "",
+    data: json(row.data_json, {}),
+    provenance: json(row.provenance_json, {}),
+    alerts: json(row.alerts_json, []),
+    status: row.status,
+    locked: Boolean(row.locked),
+    updatedAt: row.updated_at
+  };
+}
+
+function listBlocksForSection(db, sectionId) {
+  return db.prepare("SELECT * FROM document_blocks_v4 WHERE section_id = ? ORDER BY block_order, id")
+    .all(sectionId)
+    .map(rowToBlock);
+}
+
+function rowToSection(row, db) {
+  const layout = json(row.layout_json, {});
   return {
     id: row.id,
     key: row.section_key,
     order: row.section_order,
     title: row.title,
     type: row.section_type,
+    parentKey: row.parent_key || "",
+    level: Number(row.section_level || 1),
+    sortPath: row.sort_path || "",
+    numbering: row.numbering || "",
+    pageBreakBefore: Boolean(row.page_break_before),
+    keepWithNext: row.keep_with_next !== 0,
+    required: layout.required !== false,
+    allowedVisuals: Array.isArray(layout.allowedVisuals) ? layout.allowedVisuals : [],
+    derivedFrom: Array.isArray(layout.derivedFrom) ? layout.derivedFrom : [],
+    maxWords: layout.maxWords || null,
+    compact: Boolean(layout.compact),
+    layout: layout.layout || {},
     status: row.status,
     content: row.content || "",
     data: json(row.data_json, {}),
     provenance: json(row.provenance_json, {}),
     alerts: json(row.alerts_json, []),
+    blocks: db ? listBlocksForSection(db, row.id) : [],
     locked: Boolean(row.locked),
     generatedAt: row.generated_at,
     updatedAt: row.updated_at
@@ -526,7 +635,7 @@ function getDocumentInstance(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
   if (!row) return null;
-  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? ORDER BY section_order, id").all(instanceId).map(rowToSection);
+  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
   const engine = registry.getEngine(row.engine_id);
   return {
     id: row.id,
@@ -556,6 +665,81 @@ function listDocumentInstances(userDataPath, dossierId) {
     .map((row) => getDocumentInstance(userDataPath, row.id));
 }
 
+function replaceSectionBlocks(db, sectionId, blocks) {
+  const normalized = editorial.normalizeBlocks(blocks || []);
+  const lockedRows = db.prepare("SELECT block_key FROM document_blocks_v4 WHERE section_id = ? AND locked = 1").all(sectionId);
+  const lockedKeys = new Set(lockedRows.map((row) => row.block_key));
+  db.prepare("DELETE FROM document_blocks_v4 WHERE section_id = ? AND locked = 0").run(sectionId);
+  const ts = now();
+  const insert = db.prepare(`
+    INSERT INTO document_blocks_v4
+      (id, section_id, block_key, block_order, block_type, role, title, content, caption, note, visual_type,
+       data_json, provenance_json, alerts_json, status, locked, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(section_id, block_key) DO UPDATE SET
+      block_order = excluded.block_order,
+      block_type = excluded.block_type,
+      role = excluded.role,
+      title = excluded.title,
+      content = excluded.content,
+      caption = excluded.caption,
+      note = excluded.note,
+      visual_type = excluded.visual_type,
+      data_json = excluded.data_json,
+      provenance_json = excluded.provenance_json,
+      alerts_json = excluded.alerts_json,
+      status = excluded.status,
+      locked = excluded.locked,
+      updated_at = excluded.updated_at
+  `);
+  normalized.forEach((block, index) => {
+    if (lockedKeys.has(block.key)) return;
+    insert.run(
+      id("block"), sectionId, block.key, index + 1, block.type, block.role, block.title || "", block.text || "",
+      block.caption || "", block.note || "", block.visualType || "", JSON.stringify(block.data || {}),
+      JSON.stringify(block.provenance || {}), JSON.stringify(block.alerts || []), block.status || "generated",
+      block.locked ? 1 : 0, ts, ts
+    );
+  });
+  return listBlocksForSection(db, sectionId);
+}
+
+function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
+  const db = dbFor(userDataPath);
+  const instance = getDocumentInstance(userDataPath, instanceId);
+  if (!instance) throw new Error("Documento no válido.");
+  if (instance.finalFrozenAt) throw new Error("La versión final está congelada.");
+  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ?").get(instanceId, sectionKey);
+  if (!sectionRow) throw new Error("Sección no válida.");
+  const normalized = editorial.normalizeBlocks(blocks || []);
+  const validation = editorial.validateSectionBlocks(rowToSection(sectionRow, db), normalized);
+  const updatedBlocks = replaceSectionBlocks(db, sectionRow.id, normalized);
+  const content = editorial.plainTextFromBlocks(updatedBlocks);
+  const ts = now();
+  const currentProvenance = json(sectionRow.provenance_json, {});
+  db.prepare(`
+    UPDATE document_sections_v3
+    SET content = ?, status = 'edited', provenance_json = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    content,
+    JSON.stringify(Object.assign({}, currentProvenance, { blockEditedBy: "human", blockEditedAt: ts })),
+    ts,
+    sectionRow.id
+  );
+  db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
+  audit(db, {
+    dossierId: instance.dossierId,
+    instanceId,
+    entityType: "section_blocks",
+    entityId: sectionKey,
+    action: "replace",
+    detail: { blockCount: updatedBlocks.length, errors: validation.errors, warnings: validation.warnings }
+  });
+  markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Cambió ${instance.label}: ${sectionKey}`);
+  return { blocks: updatedBlocks, validation, instance: getDocumentInstance(userDataPath, instanceId) };
+}
+
 function updateSection(userDataPath, instanceId, sectionKey, patch) {
   const db = dbFor(userDataPath);
   const instance = getDocumentInstance(userDataPath, instanceId);
@@ -565,12 +749,18 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   if (!current) throw new Error("Sección no válida.");
   if (current.locked && patch && patch.force !== true) throw new Error("La sección está aprobada y bloqueada.");
   const ts = now();
-  const content = patch && Object.prototype.hasOwnProperty.call(patch, "content") ? String(patch.content || "") : current.content;
-  const status = String(patch && patch.status || (content ? "edited" : current.status));
+  let content = patch && Object.prototype.hasOwnProperty.call(patch, "content") ? String(patch.content || "") : current.content;
   const data = patch && Object.prototype.hasOwnProperty.call(patch, "data") ? patch.data : json(current.data_json, {});
   const provenance = patch && Object.prototype.hasOwnProperty.call(patch, "provenance") ? patch.provenance : json(current.provenance_json, {});
   const alerts = patch && Object.prototype.hasOwnProperty.call(patch, "alerts") ? patch.alerts : json(current.alerts_json, []);
   const locked = patch && Object.prototype.hasOwnProperty.call(patch, "locked") ? Boolean(patch.locked) : Boolean(current.locked);
+  if (patch && Object.prototype.hasOwnProperty.call(patch, "blocks")) {
+    const blockResult = replaceSectionBlocks(db, current.id, patch.blocks || []);
+    if (!Object.prototype.hasOwnProperty.call(patch, "content")) {
+      content = editorial.plainTextFromBlocks(blockResult);
+    }
+  }
+  const status = String(patch && patch.status || (content ? "edited" : current.status));
   db.prepare(`
     UPDATE document_sections_v3
     SET content = ?, status = ?, data_json = ?, provenance_json = ?, alerts_json = ?, locked = ?, generated_at = ?, updated_at = ?
@@ -591,6 +781,15 @@ function freezeFinal(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
+  const editorialValidation = editorial.validateDocumentInstance(instance);
+  if (!editorialValidation.ok) {
+    throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
+  }
+  const citationValidation = citations.validateInstanceCitations(userDataPath, instance);
+  if (!citationValidation.ok) {
+    const details = citationValidation.missing.concat(citationValidation.incomplete).slice(0, 6).join(", ");
+    throw new Error(`Completa las citas APA antes de aprobar la versión final: ${details}`);
+  }
   const pendingAlerts = instance.sections.flatMap((sectionItem) => sectionItem.alerts || []).filter((alert) => alert && alert.blocking !== false);
   if (pendingAlerts.length) throw new Error("El borrador todavía tiene alertas pendientes.");
   const snapshot = {
@@ -626,6 +825,7 @@ function createWorkingCopy(userDataPath, instanceId) {
       data: sectionItem.data,
       provenance: sectionItem.provenance,
       alerts: sectionItem.alerts,
+      blocks: sectionItem.blocks || [],
       locked: false,
       force: true
     });
@@ -716,6 +916,7 @@ module.exports = {
   getDocumentInstance,
   listDocumentInstances,
   updateSection,
+  setSectionBlocks,
   freezeFinal,
   createWorkingCopy,
   cloneDossierToPeriod,

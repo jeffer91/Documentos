@@ -362,3 +362,90 @@ El borrador puede exportarse por:
 - documento completo.
 
 Las alertas aparecen en el borrador. La versión final se congela y se exporta sin alertas visibles, manteniendo internamente la trazabilidad.
+
+
+## Motor editorial v4.0.0
+
+La arquitectura v4 añade la capa editorial necesaria para construir documentos institucionales largos sin depender del formato libre de la IA.
+
+### Jerarquía multinivel
+
+Los motores pueden definir niveles ilimitados de títulos y subtítulos:
+
+```text
+1
+1.1
+1.1.1
+1.1.1.1
+...
+```
+
+La numeración se calcula automáticamente. Las secciones de primer nivel inician en página nueva y Word aplica controles para evitar títulos huérfanos y viudas/huérfanas.
+
+### Bloques de contenido
+
+Una sección puede combinar bloques estructurados:
+
+- texto;
+- listas;
+- tablas;
+- figuras e imágenes;
+- herramientas visuales;
+- notas y llamados;
+- referencias.
+
+Las tablas, figuras y herramientas analíticas no pueden quedar aisladas: deben tener contexto previo y análisis posterior.
+
+### Herramientas visuales
+
+El renderer local versionado incluye:
+
+- Ishikawa;
+- FODA;
+- CAME;
+- matriz impacto/esfuerzo;
+- árbol de problemas;
+- árbol de objetivos;
+- mapa de actores;
+- análisis de brechas;
+- flujo de proceso;
+- PESTEL;
+- tarjetas explicativas;
+- barras;
+- líneas.
+
+La IA estructura la información; la aplicación dibuja el visual de forma determinística y consistente.
+
+### APA 7
+
+La salida v4 aplica un perfil APA 7 desde la aplicación:
+
+- Arial 11;
+- márgenes de 2,54 cm;
+- doble espacio en texto;
+- jerarquía de encabezados;
+- numeración automática de tablas y figuras;
+- tablas sin cuadrícula pesada;
+- notas de tabla/figura;
+- referencias con sangría francesa;
+- citas vinculadas a fuentes registradas.
+
+Las fuentes institucionales pueden completar metadatos bibliográficos y utilizar tokens internos de cita. La versión final se bloquea cuando una cita utilizada está incompleta.
+
+### Informes
+
+El perfil de informe incorpora como secciones diferenciadas:
+
+- Resultados;
+- Análisis de resultados;
+- Resumen ejecutivo;
+- Conclusiones;
+- Recomendaciones;
+- Referencias;
+- Anexos.
+
+El resumen ejecutivo deriva de resultados/análisis y está pensado como una síntesis breve de los hallazgos más relevantes.
+
+### Compatibilidad
+
+La arquitectura v4 conserva períodos, expedientes, datos maestros, motores independientes, Excel/CSV, PVC/Regulares y proyectos históricos. El flujo antiguo basado en plantillas Word también recibe controles APA básicos y reglas de paginación.

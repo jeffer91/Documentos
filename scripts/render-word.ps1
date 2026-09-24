@@ -88,6 +88,61 @@ function Insert-Images {
   }
 }
 
+function Apply-ApaBody {
+  param($Document)
+
+  foreach ($sec in @($Document.Sections)) {
+    $sec.TopMargin = 72
+    $sec.BottomMargin = 72
+    $sec.LeftMargin = 72
+    $sec.RightMargin = 72
+  }
+
+  foreach ($p in @($Document.Paragraphs)) {
+    try {
+      $p.Range.Font.Name = "Arial"
+      $p.Range.Font.Size = 11
+      $p.Format.SpaceBefore = 0
+      $p.Format.SpaceAfter = 0
+      $p.Format.WidowControl = -1
+      $outline = [int]$p.OutlineLevel
+
+      if ($outline -ge 1 -and $outline -le 5) {
+        $p.Format.KeepWithNext = -1
+        $p.Format.KeepTogether = -1
+        $p.Format.FirstLineIndent = 0
+        $p.Format.LineSpacingRule = 2
+        $p.Range.Font.Bold = -1
+        if ($outline -eq 1) {
+          $p.Alignment = 1
+          $p.Format.PageBreakBefore = -1
+        } elseif ($outline -eq 3 -or $outline -eq 5) {
+          $p.Range.Font.Italic = -1
+        }
+      } else {
+        $text = ([string]$p.Range.Text).Trim()
+        $p.Format.LineSpacingRule = 2
+        $p.Format.FirstLineIndent = 36
+        if ($text -match '^(Tabla|Figura)\s+\d+') {
+          $p.Format.FirstLineIndent = 0
+          $p.Format.LineSpacingRule = 0
+          $p.Format.KeepWithNext = -1
+        }
+      }
+    } catch {}
+  }
+
+  foreach ($table in @($Document.Tables)) {
+    try {
+      $table.Range.Font.Name = "Arial"
+      $table.Range.Font.Size = 10
+      $table.Range.ParagraphFormat.LineSpacingRule = 0
+      $table.Range.ParagraphFormat.FirstLineIndent = 0
+      $table.Rows.Item(1).HeadingFormat = -1
+    } catch {}
+  }
+}
+
 $job = Get-Content -LiteralPath $JobPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $word = $null
 $document = $null
@@ -119,6 +174,8 @@ try {
       }
     }
   }
+
+  Apply-ApaBody -Document $document
 
   $document.SaveAs2([string]$job.outputDocx, 16)
   $document.ExportAsFixedFormat([string]$job.outputPdf, 17)

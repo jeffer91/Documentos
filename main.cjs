@@ -23,6 +23,10 @@ const aiProviders = require("./src/main/ai-provider-service.cjs");
 const aiOrchestrator = require("./src/main/ai-orchestrator.cjs");
 const draftExport = require("./src/main/draft-export-service.cjs");
 const knowledgeSources = require("./src/main/knowledge-source-service.cjs");
+const editorial = require("./src/main/editorial-structure-service.cjs");
+const visualRenderer = require("./src/main/visual-renderer-service.cjs");
+const citationService = require("./src/main/citation-service.cjs");
+const apa7 = require("./src/main/apa7-service.cjs");
 
 let mainWindow = null;
 
@@ -109,6 +113,12 @@ function registerIpc() {
   ));
 
   ipcMain.handle("engines:list", () => ({ ok: true, engines: engineRegistry.allEngines() }));
+  ipcMain.handle("editorial:capabilities", () => ({
+    ok: true,
+    apaProfile: apa7.PROFILE,
+    visualTools: visualRenderer.listTools(),
+    blockTypes: Array.from(editorial.BLOCK_TYPES)
+  }));
 
   ipcMain.handle("periods:list", () => ({ ok: true, periods: processHub.listPeriods(userData()) }));
   ipcMain.handle("periods:create", (_event, input) => safeResponse(
@@ -130,6 +140,7 @@ function registerIpc() {
       masterData: processHub.listMasterData(userData(), dossierId),
       imports: dataIngestion.listImports(userData(), dossierId),
       knowledgeSources: knowledgeSources.listKnowledgeSources(userData(), dossierId),
+      citations: citationService.listCitations(userData(), dossierId),
       instances: processHub.listDocumentInstances(userData(), dossierId)
     }),
     "dossiers",
@@ -198,6 +209,16 @@ function registerIpc() {
     "knowledge",
     "remove"
   ));
+  ipcMain.handle("citations:list", (_event, dossierId) => safeResponse(
+    () => ({ ok: true, citations: citationService.listCitations(userData(), dossierId) }),
+    "citations",
+    "list"
+  ));
+  ipcMain.handle("citations:save", (_event, dossierId, input) => safeResponse(
+    () => ({ ok: true, citation: citationService.upsertCitation(userData(), dossierId, input || {}) }),
+    "citations",
+    "save"
+  ));
   ipcMain.handle("data-imports:mapping", (_event, importId, mapping) => safeResponse(
     () => ({ ok: true, dataImport: dataIngestion.setMapping(userData(), importId, mapping || {}) }),
     "data-imports",
@@ -220,7 +241,15 @@ function registerIpc() {
     "ensure"
   ));
   ipcMain.handle("instances:get", (_event, instanceId) => safeResponse(
-    () => ({ ok: true, instance: processHub.getDocumentInstance(userData(), instanceId) }),
+    () => {
+      const instance = processHub.getDocumentInstance(userData(), instanceId);
+      return {
+        ok: true,
+        instance,
+        editorialValidation: instance ? editorial.validateDocumentInstance(instance) : null,
+        citationValidation: instance ? citationService.validateInstanceCitations(userData(), instance) : null
+      };
+    },
     "instances",
     "get"
   ));
@@ -233,6 +262,24 @@ function registerIpc() {
     () => ({ ok: true, instance: processHub.updateSection(userData(), instanceId, sectionKey, patch || {}) }),
     "instances",
     "update-section"
+  ));
+  ipcMain.handle("instances:set-blocks", (_event, instanceId, sectionKey, blocks) => safeResponse(
+    () => ({ ok: true, result: processHub.setSectionBlocks(userData(), instanceId, sectionKey, blocks || []) }),
+    "instances",
+    "set-blocks"
+  ));
+  ipcMain.handle("editorial:validate", (_event, instanceId) => safeResponse(
+    () => {
+      const instance = processHub.getDocumentInstance(userData(), instanceId);
+      if (!instance) throw new Error("Documento no válido.");
+      return {
+        ok: true,
+        editorial: editorial.validateDocumentInstance(instance),
+        citations: citationService.validateInstanceCitations(userData(), instance)
+      };
+    },
+    "editorial",
+    "validate"
   ));
   ipcMain.handle("instances:freeze", (_event, instanceId) => safeResponse(
     () => ({ ok: true, instance: processHub.freezeFinal(userData(), instanceId) }),

@@ -1,10 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("documentosApp", {
-  version: "3.0.0",
+  version: "4.0.0",
   getCatalog: () => ipcRenderer.invoke("catalog:get"),
   getArchitectureDashboard: () => ipcRenderer.invoke("architecture:dashboard"),
   listEngines: () => ipcRenderer.invoke("engines:list"),
+  getEditorialCapabilities: () => ipcRenderer.invoke("editorial:capabilities"),
   listPeriods: () => ipcRenderer.invoke("periods:list"),
   createPeriod: (input) => ipcRenderer.invoke("periods:create", input || {}),
   listDossiers: (periodId) => ipcRenderer.invoke("dossiers:list", periodId || ""),
@@ -18,6 +19,8 @@ contextBridge.exposeInMainWorld("documentosApp", {
   addKnowledgeSource: (dossierId, options) => ipcRenderer.invoke("knowledge:add", dossierId, options || {}),
   listKnowledgeSources: (dossierId) => ipcRenderer.invoke("knowledge:list", dossierId),
   removeKnowledgeSource: (sourceId) => ipcRenderer.invoke("knowledge:remove", sourceId),
+  listCitations: (dossierId) => ipcRenderer.invoke("citations:list", dossierId),
+  saveCitation: (dossierId, input) => ipcRenderer.invoke("citations:save", dossierId, input || {}),
   saveDataMapping: (importId, mapping) => ipcRenderer.invoke("data-imports:mapping", importId, mapping || {}),
   queryData: (dossierId, query) => ipcRenderer.invoke("data-query", dossierId, query || {}),
   summarizeData: (dossierId, query) => ipcRenderer.invoke("data-summary", dossierId, query || {}),
@@ -25,6 +28,8 @@ contextBridge.exposeInMainWorld("documentosApp", {
   getDocumentInstance: (instanceId) => ipcRenderer.invoke("instances:get", instanceId),
   listDocumentInstances: (dossierId) => ipcRenderer.invoke("instances:list", dossierId),
   updateDocumentSection: (instanceId, sectionKey, patch) => ipcRenderer.invoke("instances:update-section", instanceId, sectionKey, patch || {}),
+  setDocumentSectionBlocks: (instanceId, sectionKey, blocks) => ipcRenderer.invoke("instances:set-blocks", instanceId, sectionKey, blocks || []),
+  validateEditorialDocument: (instanceId) => ipcRenderer.invoke("editorial:validate", instanceId),
   freezeDocumentInstance: (instanceId) => ipcRenderer.invoke("instances:freeze", instanceId),
   createWorkingCopy: (instanceId) => ipcRenderer.invoke("instances:working-copy", instanceId),
   listAiProviders: () => ipcRenderer.invoke("ai-providers:list"),

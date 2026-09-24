@@ -297,3 +297,76 @@ En Windows se utiliza Microsoft Word mediante PowerShell para producir DOCX/PDF.
 ## Reutilización entre períodos
 
 Un expediente puede copiar su estructura y datos maestros al período siguiente. Los valores copiados quedan marcados como heredados y no verificados para evitar que información histórica se tome automáticamente como vigente.
+
+
+# Arquitectura v4 · Motor editorial
+
+## Extensión compatible del esquema
+
+V4 conserva las tablas v3 y amplía `document_sections_v3` con:
+
+- `parent_key`
+- `section_level`
+- `sort_path`
+- `numbering`
+- `page_break_before`
+- `keep_with_next`
+- `layout_json`
+
+Los bloques estructurados se almacenan en:
+
+```text
+document_instances_v3
+  └── document_sections_v3
+       └── document_blocks_v4
+```
+
+Una migración aditiva crea las columnas faltantes sin eliminar información histórica.
+
+## Bloques editoriales
+
+`document_blocks_v4` admite texto, listas, tablas, figuras, imágenes, herramientas visuales, citas destacadas, llamados y listas de referencias.
+
+Una edición humana de bloques conserva tablas y visuales ya generados; la aplicación mantiene el texto plano de la sección sincronizado para compatibilidad.
+
+## Validación editorial
+
+Antes de congelar una versión final se valida:
+
+1. integridad de la jerarquía;
+2. secciones obligatorias;
+3. tablas con título/datos;
+4. contexto previo a tablas/figuras/visuales;
+5. análisis posterior;
+6. herramientas visuales permitidas por motor;
+7. citas APA usadas y metadatos completos;
+8. alertas bloqueantes.
+
+## Visuales
+
+`visual-renderer-service.cjs` recibe datos estructurados y produce SVG/PNG con renderers versionados. La IA no dibuja libremente.
+
+## APA 7 y Word
+
+`apa7-service.cjs` compone HTML estructurado. `export-draft.ps1` postprocesa Word para aplicar:
+
+- márgenes de una pulgada;
+- Arial 11;
+- doble espacio;
+- controles `KeepWithNext`, `KeepTogether` y `WidowControl`;
+- `PageBreakBefore` en encabezados de primer nivel;
+- sangría francesa en referencias;
+- formato ligero de tablas;
+- control de tamaño y alineación de figuras.
+
+El uso de propiedades de párrafo evita insertar saltos manuales que puedan crear páginas vacías.
+
+## Citas
+
+`citation-service.cjs` vincula fuentes del expediente con metadatos bibliográficos. Los textos generados pueden referenciar únicamente claves disponibles mediante:
+
+```text
+[[CITE:clave]]
+```
+
+El renderer sustituye el token por la cita en texto y construye la lista de referencias. Las claves inexistentes o incompletas impiden aprobar una versión final.

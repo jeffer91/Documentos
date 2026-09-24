@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "3.0.0";
+  const VERSION = "4.0.0";
 
   const SELECTED_DOCUMENT_IDS = [
     "utet-plan-complexivo",
@@ -45,8 +45,20 @@
     "No redactar afirmaciones que comprometan al instituto cuando los datos no tengan respaldo.",
     "Toda conclusión debe derivarse de resultados ya sustentados; toda recomendación debe vincularse a un hallazgo.",
     "Distinguir dato verificado, cálculo determinístico, inferencia de IA, simulación y edición humana.",
-    "La versión final no muestra alertas, pero conserva internamente la trazabilidad."
+    "La versión final no muestra alertas, pero conserva internamente la trazabilidad.",
+    "Aplicar APA 7 mediante el motor editorial; no confiar el formato final al texto libre de la IA.",
+    "Toda tabla, figura o herramienta visual debe tener contexto previo y análisis posterior.",
+    "Los títulos no pueden quedar huérfanos y las secciones de primer nivel deben iniciar en página nueva sin páginas vacías.",
+    "Las herramientas visuales se seleccionan solo cuando aportan al análisis; no se fuerzan por plantilla."
   ];
+
+  const VISUAL_TOOLSETS = Object.freeze({
+    methodology: ["process_flow", "problem_tree", "objective_tree", "stakeholders"],
+    results: ["bar", "line", "cards", "gap_analysis"],
+    analysis: ["ishikawa", "foda", "came", "impact_matrix", "problem_tree", "objective_tree", "stakeholders", "gap_analysis", "process_flow", "pestel", "bar", "line", "cards"],
+    summary: ["bar", "line", "cards", "impact_matrix", "gap_analysis"],
+    none: []
+  });
 
   const section = (key, title, type, options) => Object.assign({
     key,
@@ -55,18 +67,33 @@
     required: true,
     allowManualEdit: true,
     lockAfterApproval: true,
-    regenerateOnDependencyChange: true
+    regenerateOnDependencyChange: true,
+    pageBreakBefore: true,
+    keepWithNext: true,
+    allowedVisuals: [],
+    children: []
   }, options || {});
 
   const COMMON = {
     intro: section("INTRODUCCION", "Introducción", "stable_ai"),
     legal: section("BASE_LEGAL", "Base legal", "stable_ai"),
     alignment: section("ALINEACION_INSTITUCIONAL", "Alineación institucional", "stable_ai"),
-    methodology: section("METODOLOGIA", "Metodología", "semi_stable_ai"),
-    results: section("RESULTADOS", "Resultados", "data_ai", { privacy: "percentage_first" }),
-    conclusions: section("CONCLUSIONES", "Conclusiones", "derived_ai"),
-    recommendations: section("RECOMENDACIONES", "Recomendaciones", "derived_ai"),
-    annexes: section("ANEXOS", "Anexos", "annexes", { required: false })
+    methodology: section("METODOLOGIA", "Metodología", "semi_stable_ai", { allowedVisuals: VISUAL_TOOLSETS.methodology }),
+    results: section("RESULTADOS", "Resultados", "data_ai", { privacy: "percentage_first", allowedVisuals: VISUAL_TOOLSETS.results }),
+    analysis: section("ANALISIS_RESULTADOS", "Análisis de resultados", "analysis_ai", {
+      allowedVisuals: VISUAL_TOOLSETS.analysis,
+      derivedFrom: ["RESULTADOS"]
+    }),
+    executive: section("RESUMEN_EJECUTIVO", "Resumen ejecutivo", "executive_summary", {
+      allowedVisuals: VISUAL_TOOLSETS.summary,
+      derivedFrom: ["RESULTADOS", "ANALISIS_RESULTADOS"],
+      maxWords: 600,
+      compact: true
+    }),
+    conclusions: section("CONCLUSIONES", "Conclusiones", "derived_ai", { derivedFrom: ["RESULTADOS", "ANALISIS_RESULTADOS"] }),
+    recommendations: section("RECOMENDACIONES", "Recomendaciones", "derived_ai", { derivedFrom: ["RESULTADOS", "ANALISIS_RESULTADOS", "CONCLUSIONES"] }),
+    references: section("REFERENCIAS", "Referencias", "references", { required: false, allowedVisuals: VISUAL_TOOLSETS.none }),
+    annexes: section("ANEXOS", "Anexos", "annexes", { required: false, allowedVisuals: VISUAL_TOOLSETS.none })
   };
 
   const profiles = {
@@ -89,7 +116,8 @@
     ],
     report: [
       COMMON.intro, COMMON.legal, COMMON.alignment, COMMON.methodology,
-      COMMON.results, COMMON.conclusions, COMMON.recommendations, COMMON.annexes
+      COMMON.results, COMMON.analysis, COMMON.executive,
+      COMMON.conclusions, COMMON.recommendations, COMMON.references, COMMON.annexes
     ],
     schedule: [
       section("OBJETIVO", "Objetivo", "stable_ai"),
@@ -114,7 +142,8 @@
     ],
     compactReport: [
       COMMON.intro, COMMON.methodology, COMMON.results,
-      COMMON.conclusions, COMMON.recommendations, COMMON.annexes
+      COMMON.analysis, COMMON.executive,
+      COMMON.conclusions, COMMON.recommendations, COMMON.references, COMMON.annexes
     ],
     curricular: [
       COMMON.intro, COMMON.legal, COMMON.alignment, COMMON.methodology,
@@ -136,8 +165,19 @@
     ]
   };
 
+  function cloneNode(item, order) {
+    const copy = Object.assign({}, item, {
+      order,
+      allowedVisuals: Array.isArray(item.allowedVisuals) ? item.allowedVisuals.slice() : [],
+      derivedFrom: Array.isArray(item.derivedFrom) ? item.derivedFrom.slice() : [],
+      children: []
+    });
+    copy.children = (item.children || []).map((child, index) => cloneNode(child, index + 1));
+    return copy;
+  }
+
   function cloneSections(name) {
-    return (profiles[name] || profiles.report).map((item, index) => Object.assign({}, item, { order: index + 1 }));
+    return (profiles[name] || profiles.report).map((item, index) => cloneNode(item, index + 1));
   }
 
   const engines = [];
@@ -275,7 +315,7 @@
 
   function enginesForDocument(documentId) {
     return (byDocument.get(documentId) || []).map((item) => Object.assign({}, item, {
-      sections: item.sections.map((sectionItem) => Object.assign({}, sectionItem)),
+      sections: item.sections.map((sectionItem, index) => cloneNode(sectionItem, index + 1)),
       rules: item.rules.slice(),
       dependencies: item.dependencies.slice()
     }));
@@ -283,7 +323,7 @@
 
   function allEngines() {
     return engines.map((item) => Object.assign({}, item, {
-      sections: item.sections.map((sectionItem) => Object.assign({}, sectionItem)),
+      sections: item.sections.map((sectionItem, index) => cloneNode(sectionItem, index + 1)),
       rules: item.rules.slice(),
       dependencies: item.dependencies.slice()
     }));
@@ -304,6 +344,7 @@
   module.exports = {
     VERSION,
     BASE_RULES,
+    VISUAL_TOOLSETS,
     SELECTED_DOCUMENT_IDS,
     allEngines,
     getEngine,
