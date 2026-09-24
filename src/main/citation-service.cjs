@@ -422,7 +422,7 @@ function dateForReference(citation, detailed) {
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return raw;
   const months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
-  return match[1] + ", " + Number(match[3]) + " de " + months[Number(match[2]) - 1];
+  return citationYear(citation) + ", " + Number(match[3]) + " de " + months[Number(match[2]) - 1];
 }
 
 function locator(citation) {
