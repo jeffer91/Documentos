@@ -40,7 +40,7 @@ const PROFILES = Object.freeze({
     distinctBy: ["activity_id", "activity_name", "event_date"]
   }),
   studentResults: binding("RESULTADOS", {
-    requiredAny: [["student_id", "career", "status", "grade"]],
+    requiredAny: [["career", "status", "grade", "core", "component"]],
     optionalFields: ["student_id", "career", "campus", "core", "component", "grade", "status", "modality", "level"],
     dimensions: ["career", "campus", "core", "component", "status", "modality", "level"],
     measures: ["grade"],
