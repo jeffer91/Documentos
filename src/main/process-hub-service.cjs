@@ -735,19 +735,18 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   if (!current) throw new Error("Sección no válida.");
   if (current.locked && patch && patch.force !== true) throw new Error("La sección está aprobada y bloqueada.");
   const ts = now();
-  const content = patch && Object.prototype.hasOwnProperty.call(patch, "content") ? String(patch.content || "") : current.content;
-  const status = String(patch && patch.status || (content ? "edited" : current.status));
+  let content = patch && Object.prototype.hasOwnProperty.call(patch, "content") ? String(patch.content || "") : current.content;
   const data = patch && Object.prototype.hasOwnProperty.call(patch, "data") ? patch.data : json(current.data_json, {});
   const provenance = patch && Object.prototype.hasOwnProperty.call(patch, "provenance") ? patch.provenance : json(current.provenance_json, {});
   const alerts = patch && Object.prototype.hasOwnProperty.call(patch, "alerts") ? patch.alerts : json(current.alerts_json, []);
   const locked = patch && Object.prototype.hasOwnProperty.call(patch, "locked") ? Boolean(patch.locked) : Boolean(current.locked);
   if (patch && Object.prototype.hasOwnProperty.call(patch, "blocks")) {
     const blockResult = replaceSectionBlocks(db, current.id, patch.blocks || []);
-    const blockText = editorial.plainTextFromBlocks(blockResult);
     if (!Object.prototype.hasOwnProperty.call(patch, "content")) {
-      patch.content = blockText;
+      content = editorial.plainTextFromBlocks(blockResult);
     }
   }
+  const status = String(patch && patch.status || (content ? "edited" : current.status));
   db.prepare(`
     UPDATE document_sections_v3
     SET content = ?, status = ?, data_json = ?, provenance_json = ?, alerts_json = ?, locked = ?, generated_at = ?, updated_at = ?
