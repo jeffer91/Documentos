@@ -1046,6 +1046,18 @@ async function run() {
     assert.strictEqual(invalidWeb.complete, false);
     assert.ok(invalidWeb.validation.errors.some((item) => item.includes("URL")));
 
+    const removableCitation = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:REMOVABLE",
+      sourceId: "SOURCE-REMOVABLE",
+      sourceType: "institutional",
+      corporateAuthor: "Institución removible",
+      year: "2026",
+      title: "Documento removible"
+    });
+    assert.strictEqual(removableCitation.complete, true);
+    citationService.deactivateCitationBySource(temp, dossierV4.id, "SOURCE-REMOVABLE");
+    assert.strictEqual(citationService.getCitation(temp, dossierV4.id, "APA:REMOVABLE"), null);
+
     const legalCitation = citationService.upsertCitation(temp, dossierV4.id, {
       citationKey: "APA:LAW",
       sourceType: "law",
@@ -1175,6 +1187,8 @@ async function run() {
     assert.ok(finalApaHtml.includes("Reglamento original congelado"));
     assert.ok(!finalApaHtml.includes("Reglamento MODIFICADO después de congelar"));
     assert.ok(!finalApaHtml.includes("Libro que no debe aparecer"));
+    assert.ok(!finalApaHtml.includes("Resultados académicos"));
+    assert.ok(!finalApaHtml.includes("[[CITE:APA:USED]]"));
     assert.ok(finalApaHtml.includes("Nexum Tec, 2026"));
 
     errorService.record(temp, {
