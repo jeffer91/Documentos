@@ -862,6 +862,10 @@ async function run() {
     assert.strictEqual(plagiarismSectionReadiness.ready, false);
     assert.strictEqual(plagiarismSectionReadiness.status, "missing_fields");
     assert.ok(plagiarismSectionReadiness.missingAll.includes("plagiarism_percent"));
+    await assert.rejects(
+      () => aiOrchestrator.generateSection(temp, plagiarismInstance.id, "RESULTADO_ANTIPLAGIO", {}),
+      /requiere datos antes de generar/
+    );
 
     const plagiarismPath = path.join(temp, "antiplagio-estudiantes.xlsx");
     const plagiarismWorkbook = XLSX.utils.book_new();
