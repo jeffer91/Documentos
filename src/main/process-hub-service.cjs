@@ -540,6 +540,7 @@ function sectionLayout(sectionItem) {
     derivedFrom: sectionItem.derivedFrom || [],
     maxWords: sectionItem.maxWords || null,
     compact: Boolean(sectionItem.compact),
+    data: sectionItem.data || {},
     layout: sectionItem.layout || {}
   };
 }
@@ -860,7 +861,7 @@ function rowToSection(row, db) {
     layout: layout.layout || {},
     status: row.status,
     content: row.content || "",
-    data: json(row.data_json, {}),
+    data: Object.assign({}, layout.data || {}, json(row.data_json, {})),
     provenance: json(row.provenance_json, {}),
     alerts: json(row.alerts_json, []),
     blocks: db ? listBlocksForSection(db, row.id) : [],
