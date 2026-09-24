@@ -29,6 +29,7 @@
     requirements: null,
     homeUnitId: "",
     homeSearch: "",
+    architectureDashboard: null,
     externalAi: {
       templateId: "",
       guide: "",
@@ -140,6 +141,13 @@
       throw new Error("No se pudo cargar el catálogo local.");
     }
     catalog = prepareCatalog(response.catalog);
+  }
+
+  async function loadArchitectureDashboard() {
+    const response = await api.getArchitectureDashboard();
+    state.architectureDashboard = response && response.ok
+      ? response.dashboard || { periods: [], dossiers: [], instances: [], recentInstances: [], draftCount: 0, finalCount: 0 }
+      : { periods: [], dossiers: [], instances: [], recentInstances: [], draftCount: 0, finalCount: 0 };
   }
 
   async function loadProjects() {
@@ -275,7 +283,7 @@
       state.document = null;
       state.project = null;
       setNav("home");
-      await Promise.all([loadProjects(), loadTemplates()]);
+      await loadArchitectureDashboard();
       renderHome();
       return;
     }
@@ -358,10 +366,32 @@
       return;
     }
 
+    if (route === "architecture-document") {
+      state.unit = null;
+      state.process = null;
+      state.document = catalog.findDocument(payload.documentId)?.document || null;
+      state.project = null;
+      setNav("home");
+      if (!window.DocumentArchitectureUI) throw new Error("No se pudo cargar el motor documental.");
+      await window.DocumentArchitectureUI.openDocument(payload.documentId);
+      return;
+    }
+
+    if (route === "architecture-instance") {
+      state.unit = null;
+      state.process = null;
+      state.document = null;
+      state.project = null;
+      setNav("library");
+      if (!window.DocumentArchitectureUI) throw new Error("No se pudo cargar el motor documental.");
+      await window.DocumentArchitectureUI.renderInstance(payload.instanceId);
+      return;
+    }
+
     if (route === "library") {
       setNav("library");
-      await loadProjects();
-      renderLibrary();
+      if (!window.DocumentArchitectureUI) throw new Error("No se pudo cargar la biblioteca documental.");
+      await window.DocumentArchitectureUI.renderDocuments();
       return;
     }
 
@@ -599,11 +629,10 @@
       .map((id) => catalog.findDocument(id))
       .filter(Boolean);
     const recentIds = [];
-    [...state.projects]
-      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
-      .forEach((project) => {
-        if (project.documentId && !recentIds.includes(project.documentId)) recentIds.push(project.documentId);
-      });
+    const recentInstances = state.architectureDashboard && state.architectureDashboard.recentInstances || [];
+    recentInstances.forEach((instance) => {
+      if (instance.documentId && !recentIds.includes(instance.documentId)) recentIds.push(instance.documentId);
+    });
     const items = (favorites.length
       ? favorites
       : recentIds.map((id) => catalog.findDocument(id)).filter(Boolean))
@@ -624,24 +653,22 @@
   }
 
   function homeContinueMarkup() {
-    const items = [...state.projects]
-      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
-      .slice(0, 3);
+    const items = (state.architectureDashboard && state.architectureDashboard.recentInstances || []).slice(0, 3);
     if (!items.length) {
       return '<div class="home-mini-empty">Tus borradores recientes aparecerán aquí.</div>';
     }
-    return `<div class="home-continue-list">${items.map((project) => {
-      const found = catalog.findDocument(project.documentId);
+    return `<div class="home-continue-list">${items.map((instance) => {
+      const found = catalog.findDocument(instance.documentId);
       const context = found
         ? `${found.unit.short} · ${found.process.name}`
-        : [project.unitId, project.processCode].filter(Boolean).join(" · ");
+        : [instance.processKey, instance.periodLabel].filter(Boolean).join(" · ");
       return `
-        <button class="home-continue-item" type="button" data-action="open-project" data-id="${escapeHtml(project.id)}">
+        <button class="home-continue-item" type="button" data-action="open-engine-instance" data-id="${escapeHtml(instance.id)}">
           <span class="home-continue-copy">
-            <b>${escapeHtml(project.documentName || "Documento")}</b>
-            <small>${escapeHtml(context)}</small>
+            <b>${escapeHtml(instance.label || "Documento")}</b>
+            <small>${escapeHtml(context)}${instance.periodLabel ? " · " + escapeHtml(instance.periodLabel) : ""}</small>
           </span>
-          <span class="status ${statusClass(project.status)}">${statusLabel(project.status)}</span>
+          <span class="status ${instance.status === "final" ? "good" : ""}">${instance.status === "final" ? "Final" : "Borrador"}</span>
           <span class="home-result-arrow">→</span>
         </button>
       `;
@@ -650,9 +677,10 @@
 
   function renderHome() {
     setHeader("Documentos institucionales", "Inicio", false);
-    const generated = state.projects.filter((item) => item.status === "generated").length;
-    const drafts = state.projects.filter((item) => item.status === "draft" || item.status === "analyzed").length;
-    const activeTemplates = state.templates.filter(templateIsUsable).length;
+    const dashboard = state.architectureDashboard || { periods: [], draftCount: 0, finalCount: 0 };
+    const generated = Number(dashboard.finalCount || 0);
+    const drafts = Number(dashboard.draftCount || 0);
+    const periods = Array.isArray(dashboard.periods) ? dashboard.periods.length : 0;
     const selectedUnit = homeSelectedUnit();
     const units = homeUnitOrder();
     view.innerHTML = `
@@ -664,7 +692,7 @@
           </div>
           <div class="home-stats" aria-label="Resumen">
             <span><b>${drafts}</b> borradores</span>
-            <span><b>${activeTemplates}</b> plantillas</span>
+            <span><b>${periods}</b> períodos</span>
             <span><b>${generated}</b> finalizados</span>
           </div>
         </div>
@@ -764,42 +792,16 @@
 
     view.innerHTML = `
       <div class="section-head"><div><h2>Documentos</h2><p>${escapeHtml(state.process.fullName)}</p></div></div>
-      <div class="doc-list">${state.process.documents.map((document) => {
-        const template = activeTemplate(document.id);
-        const templateText = document.mode === "upload"
-          ? "Archivo"
-          : template
-            ? `Plantilla v${template.version} lista`
-            : "Falta plantilla";
-
-        if (document.mode === "upload") {
-          return `
-            <button class="doc-row" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
-              <span class="doc-icon">⇧</span>
-              <span class="doc-main"><h3>${escapeHtml(document.name)}</h3><p>${escapeHtml(document.code)} · Archivo</p></span>
-              <span class="doc-arrow">→</span>
-            </button>
-          `;
-        }
-
-        return `
-          <div class="doc-row doc-row-manage">
-            <button class="doc-open-zone" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
-              <span class="doc-icon">${template ? "✓" : "W"}</span>
-              <span class="doc-main"><h3>${escapeHtml(document.name)}</h3><p>${escapeHtml(document.code)} · ${escapeHtml(templateText)}</p></span>
-            </button>
-            <div class="doc-template-actions">
-              ${template ? `
-                <button class="ghost small-inline" type="button" data-action="replace-template-document" data-template-id="${escapeHtml(template.id)}" data-document-id="${escapeHtml(document.id)}">Reemplazar</button>
-                <button class="danger-button small-inline" type="button" data-action="delete-template" data-template-id="${escapeHtml(template.id)}">Eliminar</button>
-              ` : `
-                <button class="secondary small-inline" type="button" data-action="upload-template-document" data-document-id="${escapeHtml(document.id)}">+ Plantilla</button>
-              `}
-              <button class="doc-arrow-button" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}" aria-label="Abrir documento">→</button>
-            </div>
-          </div>
-        `;
-      }).join("")}</div>
+      <div class="doc-list">${state.process.documents.map((document) => `
+        <button class="doc-row" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
+          <span class="doc-icon">▤</span>
+          <span class="doc-main">
+            <h3>${escapeHtml(document.name)}</h3>
+            <p>${escapeHtml(document.code)} · Motor documental</p>
+          </span>
+          <span class="doc-arrow">→</span>
+        </button>
+      `).join("")}</div>
     `;
   }
 
@@ -2479,7 +2481,7 @@
     if (event.key === "Enter" && String(event.target.value || "").trim()) {
       event.preventDefault();
       const documentMatch = homeDocumentMatches(event.target.value, 1)[0];
-      if (documentMatch) return navigate("editor", { documentId: documentMatch.document.id });
+      if (documentMatch) return navigate("architecture-document", { documentId: documentMatch.document.id });
       const processMatch = homeProcessMatches(event.target.value, 1)[0];
       if (processMatch) return navigate("process", { processId: processMatch.process.id });
     }
@@ -2531,7 +2533,8 @@
     }
     if (action === "open-unit") return navigate("unit", { unitId: button.dataset.id });
     if (action === "open-process") return navigate("process", { processId: button.dataset.id });
-    if (action === "new-document") return navigate("editor", { documentId: button.dataset.id });
+    if (action === "new-document") return navigate("architecture-document", { documentId: button.dataset.id });
+    if (action === "open-engine-instance") return navigate("architecture-instance", { instanceId: button.dataset.id });
     if (action === "open-project") return navigate("editor", { projectId: button.dataset.id });
     if (action === "import-template") return importTemplate(false);
     if (action === "import-template-global") return importTemplate(true);
@@ -2591,7 +2594,7 @@
   });
 
   backButton.addEventListener("click", async () => {
-    if (state.route === "architecture" && window.DocumentArchitectureUI) {
+    if (state.route.startsWith("architecture") && window.DocumentArchitectureUI) {
       const handled = await window.DocumentArchitectureUI.goBack();
       if (handled) return;
     }
@@ -2629,7 +2632,7 @@
 
     try {
       await loadCatalog();
-      await Promise.all([loadSettings(), loadTemplates(), loadProjects(), refreshErrorCount()]);
+      await Promise.all([loadSettings(), loadArchitectureDashboard(), refreshErrorCount()]);
       setInterval(refreshErrorCount, 15000);
       renderHome();
     } catch (error) {
