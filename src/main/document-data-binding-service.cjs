@@ -22,6 +22,7 @@ function binding(sectionKey, options) {
     where: [],
     anyOf: [],
     scopeFields: [],
+    scopeRequired: false,
     privacyMode: "aggregate",
     includeCountsForAi: false,
     includeSampleRows: false,
@@ -65,6 +66,7 @@ const PROFILES = Object.freeze({
     select: ["student_id", "student_name", "career", "plagiarism_percent", "status", "document_title"],
     where: [{ field: "plagiarism_percent", op: "exists" }],
     scopeFields: ["student_id"],
+    scopeRequired: true,
     privacyMode: "student_specific",
     includeCountsForAi: true,
     includeSampleRows: true,
@@ -126,7 +128,8 @@ const PROFILES = Object.freeze({
     measures: ["hours", "satisfaction_score", "impact_score"],
     groupBy: ["career"],
     distinctBy: ["activity_id", "teacher_id"],
-    scopeFields: ["activity_id", "activity_name"]
+    scopeFields: ["activity_id", "activity_name"],
+    scopeRequired: true
   }),
   impact: binding("RESULTADOS", {
     requiredAny: [["impact_score", "satisfaction_score", "status"]],
@@ -135,7 +138,8 @@ const PROFILES = Object.freeze({
     measures: ["impact_score", "satisfaction_score"],
     groupBy: ["career"],
     distinctBy: ["activity_id", "teacher_id"],
-    scopeFields: ["activity_id", "activity_name"]
+    scopeFields: ["activity_id", "activity_name"],
+    scopeRequired: true
   }),
   person: binding("DIAGNOSTICO_INDIVIDUAL", {
     requirement: "recommended",
@@ -145,6 +149,7 @@ const PROFILES = Object.freeze({
     dimensions: ["need", "priority", "competency", "area", "formation_level", "status"],
     select: ["person_id", "teacher_id", "teacher_name", "career", "need", "priority", "competency", "area", "formation_level", "status"],
     scopeFields: ["person_id", "teacher_id", "teacher_name"],
+    scopeRequired: true,
     privacyMode: "individual",
     includeCountsForAi: true,
     includeSampleRows: true,
@@ -189,7 +194,8 @@ const ENGINE_DATA_PLANS = Object.freeze({
   "ccc.guia-carrera": [fromProfile("curriculum", "ANALISIS_CURRICULAR")],
 
   "cap.planificacion-actividad": [fromProfile("schedule", "CRONOGRAMA", {
-    scopeFields: ["activity_id", "activity_name"]
+    scopeFields: ["activity_id", "activity_name"],
+    scopeRequired: true
   })],
   "cap.patrocinio": [],
   "cap.informe-final": [fromProfile("activity", "RESULTADOS")],
@@ -326,7 +332,11 @@ function resolveBinding(bindingConfig, instance, availability) {
   const scopeRequired = Boolean(
     String(instance && instance.scopeKey || "").trim() &&
     (bindingConfig.scopeFields || []).length &&
-    ["required", "individual"].includes(bindingConfig.requirement === "required" ? "required" : bindingConfig.mode)
+    (
+      bindingConfig.scopeRequired === true ||
+      bindingConfig.requirement === "required" ||
+      bindingConfig.mode === "individual"
+    )
   );
   const missingScope = scopeRequired && !scopeFilter;
 
