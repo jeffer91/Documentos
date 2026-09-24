@@ -367,6 +367,50 @@
     }).join("");
   }
 
+  function blockEditor(section) {
+    const blocks = section.blocks || [];
+    if (!blocks.length) {
+      return `
+        <textarea class="arch-section-text" id="arch-section-${escapeHtml(section.key)}" ${section.locked ? "disabled" : ""}>${escapeHtml(section.content)}</textarea>
+        ${section.locked ? "" : `<button class="ghost small-inline" data-arch-action="save-section" data-key="${escapeHtml(section.key)}">Guardar edición</button>`}
+      `;
+    }
+
+    return `
+      <div class="arch-block-editor">
+        ${blocks.map((block, index) => {
+          const heading = block.type === "visual" && block.visualType
+            ? `${index + 1}. Visual · ${visualLabel(block.visualType)}`
+            : `${index + 1}. ${block.type} · ${block.role || "body"}`;
+          if (["prose", "quote", "callout"].includes(block.type)) {
+            return `
+              <div class="arch-block-edit-card">
+                <b>${escapeHtml(heading)}</b>
+                <textarea data-arch-block-text data-section-key="${escapeHtml(section.key)}" data-block-key="${escapeHtml(block.key)}" ${section.locked ? "disabled" : ""}>${escapeHtml(block.text || "")}</textarea>
+              </div>
+            `;
+          }
+          if (block.type === "list") {
+            const items = block.data && Array.isArray(block.data.items) ? block.data.items : [];
+            return `
+              <div class="arch-block-edit-card">
+                <b>${escapeHtml(heading)}</b>
+                <textarea data-arch-block-list data-section-key="${escapeHtml(section.key)}" data-block-key="${escapeHtml(block.key)}" ${section.locked ? "disabled" : ""}>${escapeHtml(items.join("\n"))}</textarea>
+              </div>
+            `;
+          }
+          return `
+            <div class="arch-block-static">
+              <div><b>${escapeHtml(heading)}</b><small>${escapeHtml(block.title || block.caption || "Bloque estructurado")}</small></div>
+              <span class="status good">Preservado</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      ${section.locked ? "" : `<button class="ghost small-inline" data-arch-action="save-blocks" data-key="${escapeHtml(section.key)}">Guardar bloques editados</button>`}
+    `;
+  }
+
   function sectionCard(section) {
     const level = Math.max(1, Number(section.level || 1));
     const allowed = section.allowedVisuals || [];
@@ -388,8 +432,7 @@
         ${allowed.length ? `<div class="arch-visual-tools"><span>Herramientas habilitadas:</span>${allowed.map((id) => `<em>${escapeHtml(visualLabel(id))}</em>`).join("")}</div>` : ""}
         <div class="arch-block-summary">${blockSummary(section)}</div>
         ${alertBlock(section)}
-        <textarea class="arch-section-text" id="arch-section-${escapeHtml(section.key)}" ${section.locked ? "disabled" : ""}>${escapeHtml(section.content)}</textarea>
-        ${section.locked ? "" : `<button class="ghost small-inline" data-arch-action="save-section" data-key="${escapeHtml(section.key)}">Guardar edición</button>`}
+        ${blockEditor(section)}
       </article>
     `;
   }
@@ -573,6 +616,23 @@
     await renderInstance(state.instance.id);
   }
 
+  async function saveBlocks(key) {
+    const section = state.instance.sections.find((item) => item.key === key);
+    if (!section) return;
+    const blocks = (section.blocks || []).map((block) => {
+      const next = Object.assign({}, block, { data: Object.assign({}, block.data || {}) });
+      const textArea = document.querySelector(`[data-arch-block-text][data-section-key="${CSS.escape(key)}"][data-block-key="${CSS.escape(block.key)}"]`);
+      if (textArea) next.text = textArea.value;
+      const listArea = document.querySelector(`[data-arch-block-list][data-section-key="${CSS.escape(key)}"][data-block-key="${CSS.escape(block.key)}"]`);
+      if (listArea) next.data.items = listArea.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      return next;
+    });
+    const response = await api.setDocumentSectionBlocks(state.instance.id, key, blocks);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudieron guardar los bloques.");
+    toast("Bloques actualizados sin perder tablas ni figuras.");
+    await renderInstance(state.instance.id);
+  }
+
   async function generateSection(key) {
     setBusy(true);
     const response = await api.generateEngineSection(state.instance.id, key, { reviewers: 2 });
@@ -656,6 +716,7 @@
         const input = document.getElementById(`arch-section-${button.dataset.key}`);
         return saveSection(button.dataset.key, { content: input ? input.value : "", status: "edited", provenance: { source: "human", editedAt: new Date().toISOString() } });
       }
+      if (action === "save-blocks") return saveBlocks(button.dataset.key);
       if (action === "approve-section") {
         const current = state.instance.sections.find((item) => item.key === button.dataset.key);
         return saveSection(button.dataset.key, { status: "approved", locked: true, content: current && current.content || "", provenance: Object.assign({}, current && current.provenance || {}, { approvedBy: "human", approvedAt: new Date().toISOString() }) });
