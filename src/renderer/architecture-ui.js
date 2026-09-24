@@ -451,6 +451,7 @@
   function sectionCard(section) {
     const level = Math.max(1, Number(section.level || 1));
     const allowed = section.allowedVisuals || [];
+    const contract = section.contract || {};
     const number = section.numbering || String(section.order || "");
     return `
       <article class="arch-section-card level-${level}" style="--section-level:${level}">
@@ -466,6 +467,7 @@
             <button class="secondary small-inline" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">${section.locked ? "Aprobada" : "Aprobar"}</button>
           </div>
         </div>
+        ${contract.purpose ? `<div class="notice-soft arch-contract"><b>Regla propia</b><span>${escapeHtml(contract.purpose)}</span></div>` : ""}
         ${allowed.length ? `<div class="arch-visual-tools"><span>Herramientas habilitadas:</span>${allowed.map((id) => `<em>${escapeHtml(visualLabel(id))}</em>`).join("")}</div>` : ""}
         <div class="arch-block-summary">${blockSummary(section)}</div>
         ${alertBlock(section)}
