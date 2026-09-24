@@ -274,6 +274,28 @@ function architectureV3Check() {
   };
 }
 
+function engineLifecycleCheck() {
+  const hubSource = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  return {
+    archivesObsolete:
+      hubSource.includes("archived_reason") &&
+      hubSource.includes("is_active = 0") &&
+      hubSource.includes("Sección retirada del motor"),
+    preservesFrozen:
+      hubSource.includes('skipped: "frozen"') &&
+      hubSource.includes("frozenSnapshot.sections"),
+    updatesVersion:
+      hubSource.includes("engine_version = ?") &&
+      hubSource.includes("engine_schema_hash = ?"),
+    auditsMigration:
+      hubSource.includes('entityType: "engine_schema"') &&
+      hubSource.includes('action: previousVersion ? "migrate" : "initialize"'),
+    exposesHistory:
+      hubSource.includes("migrationHistory") &&
+      hubSource.includes("archivedSections")
+  };
+}
+
 function editorialV4Check() {
   const editorial = require(path.join(ROOT, "src/main/editorial-structure-service.cjs"));
   const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
@@ -430,6 +452,21 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar arquitectura v3: ${error.message}`);
+  }
+
+  try {
+    const lifecycle = engineLifecycleCheck();
+    if (
+      !lifecycle.archivesObsolete ||
+      !lifecycle.preservesFrozen ||
+      !lifecycle.updatesVersion ||
+      !lifecycle.auditsMigration ||
+      !lifecycle.exposesHistory
+    ) {
+      errors.push("El ciclo de vida de motores y migraciones no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el ciclo de vida de motores: ${error.message}`);
   }
 
   try {
