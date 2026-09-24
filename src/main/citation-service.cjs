@@ -197,6 +197,39 @@ function replaceCitationTokens(text, citations) {
   return { text: output, missing: Array.from(new Set(missing)) };
 }
 
+
+function citationTokensFromInstance(instance) {
+  const keys = [];
+  const scan = (value) => {
+    const text = String(value || "");
+    const regex = /\[\[CITE:([^\]]+)\]\]/g;
+    let match;
+    while ((match = regex.exec(text))) keys.push(String(match[1] || "").trim());
+  };
+  (instance && instance.sections || []).forEach((section) => {
+    scan(section.content);
+    (section.blocks || []).forEach((block) => {
+      scan(block.text);
+      scan(block.note);
+      scan(block.caption);
+      scan(block.title);
+    });
+  });
+  return Array.from(new Set(keys.filter(Boolean)));
+}
+
+function validateInstanceCitations(userDataPath, instance) {
+  const keys = citationTokensFromInstance(instance);
+  const missing = [];
+  const incomplete = [];
+  keys.forEach((key) => {
+    const citation = getCitation(userDataPath, instance.dossierId, key);
+    if (!citation) missing.push(key);
+    else if (!citation.complete) incomplete.push(key);
+  });
+  return { ok: missing.length === 0 && incomplete.length === 0, keys, missing, incomplete };
+}
+
 module.exports = {
   ensureSchema,
   upsertCitation,
@@ -206,5 +239,7 @@ module.exports = {
   listCitations,
   formatInText,
   formatReference,
-  replaceCitationTokens
+  replaceCitationTokens,
+  citationTokensFromInstance,
+  validateInstanceCitations
 };
