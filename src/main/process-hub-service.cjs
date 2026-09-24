@@ -1086,9 +1086,9 @@ function freezeFinal(userDataPath, instanceId) {
   if (!editorialValidation.ok) {
     throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
   }
-  const citationValidation = citations.validateInstanceCitations(userDataPath, instance);
-  if (!citationValidation.ok) {
-    const details = citationValidation.missing.concat(citationValidation.incomplete).slice(0, 6).join(", ");
+  const citationResolution = citations.resolveInstanceCitations(userDataPath, instance);
+  if (!citationResolution.ok) {
+    const details = citationResolution.missing.concat(citationResolution.incomplete).slice(0, 6).join(", ");
     throw new Error(`Completa las citas APA antes de aprobar la versión final: ${details}`);
   }
   const pendingAlerts = instance.sections.flatMap((sectionItem) => sectionItem.alerts || []).filter((alert) => alert && alert.blocking !== false);
@@ -1102,6 +1102,11 @@ function freezeFinal(userDataPath, instanceId) {
     scopeKey: instance.scopeKey,
     masterData: listMasterData(userDataPath, instance.dossierId),
     sections: instance.sections,
+    citationSnapshot: {
+      keys: citationResolution.keys,
+      citations: citationResolution.citations,
+      references: citationResolution.references
+    },
     frozenAt: now()
   };
   const ts = snapshot.frozenAt;
@@ -1110,7 +1115,18 @@ function freezeFinal(userDataPath, instanceId) {
     SET status = 'final', final_frozen_at = ?, frozen_snapshot_json = ?, migration_pending = 0, stale = 0, stale_reason = '', updated_at = ?
     WHERE id = ?
   `).run(ts, JSON.stringify(snapshot), ts, instanceId);
-  audit(db, { dossierId: instance.dossierId, instanceId, entityType: "document_instance", entityId: instanceId, action: "freeze_final", detail: { engineVersion: instance.engineVersion } });
+  audit(db, {
+    dossierId: instance.dossierId,
+    instanceId,
+    entityType: "document_instance",
+    entityId: instanceId,
+    action: "freeze_final",
+    detail: {
+      engineVersion: instance.engineVersion,
+      citationKeys: citationResolution.keys,
+      referenceCount: citationResolution.references.length
+    }
+  });
   markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Se aprobó una nueva versión final de ${instance.label}`);
   return getDocumentInstance(userDataPath, instanceId);
 }

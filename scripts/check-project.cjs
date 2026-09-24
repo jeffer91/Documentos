@@ -375,6 +375,84 @@ function dataEngineCheck() {
   };
 }
 
+function apaCitationCheck() {
+  const citations = require(path.join(ROOT, "src/main/citation-service.cjs"));
+  const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
+  const exportSource = fs.readFileSync(path.join(ROOT, "src/main/draft-export-service.cjs"), "utf8");
+  const hubSource = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+
+  const article = {
+    citationKey: "ARTICLE",
+    sourceType: "journal_article",
+    author: "Pérez, J.; Gómez, A.",
+    corporateAuthor: "",
+    year: "2026",
+    title: "Resultados académicos",
+    publisher: "",
+    url: "",
+    doi: "10.1000/test",
+    metadata: {
+      journalTitle: "Revista de Educación",
+      volume: "12",
+      issue: "2",
+      pages: "10-20"
+    },
+    active: true
+  };
+  const articleValidation = citations.validateCitation(article);
+  article.complete = articleValidation.ok;
+  article.validation = articleValidation;
+
+  const badWeb = {
+    sourceType: "webpage",
+    corporateAuthor: "Institución",
+    author: "",
+    year: "2026",
+    title: "Página",
+    url: "",
+    metadata: {}
+  };
+
+  const sameYear = citations.prepareCitationSet([
+    { citationKey: "A", sourceType: "institutional", corporateAuthor: "Institución", year: "2026", title: "Documento A", metadata: {}, active: true },
+    { citationKey: "B", sourceType: "institutional", corporateAuthor: "Institución", year: "2026", title: "Documento B", metadata: {}, active: true }
+  ]);
+
+  const duplicate = citations.prepareCitationSet([
+    Object.assign({}, article, { citationKey: "ARTICLE-A" }),
+    Object.assign({}, article, { citationKey: "ARTICLE-B" })
+  ]);
+
+  return {
+    sourceTypes: citations.sourceTypeOptions().length >= 15,
+    articleValid: articleValidation.ok,
+    webValidation: citations.validateCitation(badWeb).ok === false,
+    multiAuthor: citations.formatInText(article) === "(Pérez & Gómez, 2026)",
+    doi: citations.normalizeDoi("10.1000/test") === "https://doi.org/10.1000/test",
+    richReference:
+      citations.formatReferenceHtml(article).includes("<em>Revista de Educación</em>") &&
+      citations.formatReference(article).includes("https://doi.org/10.1000/test"),
+    yearSuffix:
+      sameYear.citations.some((item) => item.displayYear === "2026a") &&
+      sameYear.citations.some((item) => item.displayYear === "2026b"),
+    dedupe: duplicate.references.length === 1,
+    usedOnly:
+      exportSource.includes("resolveInstanceCitations") &&
+      exportSource.includes("citationTokensFromInstance") &&
+      !exportSource.includes("citations.listCitations(userDataPath, instance.dossierId)"),
+    frozen:
+      hubSource.includes("citationSnapshot") &&
+      exportSource.includes('citationSnapshotMode = "frozen"'),
+    htmlReferences:
+      apaSource.includes("formatReferenceHtml") &&
+      apaSource.includes("No se utilizaron referencias en este documento"),
+    ui:
+      renderer.includes("citationMetadataTemplate") &&
+      renderer.includes("Tipo de fuente APA 7")
+  };
+}
+
 function editorialV4Check() {
   const editorial = require(path.join(ROOT, "src/main/editorial-structure-service.cjs"));
   const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
@@ -636,6 +714,28 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el motor de datos del Bloque 3: ${error.message}`);
+  }
+
+  try {
+    const apaCitations = apaCitationCheck();
+    if (
+      !apaCitations.sourceTypes ||
+      !apaCitations.articleValid ||
+      !apaCitations.webValidation ||
+      !apaCitations.multiAuthor ||
+      !apaCitations.doi ||
+      !apaCitations.richReference ||
+      !apaCitations.yearSuffix ||
+      !apaCitations.dedupe ||
+      !apaCitations.usedOnly ||
+      !apaCitations.frozen ||
+      !apaCitations.htmlReferences ||
+      !apaCitations.ui
+    ) {
+      errors.push("El motor APA 7 del Bloque 4 no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el motor APA 7 del Bloque 4: ${error.message}`);
   }
 
   try {

@@ -73,28 +73,43 @@ function headingHtml(section) {
   return `<h${semanticLevel} class="apa-heading level-${styleLevel}" data-actual-level="${actualLevel}">${esc(title)}</h${semanticLevel}>`;
 }
 
+function citedInline(value, citations) {
+  const replaced = citationService.replaceCitationTokens(String(value == null ? "" : value), citations || []);
+  return { html: esc(replaced.text), missing: replaced.missing || [] };
+}
+
 function tableHtml(block, number, citations) {
   const headers = Array.isArray(block.data && block.data.headers) ? block.data.headers : [];
   const rows = Array.isArray(block.data && block.data.rows) ? block.data.rows : [];
   const note = paragraphs(block.note || "", citations);
+  const missing = [].concat(note.missing || []);
+  const renderedHeaders = headers.map((header) => {
+    const rendered = citedInline(header, citations);
+    missing.push(...rendered.missing);
+    return "<th>" + rendered.html + "</th>";
+  }).join("");
+  const renderedRows = rows.map((row) => {
+    const values = Array.isArray(row) ? row : headers.map((header) => row && row[header]);
+    return "<tr>" + headers.map((_header, index) => {
+      const rendered = citedInline(values[index], citations);
+      missing.push(...rendered.missing);
+      return "<td>" + rendered.html + "</td>";
+    }).join("") + "</tr>";
+  }).join("");
+
   return {
     html: `
       <div class="apa-table-block" data-keep-together="true">
         <p class="apa-object-number">Tabla ${number}</p>
         <p class="apa-object-title">${esc(block.title || "Tabla")}</p>
         <table class="apa-table">
-          <thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join("")}</tr></thead>
-          <tbody>
-            ${rows.map((row) => {
-              const values = Array.isArray(row) ? row : headers.map((header) => row && row[header]);
-              return `<tr>${headers.map((_header, index) => `<td>${esc(values[index])}</td>`).join("")}</tr>`;
-            }).join("")}
-          </tbody>
+          <thead><tr>${renderedHeaders}</tr></thead>
+          <tbody>${renderedRows}</tbody>
         </table>
         ${block.note ? `<div class="apa-note"><span>Nota.</span> ${note.html}</div>` : ""}
       </div>
     `,
-    missing: note.missing
+    missing: Array.from(new Set(missing))
   };
 }
 
@@ -130,49 +145,50 @@ function imageHtml(block, number, assetDir, citations) {
   };
 }
 
-function listHtml(block) {
+function listHtml(block, citations) {
   const items = Array.isArray(block.data && block.data.items) ? block.data.items : [];
-  return `<ul class="apa-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+  const missing = [];
+  const html = items.map((item) => {
+    const rendered = citedInline(item, citations);
+    missing.push(...rendered.missing);
+    return `<li>${rendered.html}</li>`;
+  }).join("");
+  return { html: `<ul class="apa-list">${html}</ul>`, missing: Array.from(new Set(missing)) };
 }
 
-function referencesHtml(citations) {
-  const rows = (citations || []).filter((item) => item.active !== false)
-    .sort((a, b) => {
-      const aa = String(a.corporateAuthor || a.author || "").toLowerCase();
-      const bb = String(b.corporateAuthor || b.author || "").toLowerCase();
-      return aa.localeCompare(bb) || String(a.year || "").localeCompare(String(b.year || ""));
-    });
-  if (!rows.length) return '<p class="apa-paragraph">No se registraron referencias para este documento.</p>';
+function referencesHtml(references) {
+  const rows = (references || []).filter((item) => item.active !== false);
+  if (!rows.length) return '<p class="apa-paragraph">No se utilizaron referencias en este documento.</p>';
   return rows.map((citation) =>
-    `<p class="apa-reference">${esc(citationService.formatReference(citation))}</p>`
+    `<p class="apa-reference" data-citation-key="${esc(citation.citationKey || "")}">${citationService.formatReferenceHtml(citation)}</p>`
   ).join("\n");
 }
 
-function renderBlock(block, maps, assetDir, citations) {
+function renderBlock(block, maps, assetDir, citations, references) {
   if (block.type === "prose" || block.type === "quote" || block.type === "callout") {
     return paragraphs(block.text, citations);
   }
-  if (block.type === "list") return { html: listHtml(block), missing: [] };
+  if (block.type === "list") return listHtml(block, citations);
   if (block.type === "table") return tableHtml(block, maps.tables.get(block.key) || 1, citations);
   if (["figure", "image", "visual"].includes(block.type)) {
     return imageHtml(block, maps.figures.get(block.key) || 1, assetDir, citations);
   }
-  if (block.type === "reference_list") return { html: referencesHtml(citations), missing: [] };
+  if (block.type === "reference_list") return { html: referencesHtml(references), missing: [] };
   return paragraphs(block.text || "", citations);
 }
 
-function sectionHtml(section, maps, assetDir, citations, includeAlerts) {
+function sectionHtml(section, maps, assetDir, citations, references, includeAlerts) {
   const blocks = editorial.normalizeBlocks(section.blocks || []);
   const missing = [];
   let body = "";
   if (blocks.length) {
     blocks.forEach((block) => {
-      const rendered = renderBlock(block, maps, assetDir, citations);
+      const rendered = renderBlock(block, maps, assetDir, citations, references);
       body += rendered.html;
       missing.push(...(rendered.missing || []));
     });
   } else if (section.key === "REFERENCIAS" || section.type === "references") {
-    body = referencesHtml(citations);
+    body = referencesHtml(references);
   } else {
     const rendered = paragraphs(section.content || "", citations);
     body = rendered.html;
@@ -228,6 +244,7 @@ function buildDocumentHtml(instance, options) {
   const opts = options || {};
   const includeAlerts = opts.includeAlerts !== false && !opts.final;
   const citations = Array.isArray(opts.citations) ? opts.citations : [];
+  const references = Array.isArray(opts.references) ? opts.references : citations;
   const assetDir = opts.assetDir;
   if (!assetDir) throw new Error("Falta el directorio de recursos APA.");
   fs.mkdirSync(assetDir, { recursive: true });
@@ -237,7 +254,7 @@ function buildDocumentHtml(instance, options) {
   const maps = blockNumberMaps(instance);
   const missingCitations = [];
   const content = sections.map((section) => {
-    const rendered = sectionHtml(section, maps, assetDir, citations, includeAlerts);
+    const rendered = sectionHtml(section, maps, assetDir, citations, references, includeAlerts);
     missingCitations.push(...rendered.missing);
     return rendered.html;
   }).join("\n");

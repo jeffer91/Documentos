@@ -54,7 +54,7 @@ function baseSystem(engine, section) {
     "Para visual usa {type:'visual',visualType:'...',title:'...',data:{...},note:'...'}",
     "Antes de toda tabla, figura, imagen o visual debe existir un bloque prose con role context/body/summary; después debe existir prose con role analysis/interpretation/summary.",
     "No fuerces una herramienta visual. Úsala únicamente cuando aporte comprensión.",
-    "Cuando sustentes texto en una fuente institucional, usa el token [[CITE:CLAVE]] con una citationKey proporcionada; nunca inventes claves.",
+    "Cuando sustentes texto en una fuente institucional, usa el token [[CITE:CLAVE]] únicamente si esa fuente tiene citationComplete=true; nunca inventes claves ni cites una fuente APA incompleta.",
     "alerts es una lista de objetos {type,severity,message,blocking}.",
     "claims es una lista de objetos {text,sourceType,sourceKey,confidence}.",
     `Documento: ${engine.label}.`,

@@ -32,5 +32,20 @@ jobs:
       - name: Validar estructura y catálogo
         run: npm run check
 
+      - name: Validar sintaxis PowerShell
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in @("scripts/export-draft.ps1", "scripts/render-word.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              Write-Error "$file contiene errores de sintaxis: $($errors | ForEach-Object { $_.Message } | Out-String)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
       - name: Smoke test SQLite
         run: xvfb-run -a npx electron --no-sandbox scripts/smoke-electron.cjs
