@@ -32,6 +32,8 @@ function normalizeContract(contract, fallbackType) {
   const input = contract && typeof contract === "object" && !Array.isArray(contract)
     ? deepClone(contract)
     : {};
+  if (!Object.keys(input).length) return {};
+
   const normalized = Object.assign({}, input);
   if (normalized.contentMode != null) normalized.contentMode = cleanString(normalized.contentMode);
   else if (fallbackType) normalized.contentMode = cleanString(fallbackType);
@@ -172,14 +174,16 @@ function validateCompiledOutline(engineId, sections, options) {
     });
 
     const contract = node.contract || {};
-    if (contract.contentMode && !VALID_CONTENT_MODES.has(contract.contentMode)) {
-      errors.push(`La sección ${node.key} usa contentMode inválido: ${contract.contentMode}.`);
+    if (Object.keys(contract).length) {
+      if (contract.contentMode && !VALID_CONTENT_MODES.has(contract.contentMode)) {
+        errors.push(`La sección ${node.key} usa contentMode inválido: ${contract.contentMode}.`);
+      }
+      if (contract.visualPolicy && !VALID_VISUAL_POLICIES.has(contract.visualPolicy)) {
+        errors.push(`La sección ${node.key} usa visualPolicy inválido: ${contract.visualPolicy}.`);
+      }
+      if (!Array.isArray(contract.dataNeeds)) errors.push(`La sección ${node.key} debe declarar dataNeeds como arreglo.`);
+      if (!Array.isArray(contract.promptInstructions)) errors.push(`La sección ${node.key} debe declarar promptInstructions como arreglo.`);
     }
-    if (contract.visualPolicy && !VALID_VISUAL_POLICIES.has(contract.visualPolicy)) {
-      errors.push(`La sección ${node.key} usa visualPolicy inválido: ${contract.visualPolicy}.`);
-    }
-    if (!Array.isArray(contract.dataNeeds)) errors.push(`La sección ${node.key} debe declarar dataNeeds como arreglo.`);
-    if (!Array.isArray(contract.promptInstructions)) errors.push(`La sección ${node.key} debe declarar promptInstructions como arreglo.`);
 
     if (depth > 6) {
       warnings.push(`La sección ${node.key} alcanza nivel ${depth}; el motor lo soporta, pero conviene confirmar que tanta profundidad sea necesaria.`);
