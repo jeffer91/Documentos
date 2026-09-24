@@ -16,6 +16,7 @@ const editorial = require("../src/main/editorial-structure-service.cjs");
 const visualRenderer = require("../src/main/visual-renderer-service.cjs");
 const citationService = require("../src/main/citation-service.cjs");
 const dataIngestion = require("../src/main/data-ingestion-service.cjs");
+const draftExport = require("../src/main/draft-export-service.cjs");
 const documentEngineRegistry = require("../src/main/document-engine-registry.cjs");
 const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
@@ -1003,15 +1004,178 @@ async function run() {
     assert.ok(visualSvg.includes("<svg"));
     assert.ok(visualSvg.includes("Núcleo 4"));
 
-    const citationV4 = citationService.upsertCitation(temp, dossierV4.id, {
-      citationKey: "SRC:SMOKE",
-      sourceType: "institutional",
-      corporateAuthor: "Institución de prueba",
+    // Bloque 4: APA 7 tipado, referencias usadas y snapshot bibliográfico.
+    const articleCitation = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:ARTICLE",
+      sourceType: "journal_article",
+      author: "Pérez, J.; Gómez, A.",
       year: "2026",
-      title: "Reglamento de prueba"
+      title: "Resultados académicos",
+      doi: "10.1000/apa-smoke",
+      metadata: {
+        journalTitle: "Revista de Educación",
+        volume: "12",
+        issue: "2",
+        pages: "10-20"
+      }
     });
-    assert.strictEqual(citationV4.complete, true);
-    assert.ok(citationService.formatReference(citationV4).includes("2026"));
+    assert.strictEqual(articleCitation.complete, true);
+    assert.strictEqual(articleCitation.doi, "https://doi.org/10.1000/apa-smoke");
+    assert.strictEqual(citationService.formatInText(articleCitation), "(Pérez & Gómez, 2026)");
+    assert.ok(citationService.formatReference(articleCitation).includes("Revista de Educación"));
+    assert.ok(citationService.formatReferenceHtml(articleCitation).includes("<em>Revista de Educación</em>"));
+
+    assert.strictEqual(
+      citationService.formatInText({
+        sourceType: "journal_article",
+        author: "Pérez, J.; Gómez, A.; Ruiz, C.",
+        year: "2026",
+        title: "Prueba",
+        metadata: {}
+      }),
+      "(Pérez et al., 2026)"
+    );
+
+    const invalidWeb = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:WEB-INCOMPLETE",
+      sourceType: "webpage",
+      corporateAuthor: "Institución web",
+      year: "2026",
+      title: "Página sin URL"
+    });
+    assert.strictEqual(invalidWeb.complete, false);
+    assert.ok(invalidWeb.validation.errors.some((item) => item.includes("URL")));
+
+    const legalCitation = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:LAW",
+      sourceType: "law",
+      year: "2026",
+      title: "Ley de prueba",
+      url: "https://example.test/ley",
+      metadata: {
+        legalNumber: "Ley No. 001",
+        officialPublication: "Registro Oficial de prueba",
+        jurisdiction: "Ecuador",
+        shortTitle: "Ley de prueba"
+      }
+    });
+    assert.strictEqual(legalCitation.complete, true);
+    assert.ok(citationService.formatInText(legalCitation).includes("Ley de prueba"));
+
+    const suffixSet = citationService.prepareCitationSet([
+      {
+        citationKey: "APA:SUFFIX-A",
+        sourceType: "institutional",
+        corporateAuthor: "Institución",
+        year: "2026",
+        title: "Documento A",
+        metadata: {},
+        active: true,
+        complete: true
+      },
+      {
+        citationKey: "APA:SUFFIX-B",
+        sourceType: "institutional",
+        corporateAuthor: "Institución",
+        year: "2026",
+        title: "Documento B",
+        metadata: {},
+        active: true,
+        complete: true
+      }
+    ]);
+    assert.deepStrictEqual(
+      suffixSet.references.map((item) => item.displayYear),
+      ["2026a", "2026b"]
+    );
+
+    const duplicateReferenceSet = citationService.prepareCitationSet([
+      Object.assign({}, articleCitation, { citationKey: "APA:DUP-A" }),
+      Object.assign({}, articleCitation, { citationKey: "APA:DUP-B" })
+    ]);
+    assert.strictEqual(duplicateReferenceSet.citations.length, 2);
+    assert.strictEqual(duplicateReferenceSet.references.length, 1);
+
+    const usedCitation = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:USED",
+      sourceType: "institutional",
+      corporateAuthor: "Nexum Tec",
+      year: "2026",
+      title: "Reglamento original congelado",
+      publisher: "Nexum Tec",
+      metadata: { documentCode: "UTET-RGI-SMOKE", reviewedByHuman: true }
+    });
+    assert.strictEqual(usedCitation.complete, true);
+
+    const unusedCitation = citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:UNUSED",
+      sourceType: "book",
+      author: "Autor, A.",
+      year: "2025",
+      title: "Libro que no debe aparecer",
+      publisher: "Editorial de prueba"
+    });
+    assert.strictEqual(unusedCitation.complete, true);
+
+    let apaInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
+      type: "period_population",
+      key: "apa-block-4"
+    });
+    for (const sectionItem of apaInstance.sections) {
+      const content = sectionItem.key === "INTRODUCCION"
+        ? "La introducción se sustenta en la normativa institucional [[CITE:APA:USED]]."
+        : "Contenido validado para la prueba editorial y bibliográfica.";
+      apaInstance = processHub.updateSection(temp, apaInstance.id, sectionItem.key, {
+        content,
+        status: "edited",
+        alerts: []
+      });
+    }
+
+    const apaResultBlocks = processHub.setSectionBlocks(temp, apaInstance.id, "RESULTADOS", [
+      { type: "prose", role: "context", text: "La siguiente tabla resume un dato sustentado en la misma fuente." },
+      { type: "table", title: "Resultado bibliográfico", data: { headers: ["Dato"], rows: [["[[CITE:APA:USED]]"]] } },
+      { type: "prose", role: "analysis", text: "El resultado se interpreta con base en la normativa citada." }
+    ]);
+    assert.strictEqual(apaResultBlocks.validation.ok, true);
+    apaInstance = processHub.getDocumentInstance(temp, apaInstance.id);
+
+    const tokenKeys = citationService.citationTokensFromInstance(apaInstance);
+    assert.deepStrictEqual(tokenKeys, ["APA:USED"]);
+    const usedResolution = citationService.resolveInstanceCitations(temp, apaInstance);
+    assert.strictEqual(usedResolution.ok, true);
+    assert.strictEqual(usedResolution.references.length, 1);
+    assert.strictEqual(usedResolution.references[0].citationKey, "APA:USED");
+    assert.ok(!usedResolution.references.some((item) => item.citationKey === "APA:UNUSED"));
+
+    const frozenApa = processHub.freezeFinal(temp, apaInstance.id);
+    assert.ok(frozenApa.finalFrozenAt);
+    assert.ok(frozenApa.frozenSnapshot.citationSnapshot);
+    assert.deepStrictEqual(frozenApa.frozenSnapshot.citationSnapshot.keys, ["APA:USED"]);
+    assert.strictEqual(frozenApa.frozenSnapshot.citationSnapshot.references.length, 1);
+    assert.strictEqual(
+      frozenApa.frozenSnapshot.citationSnapshot.references[0].title,
+      "Reglamento original congelado"
+    );
+
+    citationService.upsertCitation(temp, dossierV4.id, {
+      citationKey: "APA:USED",
+      title: "Reglamento MODIFICADO después de congelar"
+    });
+
+    const finalApaExport = draftExport.exportInstance(
+      temp,
+      frozenApa.id,
+      { final: true, formats: ["html"] },
+      path.join(__dirname, "..")
+    );
+    assert.strictEqual(finalApaExport.citationSnapshotMode, "frozen");
+    assert.strictEqual(finalApaExport.referenceCount, 1);
+    const finalApaHtml = fs.readFileSync(finalApaExport.outputs.find((item) => item.type === "html").path, "utf8");
+    assert.ok(finalApaHtml.includes("Reglamento original congelado"));
+    assert.ok(!finalApaHtml.includes("Reglamento MODIFICADO después de congelar"));
+    assert.ok(!finalApaHtml.includes("Libro que no debe aparecer"));
+    assert.ok(finalApaHtml.includes("Nexum Tec, 2026"));
 
     errorService.record(temp, {
       module: "smoke",
