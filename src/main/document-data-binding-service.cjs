@@ -29,12 +29,13 @@ function binding(sectionKey, options) {
 
 const PROFILES = Object.freeze({
   schedule: binding("CRONOGRAMA", {
-    requiredAny: [["activity_name", "event_name"]],
+    requiredAny: [["activity_name", "event_name", "core", "component"]],
     optionalFields: ["start_date", "end_date", "event_date", "responsible", "career", "campus", "modality", "segment", "status"],
     dimensions: ["career", "campus", "modality", "segment", "status"],
     distinctBy: ["activity_id", "activity_name", "event_date"]
   }),
   studentResults: binding("RESULTADOS", {
+    requiredAny: [["student_id", "career", "status", "grade"]],
     optionalFields: ["student_id", "career", "campus", "core", "component", "grade", "status", "modality", "level"],
     dimensions: ["career", "campus", "core", "component", "status", "modality", "level"],
     measures: ["grade"],
