@@ -301,19 +301,50 @@ function validateMapping(userDataPath, importId, mapping) {
   const sheets = headersForImport(db, importId);
   const errors = [];
   const warnings = [];
+  const input = mapping && typeof mapping === "object" ? mapping : {};
+  const baseFields = input.fields && typeof input.fields === "object"
+    ? input.fields
+    : Object.fromEntries(Object.entries(input).filter(([key]) => !["sheets", "sheetFields", "version"].includes(key)));
+  const perSheetRoot = input.sheets || input.sheetFields || {};
 
-  sheets.forEach((sheet) => {
+  Object.entries(baseFields || {}).forEach(([canonical, spec]) => {
+    if (!String(canonical || "").trim() || String(canonical).startsWith("__")) {
+      errors.push(`Campo canónico no válido: "${canonical}".`);
+      return;
+    }
+    const candidates = sourceCandidates(spec);
+    if (!candidates.length) {
+      errors.push(`El campo canónico "${canonical}" no tiene columna de origen.`);
+      return;
+    }
+    const matchedSheets = sheets.filter((sheet) => {
+      const normalizedHeaders = new Set(sheet.headers.map(normalizeText));
+      return candidates.some((candidate) => normalizedHeaders.has(normalizeText(candidate)));
+    });
+    if (!matchedSheets.length) {
+      errors.push(`"${canonical}" no encontró ninguna de estas columnas en el archivo: ${candidates.join(", ")}.`);
+    } else if (matchedSheets.length < sheets.length) {
+      const missing = sheets.filter((sheet) => !matchedSheets.some((matched) => matched.sheet === sheet.sheet)).map((sheet) => sheet.sheet);
+      warnings.push(`"${canonical}" no existe en: ${missing.join(", ")}. Se aplicará solo donde la columna esté disponible.`);
+    }
+  });
+
+  Object.entries(perSheetRoot || {}).forEach(([sheetName, config]) => {
+    const sheet = sheets.find((item) => item.sheet === sheetName);
+    if (!sheet) {
+      errors.push(`El mapeo hace referencia a una hoja inexistente: "${sheetName}".`);
+      return;
+    }
+    const fields = config && config.fields && typeof config.fields === "object" ? config.fields : config;
     const normalizedHeaders = new Set(sheet.headers.map(normalizeText));
-    const fields = mappingFieldSpecs(mapping, sheet.sheet);
-    Object.entries(fields).forEach(([canonical, spec]) => {
-      const candidates = sourceCandidates(spec);
-      if (!candidates.length) {
-        warnings.push(`${sheet.sheet}: el campo canónico "${canonical}" no tiene columna de origen.`);
+    Object.entries(fields || {}).forEach(([canonical, spec]) => {
+      if (!String(canonical || "").trim() || String(canonical).startsWith("__")) {
+        errors.push(`${sheetName}: campo canónico no válido "${canonical}".`);
         return;
       }
-      const exists = candidates.some((candidate) => normalizedHeaders.has(normalizeText(candidate)));
-      if (!exists) {
-        warnings.push(`${sheet.sheet}: "${canonical}" no encontró ninguna de estas columnas: ${candidates.join(", ")}.`);
+      const candidates = sourceCandidates(spec);
+      if (!candidates.length || !candidates.some((candidate) => normalizedHeaders.has(normalizeText(candidate)))) {
+        errors.push(`${sheetName}: "${canonical}" no encontró una columna válida de origen.`);
       }
     });
   });
@@ -414,6 +445,7 @@ function allRows(userDataPath, dossierId, options) {
           __importId: importRow.id,
           __sourceName: importRow.source_name,
           __sourceSha256: importRow.sha256,
+          __mappingHash: hashObject(mapping),
           __scopeType: importRow.scope_type,
           __scopeKey: importRow.scope_key,
           __sheet: sheet.sheet_name,
@@ -474,16 +506,40 @@ function distinctRows(rows, fields) {
   if (!keys.length) return rows;
   const seen = new Set();
   return rows.filter((row) => {
-    const signature = keys.map((field) => normalizeText(row[field])).join("\u241f");
+    const values = keys.map((field) => normalizeText(row[field]));
+    if (values.every((value) => !value)) return true;
+    const signature = values.join("\u241f");
     if (seen.has(signature)) return false;
     seen.add(signature);
     return true;
   });
 }
 
+function requestedFields(input) {
+  const fields = new Set();
+  (input && input.where || []).forEach((condition) => condition && condition.field && fields.add(String(condition.field)));
+  (input && input.anyOf || []).forEach((condition) => condition && condition.field && fields.add(String(condition.field)));
+  ["select", "distinctBy", "dimensions", "measures", "groupBy"].forEach((key) => {
+    (input && Array.isArray(input[key]) ? input[key] : []).forEach((field) => field && fields.add(String(field)));
+  });
+  return Array.from(fields);
+}
+
+function validateQueryFields(rows, input) {
+  if (!(rows || []).length) return { ok: true, missing: [], available: [] };
+  const available = new Set();
+  rows.forEach((row) => Object.keys(row).filter((key) => !key.startsWith("__")).forEach((key) => available.add(key)));
+  const missing = requestedFields(input).filter((field) => !available.has(field));
+  if (missing.length) {
+    throw new Error(`La consulta solicita campos que no existen o no están mapeados: ${missing.join(", ")}.`);
+  }
+  return { ok: true, missing: [], available: Array.from(available) };
+}
+
 function filteredRows(userDataPath, dossierId, query) {
   const input = query || {};
   const sourceRows = allRows(userDataPath, dossierId, input);
+  validateQueryFields(sourceRows, input);
   const filtered = sourceRows.filter((row) => rowMatches(row, input));
   const rows = distinctRows(filtered, input.distinctBy);
   return {
@@ -522,6 +578,7 @@ function sourceTrace(rows, includeMatchedCounts) {
         importId: key,
         sourceName: row.__sourceName || "",
         sha256: row.__sourceSha256 || "",
+        mappingHash: row.__mappingHash || "",
         scopeType: row.__scopeType || "",
         scopeKey: row.__scopeKey || "",
         sheets: new Map(),
@@ -544,6 +601,7 @@ function sourceTrace(rows, includeMatchedCounts) {
       importId: item.importId,
       sourceName: item.sourceName,
       sha256: item.sha256,
+      mappingHash: item.mappingHash,
       scopeType: item.scopeType,
       scopeKey: item.scopeKey,
       sheets: Array.from(item.sheets.values()).map((sheet) => ({
@@ -673,6 +731,7 @@ function summarize(userDataPath, dossierId, query) {
   summary.groups = groupedSummary(rows, input.groupBy, measures);
   summary.querySignature = hashObject({
     importHashes: summary.sourceTrace.map((item) => item.sha256),
+    mappingHashes: summary.sourceTrace.map((item) => item.mappingHash),
     sheetNames: summary.sourceTrace.flatMap((item) => item.sheets.map((sheet) => sheet.name)),
     where: input.where || [],
     anyOf: input.anyOf || [],
@@ -780,6 +839,7 @@ function aiSlice(userDataPath, dossierId, query) {
       importId: item.importId,
       sourceName: item.sourceName,
       sha256: item.sha256,
+      mappingHash: item.mappingHash,
       scopeType: item.scopeType,
       scopeKey: item.scopeKey,
       sheets: item.sheets
@@ -798,6 +858,7 @@ module.exports = {
   getImport,
   listImports,
   validateMapping,
+  validateQueryFields,
   setMapping,
   suggestMapping,
   queryData,
