@@ -827,3 +827,142 @@ form.informe
 cap.informe-final
 ...
 ```
+
+
+## Bloque 2 nuevo · Estructura propia por documento
+
+Cada motor dispone de un árbol documental propio compilado y validado antes de crear instancias.
+
+La estructura admite profundidad arbitraria:
+
+```text
+1. Sección
+  1.1 Subpunto
+    1.1.1 Sub-subpunto
+      1.1.1.1 Nivel adicional
+```
+
+La numeración visible sigue siendo calculada por el motor editorial. Las `key` permanecen estables aunque se inserten o reordenen puntos.
+
+### Estado de la estructura
+
+Mientras no se haya definido con el usuario el detalle institucional completo de un documento, el motor se identifica como:
+
+```text
+outlineStatus = scaffold
+```
+
+Esto significa **estructura base funcional**, no estructura institucional definitiva.
+
+Cuando el árbol de un documento sea confirmado punto por punto podrá pasar a:
+
+```text
+outlineStatus = confirmed
+```
+
+El estado es visible en la interfaz para no confundir una estructura provisional con una ya aprobada.
+
+### Contrato por nodo
+
+Cualquier punto o subpunto puede declarar un contrato propio:
+
+```json
+{
+  "purpose": "Qué debe lograr esta sección",
+  "contentMode": "analysis_ai",
+  "sourcePolicy": "resultados_y_fuentes_institucionales",
+  "evidenceRequired": true,
+  "visualPolicy": "recommended",
+  "dataNeeds": ["career", "core"],
+  "promptInstructions": [
+    "Interpretar los datos, no recalcularlos."
+  ]
+}
+```
+
+El contrato forma parte del esquema versionado cuando está definido. Cambiarlo activa el ciclo normal de migración/revisión de esa sección.
+
+La IA escritora y la IA revisora reciben este contrato automáticamente.
+
+### Validación previa
+
+El compilador rechaza antes de crear la instancia:
+
+- `key` duplicadas;
+- secciones sin clave o título;
+- dependencias `derivedFrom` hacia puntos inexistentes;
+- dependencias circulares;
+- `maxWords` inválido;
+- herramientas visuales no registradas;
+- contratos con tipos o políticas inválidas.
+
+Así, una estructura incorrecta no llega silenciosamente a producción.
+
+### Detección de Necesidades
+
+Los motores:
+
+```text
+cap.deteccion
+form.deteccion
+```
+
+incluyen formalmente:
+
+```text
+Resultados
+→ Análisis de resultados
+→ Necesidades priorizadas
+```
+
+`Análisis de resultados` permite, cuando aporten al caso:
+
+- Ishikawa;
+- FODA;
+- CAME;
+- árbol de problemas;
+- árbol de objetivos;
+- matriz de impacto;
+- análisis de brechas;
+- stakeholders;
+- flujo de procesos;
+- PESTEL;
+- gráficos y tarjetas.
+
+No se obliga a utilizar todas las herramientas. El contrato indica que deben seleccionarse solo las que ayuden al análisis.
+
+### Dependencias corregidas
+
+Las conclusiones de documentos de planificación ya no dependen de `RESULTADOS` o `ANALISIS_RESULTADOS`, porque esos puntos no existen en dichos documentos. Ahora derivan de:
+
+```text
+PLANIFICACION
+CRONOGRAMA
+SEGUIMIENTO
+```
+
+Los documentos curriculares utilizan sus propias dependencias:
+
+```text
+ANALISIS_CURRICULAR
+ACUERDOS
+→ CONCLUSIONES
+→ RECOMENDACIONES
+```
+
+El compilador verifica que estas relaciones existan dentro del mismo motor.
+
+### Carga futura de puntos reales
+
+Al recibir la estructura real de cada documento se modifica únicamente su blueprint.
+
+No es necesario cambiar:
+
+- el motor editorial;
+- la base de datos;
+- APA 7;
+- Excel/CSV;
+- el orquestador de IA;
+- otros motores documentales.
+
+Por tanto, la siguiente configuración puede hacerse documento por documento sin volver a rediseñar la aplicación.

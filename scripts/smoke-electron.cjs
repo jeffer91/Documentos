@@ -12,6 +12,7 @@ const externalAiExchange = require("../src/main/external-ai-exchange.cjs");
 const templateRequirements = require("../src/main/template-requirements.cjs");
 const templateService = require("../src/main/template-service.cjs");
 const processHub = require("../src/main/process-hub-service.cjs");
+const outlineService = require("../src/main/document-outline-service.cjs");
 const editorial = require("../src/main/editorial-structure-service.cjs");
 const visualRenderer = require("../src/main/visual-renderer-service.cjs");
 const citationService = require("../src/main/citation-service.cjs");
@@ -617,7 +618,100 @@ async function run() {
     assert.strictEqual(pvcReloadedOwned.profile, "report");
     assert.notStrictEqual(regularReloadedOwned.definitionOwner, pvcReloadedOwned.definitionOwner);
 
-    // Bloque 2: jerarquía multinivel y reglas editoriales.
+    // Nuevo Bloque 2: estructura propia, multinivel y validada por documento.
+    const allStructureReports = documentEngineRegistry.allStructureReports();
+    assert.strictEqual(allStructureReports.length, 33);
+    assert.ok(allStructureReports.every((item) => item.ok));
+    assert.ok(allStructureReports.every((item) => item.outlineStatus === "scaffold"));
+
+    const nestedOutline = outlineService.compileOutline("SMOKE.OUTLINE", [
+      {
+        key: "METODOLOGIA_DEMO",
+        title: "Metodología",
+        type: "semi_stable_ai",
+        children: [{
+          key: "DISENO_DEMO",
+          title: "Diseño",
+          type: "semi_stable_ai",
+          contract: {
+            purpose: "Definir el diseño metodológico.",
+            sourcePolicy: "fuentes_institucionales",
+            visualPolicy: "optional",
+            dataNeeds: [],
+            promptInstructions: ["Mantener coherencia con el objetivo."]
+          },
+          children: [{
+            key: "POBLACION_DEMO",
+            title: "Población",
+            type: "data_ai",
+            children: [{
+              key: "MUESTRA_DEMO",
+              title: "Muestra",
+              type: "data_ai",
+              derivedFrom: ["POBLACION_DEMO"]
+            }]
+          }]
+        }]
+      }
+    ], {}, { allowedVisuals: [] });
+    assert.strictEqual(nestedOutline.validation.ok, true);
+    assert.strictEqual(nestedOutline.validation.summary.maxDepth, 4);
+    assert.strictEqual(nestedOutline.validation.summary.nodeCount, 4);
+    assert.strictEqual(nestedOutline.validation.summary.contractedNodes, 1);
+
+    assert.throws(
+      () => outlineService.compileOutline("SMOKE.MISSING", [
+        { key: "A", title: "A", type: "derived_ai", derivedFrom: ["NO_EXISTE"] }
+      ], {}, { allowedVisuals: [] }),
+      /no existe/
+    );
+    assert.throws(
+      () => outlineService.compileOutline("SMOKE.CYCLE", [
+        { key: "A", title: "A", type: "derived_ai", derivedFrom: ["B"] },
+        { key: "B", title: "B", type: "derived_ai", derivedFrom: ["A"] }
+      ], {}, { allowedVisuals: [] }),
+      /circular/
+    );
+
+    const capDetectionEngine = documentEngineRegistry.getEngine("cap.deteccion");
+    const capDetectionKeys = capDetectionEngine.sections.map((item) => item.key);
+    assert.ok(capDetectionKeys.includes("ANALISIS_RESULTADOS"));
+    assert.ok(capDetectionKeys.indexOf("RESULTADOS") < capDetectionKeys.indexOf("ANALISIS_RESULTADOS"));
+    assert.ok(capDetectionKeys.indexOf("ANALISIS_RESULTADOS") < capDetectionKeys.indexOf("NECESIDADES_PRIORIZADAS"));
+    const capAnalysis = capDetectionEngine.sections.find((item) => item.key === "ANALISIS_RESULTADOS");
+    assert.strictEqual(capAnalysis.contract.visualPolicy, "recommended");
+    assert.ok(capAnalysis.allowedVisuals.includes("ishikawa"));
+    assert.ok(capAnalysis.allowedVisuals.includes("foda"));
+    assert.ok(capAnalysis.allowedVisuals.includes("came"));
+    const capNeeds = capDetectionEngine.sections.find((item) => item.key === "NECESIDADES_PRIORIZADAS");
+    assert.deepStrictEqual(capNeeds.derivedFrom, ["RESULTADOS", "ANALISIS_RESULTADOS"]);
+
+    const capDossier = processHub.createDossier(temp, {
+      periodId: periodV4.id,
+      processKey: "capacitacion",
+      population: "all",
+      label: "Capacitación Smoke"
+    });
+    const capDetectionInstance = processHub.ensureDocumentInstance(temp, capDossier.id, "cap.deteccion", {
+      type: "period",
+      key: periodV4.id
+    });
+    const persistedAnalysis = capDetectionInstance.sections.find((item) => item.key === "ANALISIS_RESULTADOS");
+    assert.ok(persistedAnalysis);
+    assert.strictEqual(persistedAnalysis.contract.visualPolicy, "recommended");
+    assert.ok(persistedAnalysis.contract.promptInstructions.some((item) => item.includes("Ishikawa")));
+
+    const planningEngine = documentEngineRegistry.getEngine("cap.plan");
+    const planningConclusions = planningEngine.sections.find((item) => item.key === "CONCLUSIONES");
+    assert.deepStrictEqual(planningConclusions.derivedFrom, ["PLANIFICACION", "CRONOGRAMA", "SEGUIMIENTO"]);
+
+    const curricularEngine = documentEngineRegistry.getEngine("ccc.acta-colectivos");
+    const curricularConclusions = curricularEngine.sections.find((item) => item.key === "CONCLUSIONES");
+    const curricularRecommendations = curricularEngine.sections.find((item) => item.key === "RECOMENDACIONES");
+    assert.deepStrictEqual(curricularConclusions.derivedFrom, ["ANALISIS_CURRICULAR", "ACUERDOS"]);
+    assert.deepStrictEqual(curricularRecommendations.derivedFrom, ["ANALISIS_CURRICULAR", "ACUERDOS", "CONCLUSIONES"]);
+
+    // Jerarquía multinivel y reglas editoriales.
     const hierarchyInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
       type: "period_population",
       key: "hierarchy-block-2"

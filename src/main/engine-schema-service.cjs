@@ -17,6 +17,9 @@ function hash(value) {
 }
 
 function sectionDefinition(section) {
+  const contract = section && section.contract && typeof section.contract === "object" && !Array.isArray(section.contract)
+    ? section.contract
+    : {};
   return {
     key: section.key,
     title: section.title,
@@ -33,6 +36,7 @@ function sectionDefinition(section) {
     maxWords: section.maxWords || null,
     compact: Boolean(section.compact),
     data: section.data || {},
+    contract: Object.keys(contract).length ? contract : undefined,
     layout: section.layout || {}
   };
 }
@@ -73,6 +77,9 @@ function engineDefinitionHash(engine) {
 function rowDefinition(row) {
   let layout = {};
   try { layout = JSON.parse(row && row.layout_json || "{}"); } catch (_error) { layout = {}; }
+  const contract = layout.contract && typeof layout.contract === "object" && !Array.isArray(layout.contract)
+    ? layout.contract
+    : {};
   return {
     key: row.section_key,
     title: row.title,
@@ -89,6 +96,7 @@ function rowDefinition(row) {
     maxWords: layout.maxWords || null,
     compact: Boolean(layout.compact),
     data: layout.data || {},
+    contract: Object.keys(contract).length ? contract : undefined,
     layout: layout.layout || {}
   };
 }

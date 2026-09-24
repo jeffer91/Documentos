@@ -541,6 +541,7 @@ function sectionLayout(sectionItem) {
     maxWords: sectionItem.maxWords || null,
     compact: Boolean(sectionItem.compact),
     data: sectionItem.data || {},
+    contract: sectionItem.contract || {},
     layout: sectionItem.layout || {}
   };
 }
@@ -858,6 +859,7 @@ function rowToSection(row, db) {
     derivedFrom: Array.isArray(layout.derivedFrom) ? layout.derivedFrom : [],
     maxWords: layout.maxWords || null,
     compact: Boolean(layout.compact),
+    contract: layout.contract && typeof layout.contract === "object" ? layout.contract : {},
     layout: layout.layout || {},
     status: row.status,
     content: row.content || "",

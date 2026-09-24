@@ -31,6 +31,7 @@ const REQUIRED_FILES = [
   "src/main/pdf-service.cjs",
   "src/main/settings-service.cjs",
   "src/main/document-engine-registry.cjs",
+  "src/main/document-outline-service.cjs",
   "src/main/process-hub-service.cjs",
   "src/main/engine-schema-service.cjs",
   "src/main/data-ingestion-service.cjs",
@@ -328,6 +329,110 @@ function independentEngineCheck() {
       report.orphanBlueprints.length === 0 &&
       report.blueprintCount === report.engineCount &&
       report.uniqueDefinitionOwners === report.engineCount
+  };
+}
+
+function documentOutlineCheck() {
+  const outline = require(path.join(ROOT, "src/main/document-outline-service.cjs"));
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+  const schemaSource = fs.readFileSync(path.join(ROOT, "src/main/engine-schema-service.cjs"), "utf8");
+  const hubSource = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  const aiSource = fs.readFileSync(path.join(ROOT, "src/main/ai-orchestrator.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+
+  const reports = registry.allStructureReports();
+  const capDetection = registry.getEngine("cap.deteccion");
+  const formDetection = registry.getEngine("form.deteccion");
+  const planning = registry.getEngine("cap.plan");
+  const curricular = registry.getEngine("ccc.acta-colectivos");
+
+  const nested = outline.compileOutline("TEST.NESTED", [
+    {
+      key: "ROOT",
+      title: "Raíz",
+      type: "ai",
+      children: [{
+        key: "CHILD",
+        title: "Hijo",
+        type: "data_ai",
+        contract: {
+          purpose: "Probar contrato por nodo.",
+          sourcePolicy: "datos",
+          visualPolicy: "optional",
+          dataNeeds: ["career"],
+          promptInstructions: ["Usar solo datos filtrados."]
+        },
+        children: [{
+          key: "GRANDCHILD",
+          title: "Nieto",
+          type: "derived_ai",
+          derivedFrom: ["CHILD"]
+        }]
+      }]
+    }
+  ], {}, { allowedVisuals: [] });
+
+  let missingDependencyRejected = false;
+  let cycleRejected = false;
+  try {
+    outline.compileOutline("TEST.MISSING", [
+      { key: "A", title: "A", type: "derived_ai", derivedFrom: ["NO_EXISTE"] }
+    ], {}, { allowedVisuals: [] });
+  } catch (_error) {
+    missingDependencyRejected = true;
+  }
+  try {
+    outline.compileOutline("TEST.CYCLE", [
+      { key: "A", title: "A", type: "derived_ai", derivedFrom: ["B"] },
+      { key: "B", title: "B", type: "derived_ai", derivedFrom: ["A"] }
+    ], {}, { allowedVisuals: [] });
+  } catch (_error) {
+    cycleRejected = true;
+  }
+
+  const capKeys = (capDetection.sections || []).map((item) => item.key);
+  const formKeys = (formDetection.sections || []).map((item) => item.key);
+  const capAnalysis = (capDetection.sections || []).find((item) => item.key === "ANALISIS_RESULTADOS");
+  const capNeeds = (capDetection.sections || []).find((item) => item.key === "NECESIDADES_PRIORIZADAS");
+  const planConclusions = (planning.sections || []).find((item) => item.key === "CONCLUSIONES");
+  const curricularConclusions = (curricular.sections || []).find((item) => item.key === "CONCLUSIONES");
+  const curricularRecommendations = (curricular.sections || []).find((item) => item.key === "RECOMENDACIONES");
+
+  return {
+    allValid: reports.length === 33 && reports.every((item) => item && item.ok),
+    allScaffolded: reports.every((item) => item.outlineStatus === "scaffold"),
+    nestedTree:
+      nested.validation.ok &&
+      nested.validation.summary.maxDepth === 3 &&
+      nested.validation.summary.nodeCount === 3 &&
+      nested.validation.summary.contractedNodes === 1,
+    rejectsBadDependencies: missingDependencyRejected && cycleRejected,
+    detectionAnalysis:
+      capKeys.includes("ANALISIS_RESULTADOS") &&
+      formKeys.includes("ANALISIS_RESULTADOS") &&
+      capKeys.indexOf("RESULTADOS") < capKeys.indexOf("ANALISIS_RESULTADOS") &&
+      capKeys.indexOf("ANALISIS_RESULTADOS") < capKeys.indexOf("NECESIDADES_PRIORIZADAS") &&
+      capAnalysis && capAnalysis.contract && capAnalysis.contract.visualPolicy === "recommended" &&
+      capNeeds && (capNeeds.derivedFrom || []).includes("ANALISIS_RESULTADOS"),
+    planningDependencies:
+      planConclusions &&
+      JSON.stringify(planConclusions.derivedFrom) === JSON.stringify(["PLANIFICACION", "CRONOGRAMA", "SEGUIMIENTO"]),
+    curricularDependencies:
+      curricularConclusions &&
+      (curricularConclusions.derivedFrom || []).includes("ANALISIS_CURRICULAR") &&
+      curricularRecommendations &&
+      (curricularRecommendations.derivedFrom || []).includes("CONCLUSIONES"),
+    persistedContracts:
+      schemaSource.includes("contract: Object.keys(contract).length ? contract : undefined") &&
+      hubSource.includes("contract: sectionItem.contract || {}") &&
+      hubSource.includes("contract: layout.contract"),
+    aiUsesContracts:
+      aiSource.includes("Propósito específico de la sección") &&
+      aiSource.includes("promptInstructions") &&
+      aiSource.includes("contract: section.contract || {}"),
+    uiShowsStructure:
+      renderer.includes("estructura base") &&
+      renderer.includes("Regla propia")
   };
 }
 
@@ -749,6 +854,26 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar la independencia de motores: ${error.message}`);
+  }
+
+  try {
+    const outlines = documentOutlineCheck();
+    if (
+      !outlines.allValid ||
+      !outlines.allScaffolded ||
+      !outlines.nestedTree ||
+      !outlines.rejectsBadDependencies ||
+      !outlines.detectionAnalysis ||
+      !outlines.planningDependencies ||
+      !outlines.curricularDependencies ||
+      !outlines.persistedContracts ||
+      !outlines.aiUsesContracts ||
+      !outlines.uiShowsStructure
+    ) {
+      errors.push("La estructura propia por documento del Bloque 2 no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la estructura propia por documento: ${error.message}`);
   }
 
   try {

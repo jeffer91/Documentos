@@ -293,7 +293,8 @@
 
   function engineCard(engine) {
     const instance = instanceForEngine(engine.engineId);
-    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : ""].filter(Boolean).join(" · ");
+    const outlineLabel = engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base";
+    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : "", outlineLabel].filter(Boolean).join(" · ");
     if (instance) {
       const lifecycleLabel = instance.engineState === "migration_pending"
         ? "Migración pendiente"
@@ -450,6 +451,7 @@
   function sectionCard(section) {
     const level = Math.max(1, Number(section.level || 1));
     const allowed = section.allowedVisuals || [];
+    const contract = section.contract || {};
     const number = section.numbering || String(section.order || "");
     return `
       <article class="arch-section-card level-${level}" style="--section-level:${level}">
@@ -465,6 +467,7 @@
             <button class="secondary small-inline" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">${section.locked ? "Aprobada" : "Aprobar"}</button>
           </div>
         </div>
+        ${contract.purpose ? `<div class="notice-soft arch-contract"><b>Regla propia</b><span>${escapeHtml(contract.purpose)}</span></div>` : ""}
         ${allowed.length ? `<div class="arch-visual-tools"><span>Herramientas habilitadas:</span>${allowed.map((id) => `<em>${escapeHtml(visualLabel(id))}</em>`).join("")}</div>` : ""}
         <div class="arch-block-summary">${blockSummary(section)}</div>
         ${alertBlock(section)}
@@ -494,7 +497,7 @@
         <div>
           <span class="process-code">${escapeHtml(state.instance.engineId)} · v${escapeHtml(state.instance.engineVersion)}</span>
           <h2>${escapeHtml(state.instance.label)}</h2>
-          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""} · migraciones: ${Number(state.instance.migrationRevision || 0)}${state.instance.lastMigratedAt ? " · última: " + escapeHtml(String(state.instance.lastMigratedAt).slice(0, 10)) : ""}</p>
+          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""} · ${state.instance.engine && state.instance.engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base"} · ${Number(state.instance.engine && state.instance.engine.outlineSummary && state.instance.engine.outlineSummary.nodeCount || state.instance.sections.length)} punto(s) · migraciones: ${Number(state.instance.migrationRevision || 0)}${state.instance.lastMigratedAt ? " · última: " + escapeHtml(String(state.instance.lastMigratedAt).slice(0, 10)) : ""}</p>
         </div>
         <span class="status ${state.instance.status === "final" ? "good" : alerts ? "warn" : ""}">${state.instance.status === "final" ? "Final congelada" : alerts + " alerta(s)"}</span>
       </div>
