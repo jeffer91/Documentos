@@ -275,7 +275,13 @@ function architectureV3Check() {
     pvcFinal: finalVariants.some((item) => item.engineId === "tit.pvc.informe-final"),
     hasStudentCardinality: engines.some((item) => item.cardinality === "student"),
     hasPeriodSegmentCardinality: engines.some((item) => item.cardinality === "period_segment"),
-    hasProcessUi: renderer.includes("Expediente maestro") && renderer.includes("Generar / revisar todo"),
+    hasProcessUi:
+      renderer.includes("¿En qué período vas a trabajar?") &&
+      renderer.includes('["preparation", "Preparación"]') &&
+      renderer.includes('["document", "Documento"]') &&
+      renderer.includes('["review", "Revisión"]') &&
+      renderer.includes('["output", "Salida"]') &&
+      renderer.includes("openDocument"),
     hasIpc: mainSource.includes("architecture:dashboard") && mainSource.includes("ai-engine:generate-document"),
     hasBridge: preload.includes("getArchitectureDashboard") && preload.includes("generateEngineDocument")
   };
@@ -405,20 +411,39 @@ function documentOutlineCheck() {
 
   return {
     allValid: reports.length === 33 && reports.every((item) => item && item.ok),
-    allScaffolded: reports.every((item) => item.outlineStatus === "scaffold"),
+    allScaffolded:
+      reports.every((item) => ["scaffold", "confirmed"].includes(item.outlineStatus)) &&
+      reports.some((item) => item.engineId === "form.deteccion" && item.outlineStatus === "confirmed"),
     nestedTree:
       nested.validation.ok &&
       nested.validation.summary.maxDepth === 3 &&
       nested.validation.summary.nodeCount === 3 &&
       nested.validation.summary.contractedNodes === 1,
     rejectsBadDependencies: missingDependencyRejected && cycleRejected,
-    detectionAnalysis:
-      capKeys.includes("ANALISIS_RESULTADOS") &&
-      formKeys.includes("ANALISIS_RESULTADOS") &&
-      capKeys.indexOf("RESULTADOS") < capKeys.indexOf("ANALISIS_RESULTADOS") &&
-      capKeys.indexOf("ANALISIS_RESULTADOS") < capKeys.indexOf("NECESIDADES_PRIORIZADAS") &&
-      capAnalysis && capAnalysis.contract && capAnalysis.contract.visualPolicy === "recommended" &&
-      capNeeds && (capNeeds.derivedFrom || []).includes("ANALISIS_RESULTADOS"),
+    detectionAnalysis: (() => {
+      const formRows = outline.flattenTree(formDetection.sections || []).map((row) => row.node);
+      const formByKey = new Map(formRows.map((item) => [item.key, item]));
+      const roots = formDetection.sections || [];
+      const methodology = formByKey.get("METODOLOGIA");
+      const analysis = formByKey.get("ANALISIS_INTERPRETACION");
+      const prioritization = formByKey.get("PRIORIZACION_INSTITUCIONAL");
+      const bibliography = formByKey.get("REFERENCIAS");
+      return (
+        capKeys.includes("ANALISIS_RESULTADOS") &&
+        capKeys.indexOf("RESULTADOS") < capKeys.indexOf("ANALISIS_RESULTADOS") &&
+        capKeys.indexOf("ANALISIS_RESULTADOS") < capKeys.indexOf("NECESIDADES_PRIORIZADAS") &&
+        capAnalysis && capAnalysis.contract && capAnalysis.contract.visualPolicy === "recommended" &&
+        capNeeds && (capNeeds.derivedFrom || []).includes("ANALISIS_RESULTADOS") &&
+        roots.length === 14 &&
+        formRows.some((item) => item.key === "ANALISIS_GLOBAL") &&
+        formRows.some((item) => item.key === "ANALISIS_MAPA_CALOR" && (item.allowedVisuals || []).includes("heatmap")) &&
+        formRows.some((item) => item.key === "LINEAS_FORMACION_COORDINACION") &&
+        methodology && (methodology.children || []).length === 8 &&
+        analysis && (analysis.children || []).length === 12 &&
+        prioritization && (prioritization.children || []).length === 5 &&
+        bibliography && bibliography.title === "Bibliografía"
+      );
+    })(),
     planningDependencies:
       planConclusions &&
       JSON.stringify(planConclusions.derivedFrom) === JSON.stringify(["PLANIFICACION", "CRONOGRAMA", "SEGUIMIENTO"]),
@@ -437,7 +462,9 @@ function documentOutlineCheck() {
       aiSource.includes("contract: section.contract || {}"),
     uiShowsStructure:
       renderer.includes("estructura base") &&
-      renderer.includes("Regla propia")
+      renderer.includes("Ver respaldo y trazabilidad") &&
+      renderer.includes("Recomendación de IA") &&
+      renderer.includes("Guardado automáticamente")
   };
 }
 
@@ -638,8 +665,9 @@ function documentDataBindingCheck() {
       mainSource.includes("dataReadiness: instance ? aiOrchestrator.instanceDataReadiness"),
     uiReadiness:
       renderer.includes("Datos listos") &&
-      renderer.includes("Mapeo pendiente") &&
-      renderer.includes("Campos faltantes")
+      renderer.includes("Datos por revisar") &&
+      renderer.includes("Gestionar datos, fuentes y mapeos") &&
+      renderer.includes("Mapeo canónico")
   };
 }
 
@@ -690,8 +718,8 @@ function draftFinalAlertCheck() {
       apaSource.includes('alert.source === "block"'),
     finalHidesAlerts:
       apaSource.includes("opts.includeAlerts !== false && !opts.final") &&
-      renderer.includes("state.instance && state.instance.finalFrozenAt") &&
-      renderer.includes("No forman parte de la versión final visible"),
+      renderer.includes("finalFrozenAt") &&
+      renderer.includes("no forman parte de la versión final visible"),
     workingCopy:
       hubSource.includes("copiedAlertCount") &&
       hubSource.includes("alerts: sectionItem.alerts")
@@ -827,8 +855,8 @@ function exportVisualQualityCheck() {
 
   return {
     allVisuals:
-      tools.length === 13 &&
-      visualResults.length === 13 &&
+      tools.length === 14 &&
+      visualResults.length === 14 &&
       visualResults.every((item) => item.valid && item.svg),
     rejectsEmptyVisuals:
       !invalidFoda.ok &&
@@ -1441,7 +1469,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: v4 validada · jerarquía multinivel, bloques, 13 herramientas visuales, APA 7, paginación y arquitectura v3 compatibles.");
+    console.log("OK: v4 validada · jerarquía multinivel, bloques, 14 herramientas visuales, APA 7, paginación y arquitectura v3 compatibles.");
   }
 }
 
