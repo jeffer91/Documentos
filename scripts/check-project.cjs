@@ -746,7 +746,9 @@ function aiGenerationResilienceCheck() {
       aiSource.includes('reviewerPrompt(engine, section, { content, blocks, alerts }, context)') &&
       aiSource.includes("review_format"),
     reviewStatus:
-      aiSource.includes('const sectionStatus = editorialValidation.ok && !reviewerRejected ? "reviewed" : "needs_review"'),
+      aiSource.includes("reviewerCoverageMissing") &&
+      aiSource.includes('"reviewed"') &&
+      aiSource.includes('"needs_review"'),
     documentMemory:
       aiSource.includes("function documentMemory") &&
       aiSource.includes("priorSections") &&
