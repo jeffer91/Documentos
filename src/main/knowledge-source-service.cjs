@@ -165,11 +165,13 @@ function searchKnowledge(userDataPath, dossierId, query, limit) {
     return {
       id: row.id,
       name: row.name,
-      sourceType: row.source_type,
+      sourceType: citation ? citation.sourceType : row.source_type,
       sha256: row.sha256,
       tags: (() => { try { return JSON.parse(row.tags_json || "[]"); } catch (_error) { return []; } })(),
       citationKey: citation ? citation.citationKey : `SRC:${row.id}`,
       citationComplete: Boolean(citation && citation.complete),
+      citationValidation: citation && citation.validation || null,
+      referencePreview: citation && citation.complete ? citations.formatReference(citation) : "",
       score,
       excerpt: snippet(row.extracted_text, terms)
     };
