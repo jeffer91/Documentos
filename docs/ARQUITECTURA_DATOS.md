@@ -599,3 +599,123 @@ modifica el hash del motor y activa el ciclo de migración/revisión correspondi
 ### Adaptadores futuros
 
 El motor está preparado para uno o varios Excel/CSV sin asumir todavía una estructura definitiva. Cuando se proporcionen los archivos reales de Complexivo, PVC, Formación, Capacitación, etc., se configurarán sus mapeos/adaptadores específicos sobre esta capa sin modificar el núcleo de cálculo.
+
+
+## Bloque 4 · APA 7 y referencias
+
+La bibliografía deja de tratarse como una cadena genérica y pasa a ser un sistema tipado por fuente.
+
+### Tipos admitidos
+
+El registro APA distingue:
+
+- documento institucional;
+- artículo científico;
+- libro;
+- capítulo de libro;
+- tesis / trabajo académico;
+- página web;
+- informe;
+- ley / norma legal;
+- reglamento;
+- resolución;
+- política institucional;
+- manual / guía;
+- norma técnica;
+- ponencia / congreso;
+- conjunto de datos.
+
+Cada tipo valida sus campos obligatorios antes de considerarse completo. Por ejemplo, un artículo exige autores y revista; una tesis exige institución y tipo de tesis; una página web exige URL; una resolución exige organismo emisor e identificador.
+
+### Autores
+
+Los autores personales pueden registrarse como:
+
+```text
+Pérez, J.; Gómez, A.; Ruiz, C.
+```
+
+Las citas parentéticas se transforman según APA:
+
+```text
+(Pérez, 2026)
+(Pérez & Gómez, 2026)
+(Pérez et al., 2026)
+```
+
+Los autores institucionales se mantienen como autor corporativo.
+
+### DOI y URL
+
+Los DOI se normalizan a:
+
+```text
+https://doi.org/...
+```
+
+La salida bibliográfica usa el DOI cuando existe y, en su defecto, la URL.
+
+### Obras del mismo autor y año
+
+Cuando el documento utiliza más de una obra del mismo autor o institución y año, el motor asigna sufijos determinísticos:
+
+```text
+2026a
+2026b
+2026c
+```
+
+Los mismos sufijos aparecen en las citas del cuerpo y en la bibliografía.
+
+### Referencias realmente utilizadas
+
+La sección Referencias ya no lista todas las fuentes cargadas en el expediente.
+
+El flujo es:
+
+```text
+tokens [[CITE:...]] usados
+  → resolver metadatos
+  → validar APA
+  → deduplicar obras equivalentes
+  → ordenar bibliografía
+  → renderizar solo referencias citadas
+```
+
+El escaneo incluye párrafos, listas, notas, tablas y otros bloques estructurados.
+
+Dos claves distintas que apuntan a la misma obra —por DOI, URL, fuente o identidad bibliográfica— producen una sola entrada en Referencias.
+
+### Integridad de la versión final
+
+Al aprobar una versión final se congela también:
+
+- claves de cita usadas;
+- metadatos bibliográficos;
+- referencias deduplicadas y ordenadas.
+
+Por ello, editar posteriormente una referencia viva del expediente no modifica una final ya aprobada.
+
+Las finales históricas creadas antes de este mecanismo conservan compatibilidad mediante un fallback identificado en auditoría.
+
+### Fuentes retiradas
+
+Si una fuente institucional se desactiva, su cita viva también se desactiva. Un borrador que todavía contenga su token quedará con una cita pendiente.
+
+Una final congelada no se afecta porque conserva su snapshot bibliográfico.
+
+### Render APA
+
+Las referencias se generan con estructura específica por tipo de fuente y conservan elementos tipográficos como cursivas en títulos de obras, revistas y volúmenes donde corresponde.
+
+La sección Referencias mantiene:
+
+- doble espacio;
+- sangría francesa;
+- orden bibliográfico;
+- cursivas semánticas;
+- DOI/URL normalizado.
+
+### Control de Word
+
+Los scripts PowerShell usados para DOCX/PDF ahora se validan sintácticamente en CI antes de ejecutar el smoke test. Esto evita que un cambio de maquetación deje scripts de Word cortados o duplicados sin ser detectado.
