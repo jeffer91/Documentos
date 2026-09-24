@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { openDatabase, queueSync } = require("./database-service.cjs");
 const registry = require("./document-engine-registry.cjs");
 const editorial = require("./editorial-structure-service.cjs");
+const citations = require("./citation-service.cjs");
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -770,6 +771,11 @@ function freezeFinal(userDataPath, instanceId) {
   const editorialValidation = editorial.validateDocumentInstance(instance);
   if (!editorialValidation.ok) {
     throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
+  }
+  const citationValidation = citations.validateInstanceCitations(userDataPath, instance);
+  if (!citationValidation.ok) {
+    const details = citationValidation.missing.concat(citationValidation.incomplete).slice(0, 6).join(", ");
+    throw new Error(`Completa las citas APA antes de aprobar la versión final: ${details}`);
   }
   const pendingAlerts = instance.sections.flatMap((sectionItem) => sectionItem.alerts || []).filter((alert) => alert && alert.blocking !== false);
   if (pendingAlerts.length) throw new Error("El borrador todavía tiene alertas pendientes.");
