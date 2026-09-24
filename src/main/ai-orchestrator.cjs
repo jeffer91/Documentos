@@ -598,6 +598,7 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
     provenance.reviewers &&
     provenance.reviewers.some((item) => item.approved === false)
   );
+  const reviewerCoverageMissing = reviewers.length > 0 && !(provenance.reviewers && provenance.reviewers.length);
   editorialValidation.errors.forEach((message) => {
     alerts.push({ type: "editorial", severity: "error", message, blocking: true });
   });
@@ -615,7 +616,9 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
     }
   });
 
-  const sectionStatus = editorialValidation.ok && !reviewerRejected ? "reviewed" : "needs_review";
+  const sectionStatus = editorialValidation.ok && !reviewerRejected && !reviewerCoverageMissing
+    ? "reviewed"
+    : "needs_review";
   instance = hub.updateSection(userDataPath, instanceId, sectionKey, {
     content,
     blocks,
