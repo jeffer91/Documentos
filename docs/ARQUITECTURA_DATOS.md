@@ -1346,3 +1346,231 @@ alertsVisible
 ```
 
 Por tanto, se puede demostrar que una final tenía alertas internas congeladas aunque ninguna aparezca en el archivo entregado.
+
+
+## Bloque 5 nuevo · Word, PDF y motor gráfico
+
+La exportación ya no considera que una operación fue exitosa únicamente porque existe el HTML intermedio.
+
+### Estados reales de exportación
+
+Cada exportación termina en:
+
+```text
+complete
+incomplete
+```
+
+Se validan por separado los formatos solicitados:
+
+```text
+HTML
+DOCX
+PDF
+```
+
+Un archivo cuenta como generado únicamente si:
+
+- existe;
+- no está vacío;
+- tiene una firma coherente con el formato.
+
+Firmas verificadas:
+
+```text
+HTML → <!doctype html> / <html
+DOCX → ZIP / PK
+PDF  → %PDF-
+```
+
+Si se pidió DOCX + PDF y solo existe DOCX:
+
+```text
+status = incomplete
+generatedFormats = [docx]
+missingFormats = [pdf]
+```
+
+La interfaz no muestra “Exportación creada” en este caso.
+
+### HTML de diagnóstico
+
+El HTML APA siempre se conserva como representación diagnóstica cuando puede construirse.
+
+Si DOCX/PDF falla:
+
+- la respuesta se marca como incompleta;
+- se abre el HTML de diagnóstico;
+- se conserva el motivo del fallo;
+- se guarda el convertidor usado;
+- se crea un manifiesto JSON de exportación.
+
+### Manifiesto
+
+Cada ejecución genera:
+
+```text
+*.manifest.json
+```
+
+con:
+
+- motor y versión;
+- borrador/final;
+- formatos solicitados;
+- formatos generados;
+- formatos faltantes;
+- tamaño y firma de cada archivo;
+- convertidor disponible/utilizado;
+- error del convertidor;
+- recursos visuales faltantes;
+- citas faltantes;
+- alertas internas;
+- diagnóstico físico de Word cuando está disponible.
+
+### Microsoft Word y LibreOffice
+
+En Windows se prioriza:
+
+```text
+Microsoft Word
+  → PowerShell
+  → COM
+  → DOCX/PDF
+```
+
+Fuera de Windows se utiliza LibreOffice cuando está instalado.
+
+Si ningún convertidor está disponible, la aplicación no simula éxito.
+
+### Diagnóstico físico de Word
+
+Cuando la conversión usa Microsoft Word se crea:
+
+```text
+*.word-report.json
+```
+
+con métricas como:
+
+- número de páginas;
+- número de párrafos;
+- número de títulos;
+- títulos potencialmente huérfanos;
+- número de tablas;
+- fallos de repetición de encabezados;
+- filas configuradas para partirse entre páginas;
+- número de figuras;
+- figuras sobredimensionadas.
+
+Si Word detecta problemas de maquetación controlables, la exportación se marca como incompleta aunque DOCX/PDF existan.
+
+### Títulos y páginas
+
+Las reglas continúan siendo:
+
+- secciones de nivel 1 comienzan en página nueva;
+- subniveles no fuerzan página nueva;
+- los títulos utilizan `KeepWithNext`;
+- párrafos vacíos no conservan saltos de página;
+- se mantiene control de viudas/huérfanas.
+
+Esto evita insertar páginas vacías artificiales entre secciones.
+
+### Tablas largas
+
+Las tablas pueden continuar a través de varias páginas.
+
+Reglas:
+
+- encabezado repetido;
+- filas completas, sin partir una fila entre páginas;
+- ajuste al ancho disponible;
+- tamaño de fuente adaptativo en tablas muy anchas;
+- título de tabla unido al objeto;
+- `Nota.` sin sangría de primera línea;
+- HTML con `table-header-group`;
+- filas con `break-inside: avoid`.
+
+La tabla completa no se obliga a permanecer en una sola página.
+
+### Figuras
+
+Las figuras:
+
+- se mantienen con título;
+- se centran;
+- se limitan al ancho útil;
+- se limitan también en altura;
+- no se consideran válidas si el archivo no existe o está vacío.
+
+Una figura faltante puede permanecer visible como marcador en un borrador.
+
+Una **versión final con recursos visuales faltantes se marca como exportación incompleta**.
+
+### Motor gráfico
+
+Existen 13 herramientas:
+
+```text
+Ishikawa
+FODA
+CAME
+Matriz impacto/esfuerzo
+Árbol de problemas
+Árbol de objetivos
+Mapa de actores
+Análisis de brechas
+Flujo de proceso
+PESTEL
+Tarjetas informativas
+Barras
+Líneas
+```
+
+Cada herramienta posee validación mínima de datos antes del render.
+
+Ejemplos:
+
+- Ishikawa requiere problema/efecto y categorías;
+- FODA requiere contenido en al menos un cuadrante;
+- CAME requiere al menos una acción;
+- árbol de problemas requiere problema y causa/efecto;
+- flujo requiere al menos dos pasos;
+- gráfico de líneas requiere al menos dos puntos;
+- barras requieren valores numéricos;
+- tarjetas requieren elementos;
+- impacto/esfuerzo exige coordenadas numéricas.
+
+Un visual vacío ya no puede insertarse silenciosamente como figura válida.
+
+### Tarjetas de núcleos
+
+La herramienta `cards` soporta el caso institucional de núcleos:
+
+```text
+Núcleo 1
+Núcleo 2
+Núcleo 3
+Núcleo 4
+```
+
+con número, título, valor y descripción corta.
+
+No requiere una imagen generativa externa.
+
+### Validación continua
+
+CI comprueba:
+
+- los 13 SVG;
+- contratos inválidos;
+- firmas de archivos;
+- detección de exportaciones parciales;
+- reglas HTML multipágina;
+- sintaxis PowerShell;
+- smoke Electron que convierte los 13 SVG en PNG reales.
+
+GitHub Actions usa Linux y no dispone de Microsoft Word de escritorio.
+
+Por esa razón, el comportamiento físico específico de Word se verifica en tiempo de ejecución en Windows mediante `word-report.json`, además de la validación sintáctica y estructural realizada por CI.

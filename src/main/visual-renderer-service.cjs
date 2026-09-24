@@ -1,6 +1,6 @@
 const fs = require("fs");
 
-const TOOL_VERSION = "1.0.0";
+const TOOL_VERSION = "1.1.0";
 const TOOLS = Object.freeze({
   ishikawa: { label: "Ishikawa", category: "qualitative", version: TOOL_VERSION },
   foda: { label: "FODA", category: "strategic", version: TOOL_VERSION },
@@ -363,10 +363,174 @@ function renderLine(data) {
   return svgShell(d.title || "Gráfico de líneas", body, 620);
 }
 
+
+function nonEmpty(value) {
+  return String(value == null ? "" : value).trim().length > 0;
+}
+
+function validNumeric(value) {
+  return Number.isFinite(Number(value));
+}
+
+function validateVisualData(tool, data) {
+  const type = String(tool || "").toLowerCase();
+  const d = data || {};
+  const errors = [];
+  const warnings = [];
+  if (!TOOLS[type]) return { ok: false, errors: [`Herramienta visual no reconocida: ${type}`], warnings };
+
+  if (type === "foda") {
+    const total = [
+      d.strengths || d.fortalezas,
+      d.opportunities || d.oportunidades,
+      d.weaknesses || d.debilidades,
+      d.threats || d.amenazas
+    ].reduce((sum, items) => sum + arr(items).filter(nonEmpty).length, 0);
+    if (!total) errors.push("El FODA necesita al menos un elemento en alguno de sus cuadrantes.");
+  }
+
+  if (type === "came") {
+    const total = [
+      d.correct || d.corregir,
+      d.adapt || d.afrontar,
+      d.maintain || d.mantener,
+      d.exploit || d.explotar
+    ].reduce((sum, items) => sum + arr(items).filter(nonEmpty).length, 0);
+    if (!total) errors.push("La matriz CAME necesita al menos una acción.");
+  }
+
+  if (type === "ishikawa") {
+    if (!nonEmpty(d.effect || d.efecto || d.problem || d.problema)) {
+      errors.push("Ishikawa necesita un efecto o problema central.");
+    }
+    const categories = arr(d.categories || d.categorias);
+    if (!categories.length) errors.push("Ishikawa necesita al menos una categoría causal.");
+    if (categories.length > 8) warnings.push("Ishikawa mostrará como máximo 8 categorías.");
+    categories.slice(0, 8).forEach((category, index) => {
+      if (!nonEmpty(category && (category.name || category.category))) {
+        errors.push(`La categoría ${index + 1} de Ishikawa necesita un nombre.`);
+      }
+    });
+  }
+
+  if (type === "impact_matrix") {
+    const items = arr(d.items);
+    const valid = items.filter((item) =>
+      nonEmpty(item && (item.label || item.name)) &&
+      validNumeric(item && (item.effort ?? item.esfuerzo)) &&
+      validNumeric(item && (item.impact ?? item.impacto))
+    );
+    if (!valid.length) errors.push("La matriz de impacto necesita elementos con etiqueta, impacto y esfuerzo numéricos.");
+    if (items.length > 20) warnings.push("La matriz de impacto mostrará como máximo 20 elementos.");
+  }
+
+  if (type === "problem_tree") {
+    if (!nonEmpty(d.problem || d.problema)) errors.push("El árbol de problemas necesita un problema central.");
+    if (!arr(d.causes || d.causas).length && !arr(d.effects || d.efectos).length) {
+      errors.push("El árbol de problemas necesita al menos una causa o un efecto.");
+    }
+  }
+
+  if (type === "objective_tree") {
+    if (!nonEmpty(d.objective || d.objetivo)) errors.push("El árbol de objetivos necesita un objetivo central.");
+    if (!arr(d.means || d.medios).length && !arr(d.ends || d.fines).length) {
+      errors.push("El árbol de objetivos necesita al menos un medio o un fin.");
+    }
+  }
+
+  if (type === "stakeholders") {
+    const items = arr(d.items || d.actores);
+    const valid = items.filter((item) =>
+      nonEmpty(item && (item.label || item.name)) &&
+      validNumeric(item && (item.interest ?? item.interes)) &&
+      validNumeric(item && (item.power ?? item.poder))
+    );
+    if (!valid.length) errors.push("El mapa de actores necesita actores con nombre, interés y poder numéricos.");
+    if (items.length > 20) warnings.push("El mapa de actores mostrará como máximo 20 actores.");
+  }
+
+  if (type === "gap_analysis") {
+    const items = arr(d.items);
+    const valid = items.filter((item) =>
+      nonEmpty(item && (item.label || item.name)) &&
+      validNumeric(item && (item.current ?? item.actual)) &&
+      validNumeric(item && (item.target ?? item.objetivo))
+    );
+    if (!valid.length) errors.push("El análisis de brechas necesita indicadores con valor actual y meta.");
+    if (items.length > 8) warnings.push("El análisis de brechas mostrará como máximo 8 indicadores.");
+  }
+
+  if (type === "process_flow") {
+    const steps = arr(d.steps || d.pasos || d.nodes).filter((item) =>
+      nonEmpty(typeof item === "string" ? item : item && (item.label || item.name || item.title))
+    );
+    if (steps.length < 2) errors.push("El flujo de proceso necesita al menos dos pasos.");
+    if (steps.length > 10) warnings.push("El flujo mostrará como máximo 10 pasos.");
+  }
+
+  if (type === "pestel") {
+    const total = [
+      d.political || d.politico,
+      d.economic || d.economico,
+      d.social,
+      d.technological || d.tecnologico,
+      d.environmental || d.ambiental,
+      d.legal
+    ].reduce((sum, items) => sum + arr(items).filter(nonEmpty).length, 0);
+    if (!total) errors.push("PESTEL necesita al menos un factor.");
+  }
+
+  if (type === "cards") {
+    const items = arr(d.items || d.cards || d.nucleos);
+    if (!items.length) errors.push("Las tarjetas informativas necesitan al menos un elemento.");
+    if (items.length > 8) warnings.push("Las tarjetas mostrarán como máximo 8 elementos.");
+  }
+
+  if (type === "bar") {
+    const items = arr(d.items || d.data).filter((item) =>
+      nonEmpty(item && (item.label || item.name)) && validNumeric(item && (item.value ?? item.valor))
+    );
+    if (!items.length) errors.push("El gráfico de barras necesita al menos un valor numérico con etiqueta.");
+    if (items.length > 12) warnings.push("El gráfico de barras mostrará como máximo 12 valores.");
+  }
+
+  if (type === "line") {
+    const items = arr(d.items || d.data).filter((item) =>
+      nonEmpty(item && (item.label || item.name)) && validNumeric(item && (item.value ?? item.valor))
+    );
+    if (items.length < 2) errors.push("El gráfico de líneas necesita al menos dos puntos numéricos.");
+    if (items.length > 16) warnings.push("El gráfico de líneas mostrará como máximo 16 puntos.");
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+function samplePayload(tool) {
+  const type = String(tool || "").toLowerCase();
+  const samples = {
+    ishikawa: { title: "Causas", problem: "Baja participación", categories: [{ name: "Método", causes: ["Comunicación insuficiente"] }] },
+    foda: { title: "FODA", strengths: ["Experiencia"], opportunities: ["Alianzas"], weaknesses: ["Seguimiento"], threats: ["Rotación"] },
+    came: { title: "CAME", correct: ["Mejorar seguimiento"], adapt: ["Preparar contingencia"], maintain: ["Buenas prácticas"], exploit: ["Alianzas"] },
+    impact_matrix: { title: "Impacto", items: [{ label: "Acción 1", impact: 90, effort: 30 }] },
+    problem_tree: { title: "Problemas", problem: "Bajo cumplimiento", causes: ["Seguimiento limitado"], effects: ["Retrasos"] },
+    objective_tree: { title: "Objetivos", objective: "Mejorar cumplimiento", means: ["Seguimiento periódico"], ends: ["Entregas oportunas"] },
+    stakeholders: { title: "Actores", items: [{ label: "Docentes", interest: 80, power: 70 }] },
+    gap_analysis: { title: "Brechas", items: [{ label: "Cumplimiento", current: 65, target: 90 }] },
+    process_flow: { title: "Proceso", steps: ["Inicio", "Validación", "Cierre"] },
+    pestel: { title: "PESTEL", political: ["Normativa"], economic: ["Presupuesto"], social: ["Participación"], technological: ["Plataforma"], environmental: ["Digitalización"], legal: ["Reglamento"] },
+    cards: { title: "Núcleos", items: [{ number: 1, title: "Núcleo 1", value: "85%" }, { number: 2, title: "Núcleo 2", value: "90%" }] },
+    bar: { title: "Resultados", items: [{ label: "A", value: 70 }, { label: "B", value: 85 }] },
+    line: { title: "Tendencia", items: [{ label: "P1", value: 70 }, { label: "P2", value: 82 }] }
+  };
+  return samples[type] ? JSON.parse(JSON.stringify(samples[type])) : {};
+}
+
 function renderSvg(tool, data, options) {
   const type = String(tool || "").toLowerCase();
   const payload = Object.assign({}, data || {}, options || {});
   if (!TOOLS[type]) throw new Error(`Herramienta visual no reconocida: ${type}`);
+  const validation = validateVisualData(type, payload);
+  if (!validation.ok) throw new Error(validation.errors.join(" | "));
   if (type === "foda") return renderFoda(payload);
   if (type === "came") return renderCame(payload);
   if (type === "ishikawa") return renderIshikawa(payload);
@@ -385,10 +549,14 @@ function renderSvg(tool, data, options) {
 
 function savePng(tool, data, outputPath, options) {
   const { nativeImage } = require("electron");
+  const validation = validateVisualData(tool, Object.assign({}, data || {}, options || {}));
+  if (!validation.ok) throw new Error(validation.errors.join(" | "));
   const svg = renderSvg(tool, data, options);
   const image = nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
   if (image.isEmpty()) throw new Error(`No se pudo renderizar ${tool}.`);
-  fs.writeFileSync(outputPath, image.toPNG());
+  const png = image.toPNG();
+  if (!png || png.length < 64) throw new Error(`La imagen generada para ${tool} está vacía o dañada.`);
+  fs.writeFileSync(outputPath, png);
   return outputPath;
 }
 
@@ -400,6 +568,8 @@ module.exports = {
   TOOL_VERSION,
   TOOLS,
   listTools,
+  validateVisualData,
+  samplePayload,
   renderSvg,
   savePng
 };

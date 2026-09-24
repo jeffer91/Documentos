@@ -64,6 +64,17 @@ function Apply-ApaParagraph {
     $Paragraph.Format.KeepTogether = -1
     $Paragraph.Range.Font.Bold = -1
   }
+  elseif ($text -match '(?i)^Nota\.\s*') {
+    $Paragraph.Format.FirstLineIndent = 0
+    $Paragraph.Format.LineSpacingRule = 0
+    $Paragraph.Format.KeepTogether = -1
+  }
+  elseif (-not $text) {
+    $Paragraph.Format.PageBreakBefore = 0
+    $Paragraph.Format.KeepWithNext = 0
+    $Paragraph.Format.KeepTogether = 0
+    $Paragraph.Format.FirstLineIndent = 0
+  }
 }
 
 function Apply-ApaReferences {
@@ -97,16 +108,27 @@ function Apply-ApaTables {
   param($Document)
 
   foreach ($table in @($Document.Tables)) {
-    try { $table.AutoFitBehavior(2) } catch {}
-    try { $table.Rows.Item(1).HeadingFormat = -1 } catch {}
+    try {
+      $table.AutoFitBehavior(2)
+      $table.Rows.Item(1).HeadingFormat = -1
+      $table.Rows.AllowBreakAcrossPages = 0
+    } catch {}
 
     try {
       $table.Range.Font.Name = "Arial"
-      $table.Range.Font.Size = 10
+      $columnCount = $table.Columns.Count
+      if ($columnCount -ge 9) {
+        $table.Range.Font.Size = 8
+      }
+      elseif ($columnCount -ge 7) {
+        $table.Range.Font.Size = 9
+      }
+      else {
+        $table.Range.Font.Size = 10
+      }
       $table.Range.ParagraphFormat.LineSpacingRule = 0
       $table.Range.ParagraphFormat.SpaceAfter = 0
       $table.Range.ParagraphFormat.FirstLineIndent = 0
-      $table.Rows.AllowBreakAcrossPages = 0
     } catch {}
 
     try {
@@ -144,6 +166,9 @@ function Apply-ObjectKeepRules {
           try {
             $next.Format.KeepWithNext = -1
             $next.Format.KeepTogether = -1
+            $next.Format.FirstLineIndent = 0
+            $next.Format.LineSpacingRule = 0
+            $next.Range.Font.Italic = -1
           } catch {}
           break
         }
@@ -162,10 +187,84 @@ function Apply-ApaFigures {
         $shape.Width = 450
         $shape.Height = $shape.Height * $ratio
       }
+      if ($shape.Height -gt 520) {
+        $ratio = 520 / $shape.Height
+        $shape.Height = 520
+        $shape.Width = $shape.Width * $ratio
+      }
       $shape.Range.ParagraphFormat.KeepTogether = -1
       $shape.Range.ParagraphFormat.WidowControl = -1
       $shape.Range.ParagraphFormat.Alignment = 1
     } catch {}
+  }
+}
+
+function Build-LayoutReport {
+  param($Document)
+
+  $orphanHeadings = 0
+  $headingCount = 0
+  $tableHeaderFailures = 0
+  $tableSplitFailures = 0
+  $oversizedShapes = 0
+
+  try {
+    $paragraphCount = $Document.Paragraphs.Count
+    for ($i = 1; $i -le $paragraphCount; $i++) {
+      $paragraph = $Document.Paragraphs.Item($i)
+      $outline = [int]$paragraph.OutlineLevel
+      $text = ([string]$paragraph.Range.Text).Trim()
+
+      if ($outline -ge 1 -and $outline -le 9 -and $text) {
+        $headingCount++
+        $headingPage = 0
+        try { $headingPage = [int]$paragraph.Range.Information(3) } catch {}
+
+        for ($j = $i + 1; $j -le $paragraphCount; $j++) {
+          $next = $Document.Paragraphs.Item($j)
+          $nextText = ([string]$next.Range.Text).Trim()
+          if ($nextText) {
+            $nextPage = 0
+            try { $nextPage = [int]$next.Range.Information(3) } catch {}
+            if ($headingPage -gt 0 -and $nextPage -gt 0 -and $headingPage -ne $nextPage) {
+              $orphanHeadings++
+            }
+            break
+          }
+        }
+      }
+    }
+  } catch {}
+
+  foreach ($table in @($Document.Tables)) {
+    try {
+      if ([int]$table.Rows.Item(1).HeadingFormat -eq 0) { $tableHeaderFailures++ }
+    } catch { $tableHeaderFailures++ }
+
+    try {
+      if ([int]$table.Rows.AllowBreakAcrossPages -ne 0) { $tableSplitFailures++ }
+    } catch {}
+  }
+
+  foreach ($shape in @($Document.InlineShapes)) {
+    try {
+      if ($shape.Width -gt 451 -or $shape.Height -gt 521) { $oversizedShapes++ }
+    } catch {}
+  }
+
+  $pages = 0
+  try { $pages = [int]$Document.ComputeStatistics(2) } catch {}
+
+  return [ordered]@{
+    pageCount = $pages
+    paragraphCount = $Document.Paragraphs.Count
+    headingCount = $headingCount
+    orphanHeadingCount = $orphanHeadings
+    tableCount = $Document.Tables.Count
+    tableHeaderRepeatFailures = $tableHeaderFailures
+    tableRowSplitFailures = $tableSplitFailures
+    figureCount = $Document.InlineShapes.Count
+    oversizedFigureCount = $oversizedShapes
   }
 }
 
@@ -199,6 +298,11 @@ try {
   $doc = $word.Documents.Open($InputHtml, $false, $false)
 
   Apply-ApaDocument -Document $doc
+
+  $layoutReport = Build-LayoutReport -Document $doc
+  try {
+    $layoutReport | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$OutputBase.word-report.json" -Encoding UTF8
+  } catch {}
 
   $items = $Formats.Split(",") | ForEach-Object { $_.Trim().ToLowerInvariant() }
   if ($items -contains "docx") {

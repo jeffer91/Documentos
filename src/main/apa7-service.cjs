@@ -116,22 +116,36 @@ function tableHtml(block, number, citations) {
 
 function imageHtml(block, number, assetDir, citations) {
   let sourcePath = "";
+  let assetIssue = "";
   if (block.type === "visual") {
-    const file = path.join(assetDir, `figura-${number}-${String(block.visualType || "visual").replace(/[^a-z0-9_-]+/gi, "-")}.png`);
-    visuals.savePng(block.visualType, Object.assign({}, block.data || {}, { title: block.title || block.caption || "" }), file);
-    sourcePath = file;
+    const validation = visuals.validateVisualData(block.visualType, block.data || {});
+    if (!validation.ok) {
+      assetIssue = validation.errors.join(" | ");
+    } else {
+      const file = path.join(assetDir, `figura-${number}-${String(block.visualType || "visual").replace(/[^a-z0-9_-]+/gi, "-")}.png`);
+      try {
+        visuals.savePng(block.visualType, Object.assign({}, block.data || {}, { title: block.title || block.caption || "" }), file);
+        sourcePath = file;
+      } catch (error) {
+        assetIssue = String(error && error.message || error || "No se pudo renderizar el visual.");
+      }
+    }
   } else {
     sourcePath = String(
       block.data && (block.data.path || block.data.localPath) ||
       block.path ||
       ""
     );
+    if (!sourcePath) assetIssue = "La figura no tiene un archivo asociado.";
+    else if (!fs.existsSync(sourcePath)) assetIssue = "El archivo de la figura no existe.";
+    else if (Number(fs.statSync(sourcePath).size || 0) <= 0) assetIssue = "El archivo de la figura está vacío.";
   }
 
   const note = paragraphs(block.note || "", citations);
-  const img = sourcePath && fs.existsSync(sourcePath)
+  const healthyAsset = sourcePath && fs.existsSync(sourcePath) && Number(fs.statSync(sourcePath).size || 0) > 0;
+  const img = healthyAsset
     ? `<img src="${fileUrl(sourcePath)}" alt="${esc(block.caption || block.title || "Figura")}" class="apa-figure-image">`
-    : `<div class="apa-missing-figure">Figura pendiente de archivo</div>`;
+    : `<div class="apa-missing-figure">Figura pendiente de archivo o renderizado</div>`;
 
   return {
     html: `
@@ -142,7 +156,14 @@ function imageHtml(block, number, assetDir, citations) {
         ${block.note ? `<div class="apa-note"><span>Nota.</span> ${note.html}</div>` : ""}
       </div>
     `,
-    missing: note.missing
+    missing: note.missing,
+    missingAssets: healthyAsset ? [] : [{
+      blockKey: block.key || "",
+      type: block.type || "figure",
+      visualType: block.visualType || "",
+      title: block.title || block.caption || `Figura ${number}`,
+      reason: assetIssue || "No se pudo generar o localizar el recurso visual."
+    }]
   };
 }
 
@@ -167,26 +188,33 @@ function referencesHtml(references) {
 
 function renderBlock(block, maps, assetDir, citations, references) {
   if (block.type === "prose" || block.type === "quote" || block.type === "callout") {
-    return paragraphs(block.text, citations);
+    const rendered = paragraphs(block.text, citations);
+    return Object.assign(rendered, { missingAssets: [] });
   }
-  if (block.type === "list") return listHtml(block, citations);
-  if (block.type === "table") return tableHtml(block, maps.tables.get(block.key) || 1, citations);
+  if (block.type === "list") return Object.assign(listHtml(block, citations), { missingAssets: [] });
+  if (block.type === "table") return Object.assign(tableHtml(block, maps.tables.get(block.key) || 1, citations), { missingAssets: [] });
   if (["figure", "image", "visual"].includes(block.type)) {
     return imageHtml(block, maps.figures.get(block.key) || 1, assetDir, citations);
   }
-  if (block.type === "reference_list") return { html: referencesHtml(references), missing: [] };
-  return paragraphs(block.text || "", citations);
+  if (block.type === "reference_list") return { html: referencesHtml(references), missing: [], missingAssets: [] };
+  const rendered = paragraphs(block.text || "", citations);
+  return Object.assign(rendered, { missingAssets: [] });
 }
 
 function sectionHtml(section, maps, assetDir, citations, references, includeAlerts) {
   const blocks = editorial.normalizeBlocks(section.blocks || []);
   const missing = [];
+  const missingAssets = [];
   let body = "";
   if (blocks.length) {
     blocks.forEach((block) => {
       const rendered = renderBlock(block, maps, assetDir, citations, references);
       body += rendered.html;
       missing.push(...(rendered.missing || []));
+      missingAssets.push(...(rendered.missingAssets || []).map((item) => Object.assign({
+        sectionKey: section.key,
+        sectionTitle: section.title
+      }, item)));
     });
   } else if (section.key === "REFERENCIAS" || section.type === "references") {
     body = referencesHtml(references);
@@ -206,7 +234,8 @@ function sectionHtml(section, maps, assetDir, citations, references, includeAler
 
   return {
     html: `<section class="apa-section level-${Number(section.level || 1)}" data-level="${Number(section.level || 1)}">${headingHtml(section)}${alerts}${body}</section>`,
-    missing: Array.from(new Set(missing))
+    missing: Array.from(new Set(missing)),
+    missingAssets
   };
 }
 
@@ -228,11 +257,14 @@ function css() {
     .apa-list{font-size:${PROFILE.fontSizePt}pt;line-height:2;margin:0 0 0 ${PROFILE.firstLineIndentCm}cm;padding-left:${PROFILE.firstLineIndentCm}cm;}
     .apa-object-number{font-size:${PROFILE.fontSizePt}pt;font-weight:700;line-height:1.25;margin:12pt 0 0;page-break-after:avoid;break-after:avoid;}
     .apa-object-title{font-size:${PROFILE.fontSizePt}pt;font-style:italic;line-height:1.25;margin:0 0 6pt;page-break-after:avoid;break-after:avoid;}
-    .apa-table-block{margin:12pt 0;}
+    .apa-table-block{margin:12pt 0;page-break-inside:auto;break-inside:auto;}
     .apa-figure-block{margin:12pt 0;page-break-inside:avoid;break-inside:avoid;}
-    .apa-table{border-collapse:collapse;width:100%;font-size:${PROFILE.tableFontSizePt}pt;line-height:1.25;margin:0;}
+    .apa-table{border-collapse:collapse;width:100%;font-size:${PROFILE.tableFontSizePt}pt;line-height:1.25;margin:0;page-break-inside:auto;break-inside:auto;}
+    .apa-table thead{display:table-header-group;}
+    .apa-table tfoot{display:table-footer-group;}
+    .apa-table tr{page-break-inside:avoid;break-inside:avoid;}
     .apa-table th{font-weight:700;text-align:left;border-top:1.5pt solid #111;border-bottom:1pt solid #111;padding:5pt 6pt;}
-    .apa-table td{border:0;padding:5pt 6pt;vertical-align:top;orphans:2;widows:2;}
+    .apa-table td{border:0;padding:5pt 6pt;vertical-align:top;orphans:2;widows:2;overflow-wrap:anywhere;}
     .apa-table tbody tr:last-child td{border-bottom:1.5pt solid #111;}
     .apa-figure-image{display:block;max-width:100%;height:auto;margin:6pt auto;}
     .apa-missing-figure{border:1pt dashed #94a3b8;padding:30pt;text-align:center;color:#64748b;}
@@ -258,9 +290,11 @@ function buildDocumentHtml(instance, options) {
   const sections = (instance.sections || []).filter((section) => !wanted || wanted.has(section.key));
   const maps = blockNumberMaps(instance);
   const missingCitations = [];
+  const missingAssets = [];
   const content = sections.map((section) => {
     const rendered = sectionHtml(section, maps, assetDir, citations, references, includeAlerts);
     missingCitations.push(...rendered.missing);
+    missingAssets.push(...(rendered.missingAssets || []));
     return rendered.html;
   }).join("\n");
 
@@ -270,7 +304,8 @@ function buildDocumentHtml(instance, options) {
       <div class="document-meta">Motor ${esc(instance.engineId)} · versión ${esc(instance.engineVersion)} · ${opts.final ? "VERSIÓN FINAL" : "BORRADOR"}</div>
       ${content}
     </body></html>`,
-    missingCitations: Array.from(new Set(missingCitations))
+    missingCitations: Array.from(new Set(missingCitations)),
+    missingAssets
   };
 }
 

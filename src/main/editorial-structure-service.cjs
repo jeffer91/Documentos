@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const visualRenderer = require("./visual-renderer-service.cjs");
 
 const BLOCK_TYPES = new Set([
   "prose",
@@ -163,14 +164,18 @@ function validateVisual(block, allowedVisuals) {
   const errors = [];
   if (!block.title && !block.caption) errors.push("La figura o herramienta visual necesita título.");
   if (block.type === "visual") {
-    if (!block.visualType) errors.push("La herramienta visual no indica su tipo.");
-    if (
-      block.visualType &&
-      Array.isArray(allowedVisuals) &&
-      allowedVisuals.length &&
-      !allowedVisuals.includes(block.visualType)
-    ) {
-      errors.push(`La herramienta visual "${block.visualType}" no está habilitada para esta sección.`);
+    if (!block.visualType) {
+      errors.push("La herramienta visual no indica su tipo.");
+    } else {
+      if (
+        Array.isArray(allowedVisuals) &&
+        allowedVisuals.length &&
+        !allowedVisuals.includes(block.visualType)
+      ) {
+        errors.push(`La herramienta visual "${block.visualType}" no está habilitada para esta sección.`);
+      }
+      const validation = visualRenderer.validateVisualData(block.visualType, block.data || {});
+      validation.errors.forEach((message) => errors.push(message));
     }
   }
   return errors;

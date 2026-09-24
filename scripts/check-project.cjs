@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const childProcess = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
@@ -34,6 +35,7 @@ const REQUIRED_FILES = [
   "src/main/document-outline-service.cjs",
   "src/main/document-data-binding-service.cjs",
   "src/main/alert-policy-service.cjs",
+  "src/main/export-quality-service.cjs",
   "src/main/process-hub-service.cjs",
   "src/main/engine-schema-service.cjs",
   "src/main/data-ingestion-service.cjs",
@@ -695,6 +697,100 @@ function draftFinalAlertCheck() {
   };
 }
 
+function exportVisualQualityCheck() {
+  const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
+  const quality = require(path.join(ROOT, "src/main/export-quality-service.cjs"));
+  const editorial = require(path.join(ROOT, "src/main/editorial-structure-service.cjs"));
+  const exportSource = fs.readFileSync(path.join(ROOT, "src/main/draft-export-service.cjs"), "utf8");
+  const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+  const exportWord = fs.readFileSync(path.join(ROOT, "scripts/export-draft.ps1"), "utf8");
+  const renderWord = fs.readFileSync(path.join(ROOT, "scripts/render-word.ps1"), "utf8");
+
+  const tools = visual.listTools();
+  const visualResults = tools.map((tool) => {
+    const payload = visual.samplePayload(tool.id);
+    const validation = visual.validateVisualData(tool.id, payload);
+    const svg = validation.ok ? visual.renderSvg(tool.id, payload) : "";
+    return {
+      id: tool.id,
+      valid: validation.ok,
+      svg: svg.includes("<svg") && svg.includes("viewBox")
+    };
+  });
+
+  const invalidFoda = visual.validateVisualData("foda", {});
+  const invalidLine = visual.validateVisualData("line", { items: [{ label: "Único", value: 1 }] });
+  const invalidEditorialVisual = editorial.validateSectionBlocks(
+    { title: "Análisis", type: "analysis_ai", allowedVisuals: ["foda"] },
+    [
+      { type: "prose", role: "context", text: "El análisis siguiente resume los hallazgos cualitativos detectados en el período." },
+      { type: "visual", visualType: "foda", title: "FODA vacío", data: {} },
+      { type: "prose", role: "analysis", text: "La interpretación posterior debe explicar los resultados del visual generado." }
+    ]
+  );
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "documentos-export-quality-"));
+  let signatures = false;
+  let incomplete = false;
+  try {
+    const base = path.join(temp, "demo");
+    const htmlPath = base + ".html";
+    fs.writeFileSync(htmlPath, "<!doctype html><html><body>ok</body></html>", "utf8");
+    fs.writeFileSync(base + ".pdf", Buffer.from("%PDF-1.7\nquality-check\n", "ascii"));
+    fs.writeFileSync(base + ".docx", Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]), Buffer.alloc(64, 1)]));
+    const all = quality.assessOutputs(base, htmlPath, ["html", "docx", "pdf"]);
+    signatures = all.complete && all.generatedFormats.length === 3;
+    fs.unlinkSync(base + ".pdf");
+    const partial = quality.assessOutputs(base, htmlPath, ["docx", "pdf"]);
+    incomplete = !partial.complete && partial.missingFormats.includes("pdf") && partial.generatedFormats.includes("docx");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+
+  return {
+    allVisuals:
+      tools.length === 13 &&
+      visualResults.length === 13 &&
+      visualResults.every((item) => item.valid && item.svg),
+    rejectsEmptyVisuals:
+      !invalidFoda.ok &&
+      !invalidLine.ok &&
+      !invalidEditorialVisual.ok &&
+      invalidEditorialVisual.errors.some((item) => item.includes("FODA necesita")),
+    signatures,
+    incomplete,
+    exportManifest:
+      exportSource.includes("manifestPath") &&
+      exportSource.includes("missingFormats") &&
+      exportSource.includes("converterStatus") &&
+      exportSource.includes('status = complete ? "complete" : "incomplete"'),
+    uiFailure:
+      mainSource.includes("if (!result.complete)") &&
+      mainSource.includes("Exportación incompleta") &&
+      renderer.includes("Exportación incompleta") &&
+      renderer.includes("missingFormats"),
+    missingAssets:
+      apaSource.includes("missingAssets") &&
+      apaSource.includes("Figura pendiente de archivo o renderizado") &&
+      exportSource.includes("missingAssets"),
+    multipageTables:
+      apaSource.includes("display:table-header-group") &&
+      apaSource.includes("page-break-inside:auto") &&
+      apaSource.includes("break-inside:avoid"),
+    wordLayout:
+      exportWord.includes("HeadingFormat = -1") &&
+      exportWord.includes("AllowBreakAcrossPages = 0") &&
+      exportWord.includes("$columnCount -ge 9") &&
+      exportWord.includes("$shape.Height -gt 520") &&
+      exportWord.includes("Nota\\.") &&
+      renderWord.includes("HeadingFormat = -1") &&
+      renderWord.includes("AllowBreakAcrossPages = 0") &&
+      renderWord.includes("$shape.Height -gt 520")
+  };
+}
+
 function apaCitationCheck() {
   const citations = require(path.join(ROOT, "src/main/citation-service.cjs"));
   const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
@@ -1108,6 +1204,25 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el flujo borrador/final del Bloque 4: ${error.message}`);
+  }
+
+  try {
+    const exportVisualQuality = exportVisualQualityCheck();
+    if (
+      !exportVisualQuality.allVisuals ||
+      !exportVisualQuality.rejectsEmptyVisuals ||
+      !exportVisualQuality.signatures ||
+      !exportVisualQuality.incomplete ||
+      !exportVisualQuality.exportManifest ||
+      !exportVisualQuality.uiFailure ||
+      !exportVisualQuality.missingAssets ||
+      !exportVisualQuality.multipageTables ||
+      !exportVisualQuality.wordLayout
+    ) {
+      errors.push(`La exportación Word/PDF y el motor gráfico del Bloque 5 no superaron la validación interna: ${JSON.stringify(exportVisualQuality)}`);
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar Word/PDF y visuales del Bloque 5: ${error.message}`);
   }
 
   try {
