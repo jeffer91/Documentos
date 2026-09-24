@@ -31,7 +31,10 @@ function binding(sectionKey, options) {
 
 const PROFILES = Object.freeze({
   schedule: binding("CRONOGRAMA", {
-    requiredAny: [["activity_name", "event_name", "core", "component"]],
+    requiredAny: [
+      ["activity_name", "event_name", "core", "component"],
+      ["start_date", "end_date", "event_date"]
+    ],
     optionalFields: ["start_date", "end_date", "event_date", "responsible", "career", "campus", "modality", "segment", "status"],
     dimensions: ["career", "campus", "modality", "segment", "status"],
     distinctBy: ["activity_id", "activity_name", "event_date"]
