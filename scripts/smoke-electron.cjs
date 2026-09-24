@@ -608,6 +608,18 @@ async function run() {
     assert.ok(migratedInstance.sections.some((item) => item.key === "NUEVA_SMOKE"));
     assert.ok(!migratedInstance.sections.some((item) => item.key === "LEGACY_SMOKE"));
     assert.ok(!migratedInstance.sections.some((item) => item.key === "REFERENCIAS"));
+    const migrationPendingOne = migratedInstance.sections.filter((item) => item.status === "migration_pending");
+    assert.ok(migrationPendingOne.some((item) => item.key === "NUEVA_SMOKE"));
+    assert.strictEqual(migratedInstance.stale, true);
+
+    // Revisar una sección no debe perder otras pendientes; al resolver la última, se limpia el stale de migración.
+    migratedInstance = processHub.updateSection(temp, instanceV4.id, "NUEVA_SMOKE", {
+      content: "Contenido revisado de la nueva sección.",
+      status: "edited"
+    });
+    assert.strictEqual(migratedInstance.sections.some((item) => item.status === "migration_pending"), false);
+    assert.strictEqual(migratedInstance.stale, false);
+
     const archivedAfterOne = processHub.listArchivedSections(temp, instanceV4.id);
     assert.ok(archivedAfterOne.some((item) => item.key === "LEGACY_SMOKE" && item.content.includes("Contenido histórico")));
     assert.ok(archivedAfterOne.some((item) => item.key === "REFERENCIAS"));
@@ -635,6 +647,9 @@ async function run() {
     assert.strictEqual(Number(reactivatedRow.active), 1);
     assert.strictEqual(reactivatedRow.content, "Contenido histórico que debe conservarse.");
     assert.strictEqual(reactivatedRow.archived_at, null);
+    migratedInstance = processHub.getDocumentInstance(temp, instanceV4.id);
+    assert.ok(migratedInstance.sections.some((item) => item.key === "LEGACY_SMOKE" && item.status === "migration_pending"));
+    assert.strictEqual(migratedInstance.stale, true);
     assert.strictEqual(processHub.listEngineMigrations(temp, instanceV4.id).length, 2);
 
     // Una final congelada jamás se migra aunque el motor cambie después.
