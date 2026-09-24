@@ -6,13 +6,17 @@
     dashboard: null,
     engines: [],
     providers: [],
+    capabilities: null,
     dossier: null,
     segments: [],
     masterData: [],
     imports: [],
     knowledgeSources: [],
+    citations: [],
     instances: [],
     instance: null,
+    editorialValidation: null,
+    citationValidation: null,
     busy: false,
     currentView: "home"
   };
@@ -55,14 +59,16 @@
   }
 
   async function loadHome() {
-    const [dashboard, engines, providers] = await Promise.all([
+    const [dashboard, engines, providers, capabilities] = await Promise.all([
       api.getArchitectureDashboard(),
       api.listEngines(),
-      api.listAiProviders()
+      api.listAiProviders(),
+      api.getEditorialCapabilities()
     ]);
     state.dashboard = dashboard && dashboard.ok ? dashboard.dashboard : { periods: [], dossiers: [] };
     state.engines = engines && engines.ok ? engines.engines || [] : [];
     state.providers = providers && providers.ok ? providers.providers || [] : [];
+    state.capabilities = capabilities && capabilities.ok ? capabilities : null;
   }
 
   async function loadDossier(dossierId) {
@@ -73,6 +79,7 @@
     state.masterData = response.masterData || [];
     state.imports = response.imports || [];
     state.knowledgeSources = response.knowledgeSources || [];
+    state.citations = response.citations || [];
     state.instances = response.instances || [];
     const engines = await api.listEngines();
     state.engines = engines && engines.ok ? engines.engines || [] : [];
@@ -82,6 +89,8 @@
     const response = await api.getDocumentInstance(instanceId);
     if (!response || !response.ok || !response.instance) throw new Error(response && response.error || "No se pudo abrir el documento.");
     state.instance = response.instance;
+    state.editorialValidation = response.editorialValidation || null;
+    state.citationValidation = response.citationValidation || null;
     return state.instance;
   }
 
@@ -233,14 +242,28 @@
     }).join("")}</div>`;
   }
 
+  function citationForSource(sourceId) {
+    return (state.citations || []).find((item) => item.sourceId === sourceId) || null;
+  }
+
   function knowledgeHtml() {
     if (!(state.knowledgeSources || []).length) return '<div class="empty compact-empty"><b>Sin fuentes institucionales</b>Agrega reglamentos, manuales, políticas o normativa.</div>';
-    return `<div class="arch-data-list">${state.knowledgeSources.map((item) => `
+    return `<div class="arch-data-list">${state.knowledgeSources.map((item) => {
+      const citation = citationForSource(item.id);
+      return `
       <div class="arch-data-row">
-        <div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.sourceType)} · ${Number(item.textLength || 0)} caracteres · SHA-256 registrado</small></div>
-        <button class="danger-button small-inline" data-arch-action="remove-knowledge" data-id="${escapeHtml(item.id)}">Quitar</button>
+        <div>
+          <b>${escapeHtml(item.name)}</b>
+          <small>${escapeHtml(item.sourceType)} · ${Number(item.textLength || 0)} caracteres · SHA-256 registrado</small>
+          <small class="${citation && citation.complete ? "arch-ok-text" : "arch-warn-text"}">APA: ${citation && citation.complete ? "completo" : "pendiente de metadatos"}</small>
+        </div>
+        <div class="button-row">
+          <button class="ghost small-inline" data-arch-action="edit-citation" data-source-id="${escapeHtml(item.id)}">APA</button>
+          <button class="danger-button small-inline" data-arch-action="remove-knowledge" data-id="${escapeHtml(item.id)}">Quitar</button>
+        </div>
       </div>
-    `).join("")}</div>`;
+    `;
+    }).join("")}</div>`;
   }
 
   function engineCard(engine) {
@@ -330,11 +353,31 @@
     `).join("")}</div>`;
   }
 
+  function visualLabel(id) {
+    const tool = state.capabilities && (state.capabilities.visualTools || []).find((item) => item.id === id);
+    return tool ? tool.label : id;
+  }
+
+  function blockSummary(section) {
+    const blocks = section.blocks || [];
+    if (!blocks.length) return '<span class="arch-muted-chip">Sin bloques estructurados</span>';
+    return blocks.map((block) => {
+      const label = block.type === "visual" && block.visualType ? `Visual: ${visualLabel(block.visualType)}` : block.type;
+      return `<span class="arch-block-chip">${escapeHtml(label)}</span>`;
+    }).join("");
+  }
+
   function sectionCard(section) {
+    const level = Math.max(1, Number(section.level || 1));
+    const allowed = section.allowedVisuals || [];
+    const number = section.numbering || String(section.order || "");
     return `
-      <article class="arch-section-card">
+      <article class="arch-section-card level-${level}" style="--section-level:${level}">
         <div class="arch-section-head">
-          <label><input type="checkbox" data-arch-section-select value="${escapeHtml(section.key)}"> ${section.order}. ${escapeHtml(section.title)}</label>
+          <div class="arch-section-title-wrap">
+            <label><input type="checkbox" data-arch-section-select value="${escapeHtml(section.key)}"> <b>${escapeHtml(number)}.</b> ${escapeHtml(section.title)}</label>
+            <small>Nivel ${level} · ${escapeHtml(section.type)} · ${(section.blocks || []).length} bloque(s)</small>
+          </div>
           <div class="button-row">
             <span class="status ${section.status === "approved" ? "good" : section.alerts && section.alerts.length ? "warn" : ""}">${escapeHtml(section.status)}</span>
             <button class="ghost small-inline" data-arch-action="generate-section" data-key="${escapeHtml(section.key)}">IA</button>
@@ -342,6 +385,8 @@
             <button class="secondary small-inline" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">${section.locked ? "Aprobada" : "Aprobar"}</button>
           </div>
         </div>
+        ${allowed.length ? `<div class="arch-visual-tools"><span>Herramientas habilitadas:</span>${allowed.map((id) => `<em>${escapeHtml(visualLabel(id))}</em>`).join("")}</div>` : ""}
+        <div class="arch-block-summary">${blockSummary(section)}</div>
         ${alertBlock(section)}
         <textarea class="arch-section-text" id="arch-section-${escapeHtml(section.key)}" ${section.locked ? "disabled" : ""}>${escapeHtml(section.content)}</textarea>
         ${section.locked ? "" : `<button class="ghost small-inline" data-arch-action="save-section" data-key="${escapeHtml(section.key)}">Guardar edición</button>`}
@@ -354,7 +399,15 @@
     await loadInstance(instanceId || state.instance && state.instance.id);
     setHeader(state.instance.label, `Procesos / ${state.dossier ? state.dossier.label : "Documento"}`, true);
     const alerts = state.instance.sections.reduce((sum, section) => sum + (section.alerts || []).length, 0);
+    const editorialErrors = state.editorialValidation && state.editorialValidation.errors || [];
+    const editorialWarnings = state.editorialValidation && state.editorialValidation.warnings || [];
+    const citationIssues = state.citationValidation
+      ? (state.citationValidation.missing || []).concat(state.citationValidation.incomplete || [])
+      : [];
     view().innerHTML = `
+      ${editorialErrors.length ? `<div class="notice-warn"><b>Control editorial pendiente</b><span>${escapeHtml(editorialErrors.slice(0,3).join(" · "))}</span></div>` : ""}
+      ${!editorialErrors.length && editorialWarnings.length ? `<div class="notice-soft"><b>Observaciones editoriales</b><span>${escapeHtml(editorialWarnings.slice(0,3).join(" · "))}</span></div>` : ""}
+      ${citationIssues.length ? `<div class="notice-warn"><b>Citas APA pendientes</b><span>${escapeHtml(citationIssues.slice(0,6).join(", "))}</span></div>` : ""}
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Regenera las secciones no bloqueadas.</span></div>` : ""}
       <div class="arch-dossier-head">
         <div>
@@ -441,6 +494,42 @@
     if (!response || response.canceled) return;
     if (!response.ok) return toast(response.error || "No se pudo agregar la fuente.");
     toast("Fuente institucional agregada y versionada.");
+    await renderDossier(state.dossier.id);
+  }
+
+  async function editCitation(sourceId) {
+    const source = (state.knowledgeSources || []).find((item) => item.id === sourceId);
+    if (!source) return;
+    const current = citationForSource(sourceId) || {};
+    const corporateAuthor = window.prompt("Autor institucional/corporativo (deja vacío si es autor personal):", current.corporateAuthor || "");
+    if (corporateAuthor == null) return;
+    const author = window.prompt("Autor personal en formato Apellido, Iniciales (opcional):", current.author || "");
+    if (author == null) return;
+    const year = window.prompt("Año de publicación (o s. f. si realmente no existe):", current.year || "");
+    if (year == null) return;
+    const titleValue = window.prompt("Título de la fuente:", current.title || source.name || "");
+    if (titleValue == null) return;
+    const publisher = window.prompt("Editorial / institución publicadora (opcional):", current.publisher || "");
+    if (publisher == null) return;
+    const url = window.prompt("URL (opcional):", current.url || "");
+    if (url == null) return;
+    const doi = window.prompt("DOI (opcional):", current.doi || "");
+    if (doi == null) return;
+    const response = await api.saveCitation(state.dossier.id, {
+      citationKey: current.citationKey || `SRC:${sourceId}`,
+      sourceId,
+      sourceType: source.sourceType || "institutional",
+      corporateAuthor,
+      author,
+      year,
+      title: titleValue,
+      publisher,
+      url,
+      doi,
+      metadata: Object.assign({}, current.metadata || {}, { reviewedByHuman: true })
+    });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo guardar la referencia APA.");
+    toast("Metadatos APA guardados.");
     await renderDossier(state.dossier.id);
   }
 
@@ -555,6 +644,7 @@
       if (action === "add-data-import") return addDataImport();
       if (action === "add-knowledge") return addKnowledge();
       if (action === "clone-dossier") return cloneDossier();
+      if (action === "edit-citation") return editCitation(button.dataset.sourceId);
       if (action === "remove-knowledge") {
         const response = await api.removeKnowledgeSource(button.dataset.id);
         if (!response || !response.ok) return toast(response && response.error || "No se pudo quitar la fuente.");
