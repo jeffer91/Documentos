@@ -88,6 +88,7 @@ function rowDefinition(row) {
     derivedFrom: Array.isArray(layout.derivedFrom) ? layout.derivedFrom : [],
     maxWords: layout.maxWords || null,
     compact: Boolean(layout.compact),
+    data: layout.data || {},
     layout: layout.layout || {}
   };
 }
