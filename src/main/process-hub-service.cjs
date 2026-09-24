@@ -106,6 +106,8 @@ function ensureSchema(db) {
       stale_reason TEXT NOT NULL DEFAULT '',
       final_frozen_at TEXT,
       frozen_snapshot_json TEXT,
+      engine_schema_hash TEXT NOT NULL DEFAULT '',
+      last_migrated_at TEXT,
       project_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -129,6 +131,11 @@ function ensureSchema(db) {
       alerts_json TEXT NOT NULL DEFAULT '[]',
       locked INTEGER NOT NULL DEFAULT 0,
       generated_at TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      archived_at TEXT,
+      archived_reason TEXT NOT NULL DEFAULT '',
+      introduced_engine_version TEXT NOT NULL DEFAULT '',
+      last_engine_version TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY(instance_id) REFERENCES document_instances_v3(id) ON DELETE CASCADE
@@ -229,6 +236,13 @@ function ensureSchema(db) {
   ensureColumn(db, "document_sections_v3", "page_break_before", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "document_sections_v3", "keep_with_next", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "document_sections_v3", "layout_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, "document_sections_v3", "is_active", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "document_sections_v3", "archived_at", "TEXT");
+  ensureColumn(db, "document_sections_v3", "archived_reason", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "introduced_engine_version", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "last_engine_version", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_instances_v3", "engine_schema_hash", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_instances_v3", "last_migrated_at", "TEXT");
 }
 
 function dbFor(userDataPath) {
@@ -504,27 +518,77 @@ function listMasterData(userDataPath, dossierId) {
     }));
 }
 
-function ensureSections(db, instanceId, engine) {
+function engineSchemaDescriptor(engine) {
+  return editorial.flattenSections(engine && engine.sections || []).map((sectionItem) => ({
+    key: sectionItem.key,
+    title: sectionItem.title,
+    type: sectionItem.type,
+    parentKey: sectionItem.parentKey || "",
+    level: Number(sectionItem.level || 1),
+    sortPath: sectionItem.sortPath || "",
+    numbering: sectionItem.numbering || "",
+    pageBreakBefore: Boolean(sectionItem.pageBreakBefore),
+    keepWithNext: sectionItem.keepWithNext !== false,
+    required: sectionItem.required !== false,
+    allowedVisuals: sectionItem.allowedVisuals || [],
+    derivedFrom: sectionItem.derivedFrom || [],
+    maxWords: sectionItem.maxWords || null,
+    compact: Boolean(sectionItem.compact),
+    layout: sectionItem.layout || {}
+  }));
+}
+
+function engineSchemaHash(engine) {
+  return crypto.createHash("sha256").update(JSON.stringify(engineSchemaDescriptor(engine))).digest("hex");
+}
+
+function syncEngineSchema(db, instanceRow, engine, options) {
+  if (!instanceRow) throw new Error("Instancia documental no válida.");
+  const opts = options || {};
+  if (instanceRow.final_frozen_at && !opts.allowFrozen) {
+    return {
+      changed: false,
+      skipped: "frozen",
+      fromVersion: instanceRow.engine_version || "",
+      toVersion: instanceRow.engine_version || "",
+      added: [],
+      updated: [],
+      archived: [],
+      reactivated: []
+    };
+  }
+
   const ts = now();
-  const sections = editorial.flattenSections(engine.sections || []);
-  const upsert = db.prepare(`
+  const targetVersion = String(engine.version || registry.VERSION || "");
+  const targetHash = engineSchemaHash(engine);
+  const previousVersion = String(instanceRow.engine_version || "");
+  const previousHash = String(instanceRow.engine_schema_hash || "");
+  const sections = engineSchemaDescriptor(engine);
+  const targetKeys = new Set(sections.map((item) => item.key));
+  const existingRows = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ?").all(instanceRow.id);
+  const existingByKey = new Map(existingRows.map((row) => [row.section_key, row]));
+
+  const added = [];
+  const updated = [];
+  const archived = [];
+  const reactivated = [];
+
+  const insert = db.prepare(`
     INSERT INTO document_sections_v3
       (id, instance_id, section_key, section_order, title, section_type, status, content, data_json, provenance_json, alerts_json, locked,
-       parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next, layout_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(instance_id, section_key) DO UPDATE SET
-      section_order = excluded.section_order,
-      title = excluded.title,
-      section_type = excluded.section_type,
-      parent_key = excluded.parent_key,
-      section_level = excluded.section_level,
-      sort_path = excluded.sort_path,
-      numbering = excluded.numbering,
-      page_break_before = excluded.page_break_before,
-      keep_with_next = excluded.keep_with_next,
-      layout_json = excluded.layout_json,
-      updated_at = excluded.updated_at
+       parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next, layout_json,
+       is_active, archived_at, archived_reason, introduced_engine_version, last_engine_version, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '', ?, ?, ?, ?)
   `);
+
+  const update = db.prepare(`
+    UPDATE document_sections_v3
+    SET section_order = ?, title = ?, section_type = ?, parent_key = ?, section_level = ?, sort_path = ?, numbering = ?,
+        page_break_before = ?, keep_with_next = ?, layout_json = ?, is_active = 1, archived_at = NULL, archived_reason = '',
+        last_engine_version = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
   sections.forEach((sectionItem, index) => {
     const layout = {
       required: sectionItem.required !== false,
@@ -534,13 +598,93 @@ function ensureSections(db, instanceId, engine) {
       compact: Boolean(sectionItem.compact),
       layout: sectionItem.layout || {}
     };
-    upsert.run(
-      id("section"), instanceId, sectionItem.key, index + 1, sectionItem.title, sectionItem.type,
-      sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
-      sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0, sectionItem.keepWithNext === false ? 0 : 1,
-      JSON.stringify(layout), ts, ts
+    const existing = existingByKey.get(sectionItem.key);
+    if (!existing) {
+      insert.run(
+        id("section"), instanceRow.id, sectionItem.key, index + 1, sectionItem.title, sectionItem.type,
+        sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
+        sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0, sectionItem.keepWithNext === false ? 0 : 1,
+        JSON.stringify(layout), targetVersion, targetVersion, ts, ts
+      );
+      added.push(sectionItem.key);
+      return;
+    }
+
+    if (!existing.is_active) reactivated.push(sectionItem.key);
+    update.run(
+      index + 1, sectionItem.title, sectionItem.type, sectionItem.parentKey || "", Number(sectionItem.level || 1),
+      sectionItem.sortPath || "", sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0,
+      sectionItem.keepWithNext === false ? 0 : 1, JSON.stringify(layout), targetVersion, ts, existing.id
     );
+    updated.push(sectionItem.key);
   });
+
+  const archive = db.prepare(`
+    UPDATE document_sections_v3
+    SET is_active = 0, archived_at = ?, archived_reason = ?, last_engine_version = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  existingRows.forEach((row) => {
+    if (row.is_active && !targetKeys.has(row.section_key)) {
+      const reason = `Sección retirada del motor ${engine.engineId} al sincronizar ${previousVersion || "sin versión"} → ${targetVersion || "sin versión"}.`;
+      archive.run(ts, reason, targetVersion, ts, row.id);
+      archived.push(row.section_key);
+    }
+  });
+
+  const schemaChanged = previousHash !== targetHash;
+  const versionChanged = previousVersion !== targetVersion;
+  const changed = schemaChanged || versionChanged || added.length > 0 || archived.length > 0 || reactivated.length > 0;
+
+  db.prepare(`
+    UPDATE document_instances_v3
+    SET document_id = ?, label = ?, engine_version = ?, engine_schema_hash = ?, last_migrated_at = ?,
+        stale = CASE WHEN ? THEN 1 ELSE stale END,
+        stale_reason = CASE WHEN ? THEN ? ELSE stale_reason END,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    engine.documentId, engine.label, targetVersion, targetHash, changed ? ts : instanceRow.last_migrated_at,
+    changed ? 1 : 0,
+    changed ? 1 : 0,
+    changed ? `Motor documental actualizado: ${previousVersion || "sin versión"} → ${targetVersion || "sin versión"}.` : "",
+    ts,
+    instanceRow.id
+  );
+
+  if (changed && !opts.skipAudit) {
+    audit(db, {
+      dossierId: instanceRow.dossier_id,
+      instanceId: instanceRow.id,
+      entityType: "engine_schema",
+      entityId: engine.engineId,
+      action: previousVersion ? "migrate" : "initialize",
+      detail: {
+        fromVersion: previousVersion,
+        toVersion: targetVersion,
+        previousSchemaHash: previousHash,
+        schemaHash: targetHash,
+        added,
+        archived,
+        reactivated,
+        preserved: updated,
+        frozen: false
+      }
+    });
+  }
+
+  return {
+    changed,
+    skipped: "",
+    fromVersion: previousVersion,
+    toVersion: targetVersion,
+    previousSchemaHash: previousHash,
+    schemaHash: targetHash,
+    added,
+    updated,
+    archived,
+    reactivated
+  };
 }
 
 function ensureDocumentInstance(userDataPath, dossierId, engineId, scope) {
@@ -555,20 +699,37 @@ function ensureDocumentInstance(userDataPath, dossierId, engineId, scope) {
     SELECT * FROM document_instances_v3
     WHERE dossier_id = ? AND engine_id = ? AND scope_type = ? AND scope_key = ?
   `).get(dossierId, engineId, scopeType, scopeKey);
+
   if (!row) {
     const ts = now();
     const instanceId = id("doc");
     db.prepare(`
       INSERT INTO document_instances_v3
-        (id, dossier_id, document_id, engine_id, engine_version, scope_type, scope_key, label, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+        (id, dossier_id, document_id, engine_id, engine_version, scope_type, scope_key, label, status,
+         engine_schema_hash, last_migrated_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', '', NULL, ?, ?)
     `).run(instanceId, dossierId, engine.documentId, engine.engineId, engine.version, scopeType, scopeKey, engine.label, ts, ts);
-    ensureSections(db, instanceId, engine);
-    audit(db, { dossierId, instanceId, entityType: "document_instance", entityId: instanceId, action: "create", detail: { engineId, scopeType, scopeKey } });
     row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
-  } else {
-    ensureSections(db, row.id, engine);
+    const sync = syncEngineSchema(db, row, engine, { skipAudit: true });
+    audit(db, {
+      dossierId,
+      instanceId,
+      entityType: "document_instance",
+      entityId: instanceId,
+      action: "create",
+      detail: {
+        engineId,
+        engineVersion: engine.version,
+        engineSchemaHash: sync.schemaHash,
+        scopeType,
+        scopeKey,
+        sectionCount: sync.added.length
+      }
+    });
+  } else if (!row.final_frozen_at) {
+    syncEngineSchema(db, row, engine);
   }
+
   return getDocumentInstance(userDataPath, row.id);
 }
 
@@ -627,6 +788,11 @@ function rowToSection(row, db) {
     blocks: db ? listBlocksForSection(db, row.id) : [],
     locked: Boolean(row.locked),
     generatedAt: row.generated_at,
+    active: row.is_active !== 0,
+    archivedAt: row.archived_at || null,
+    archivedReason: row.archived_reason || "",
+    introducedEngineVersion: row.introduced_engine_version || "",
+    lastEngineVersion: row.last_engine_version || "",
     updatedAt: row.updated_at
   };
 }
@@ -635,7 +801,8 @@ function getDocumentInstance(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
   if (!row) return null;
-  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND is_active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const archivedSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND is_active = 0 ORDER BY archived_at, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
   const engine = registry.getEngine(row.engine_id);
   return {
     id: row.id,
@@ -653,7 +820,10 @@ function getDocumentInstance(userDataPath, instanceId) {
     finalFrozenAt: row.final_frozen_at,
     frozenSnapshot: json(row.frozen_snapshot_json, null),
     projectId: row.project_id || "",
+    engineSchemaHash: row.engine_schema_hash || "",
+    lastMigratedAt: row.last_migrated_at || null,
     sections,
+    archivedSections,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -709,7 +879,7 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada.");
-  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ?").get(instanceId, sectionKey);
+  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND is_active = 1").get(instanceId, sectionKey);
   if (!sectionRow) throw new Error("Sección no válida.");
   const normalized = editorial.normalizeBlocks(blocks || []);
   const validation = editorial.validateSectionBlocks(rowToSection(sectionRow, db), normalized);
@@ -745,7 +915,7 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada. Crea una nueva versión de trabajo.");
-  const current = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ?").get(instanceId, sectionKey);
+  const current = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND is_active = 1").get(instanceId, sectionKey);
   if (!current) throw new Error("Sección no válida.");
   if (current.locked && patch && patch.force !== true) throw new Error("La sección está aprobada y bloqueada.");
   const ts = now();
@@ -795,6 +965,7 @@ function freezeFinal(userDataPath, instanceId) {
   const snapshot = {
     engineId: instance.engineId,
     engineVersion: instance.engineVersion,
+    engineSchemaHash: instance.engineSchemaHash,
     scopeType: instance.scopeType,
     scopeKey: instance.scopeKey,
     masterData: listMasterData(userDataPath, instance.dossierId),
@@ -818,19 +989,46 @@ function createWorkingCopy(userDataPath, instanceId) {
   if (!source) throw new Error("Documento no válido.");
   const scopeKey = source.scopeKey ? `${source.scopeKey}::rev-${Date.now()}` : `rev-${Date.now()}`;
   const copy = ensureDocumentInstance(userDataPath, source.dossierId, source.engineId, { type: source.scopeType, key: scopeKey });
-  source.sections.forEach((sectionItem) => {
+
+  const sourceSections = source.finalFrozenAt && source.frozenSnapshot && Array.isArray(source.frozenSnapshot.sections)
+    ? source.frozenSnapshot.sections
+    : source.sections;
+  const targetKeys = new Set(copy.sections.map((item) => item.key));
+  const skippedLegacySections = [];
+
+  sourceSections.forEach((sectionItem) => {
+    if (!targetKeys.has(sectionItem.key)) {
+      skippedLegacySections.push(sectionItem.key);
+      return;
+    }
     updateSection(userDataPath, copy.id, sectionItem.key, {
       content: sectionItem.content,
       status: sectionItem.status === "approved" ? "edited" : sectionItem.status,
       data: sectionItem.data,
-      provenance: sectionItem.provenance,
+      provenance: Object.assign({}, sectionItem.provenance || {}, {
+        copiedFromInstanceId: source.id,
+        copiedFromEngineVersion: source.engineVersion
+      }),
       alerts: sectionItem.alerts,
       blocks: sectionItem.blocks || [],
       locked: false,
       force: true
     });
   });
-  audit(db, { dossierId: source.dossierId, instanceId: copy.id, entityType: "document_instance", entityId: copy.id, action: "working_copy", detail: { sourceInstanceId: instanceId } });
+
+  audit(db, {
+    dossierId: source.dossierId,
+    instanceId: copy.id,
+    entityType: "document_instance",
+    entityId: copy.id,
+    action: "working_copy",
+    detail: {
+      sourceInstanceId: instanceId,
+      sourceEngineVersion: source.engineVersion,
+      targetEngineVersion: copy.engineVersion,
+      skippedLegacySections
+    }
+  });
   return getDocumentInstance(userDataPath, copy.id);
 }
 
@@ -901,6 +1099,8 @@ function dashboard(userDataPath) {
 
 module.exports = {
   ensureSchema,
+  engineSchemaHash,
+  syncEngineSchema,
   createPeriod,
   getPeriod,
   listPeriods,
