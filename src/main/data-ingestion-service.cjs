@@ -774,8 +774,10 @@ function suppressNumeric(item, minimum, includeCounts) {
 function aiSlice(userDataPath, dossierId, query) {
   const input = query || {};
   const summary = summarize(userDataPath, dossierId, input);
-  const privacyMinGroup = Math.max(2, Number(input.privacyMinGroup || 5));
-  const includeCounts = input.includeCountsForAi === true;
+  const privacyMode = String(input.privacyMode || "aggregate").toLowerCase();
+  const individualMode = ["individual", "student_specific"].includes(privacyMode);
+  const privacyMinGroup = individualMode ? 1 : Math.max(2, Number(input.privacyMinGroup || 5));
+  const includeCounts = input.includeCountsForAi === true || individualMode;
   const safePercentages = {};
   Object.entries(summary.percentages || {}).forEach(([field, items]) => {
     safePercentages[field] = suppressDimension(items, privacyMinGroup, includeCounts);
@@ -803,9 +805,8 @@ function aiSlice(userDataPath, dossierId, query) {
     return out;
   });
 
-  const privacyMode = String(input.privacyMode || "aggregate").toLowerCase();
   const rawRowsAllowed = input.includeSampleRows === true &&
-    (input.allowRawRowsForAi === true || ["individual", "student_specific"].includes(privacyMode));
+    (input.allowRawRowsForAi === true || individualMode);
   const hasExplicitSelect = Array.isArray(input.select) && input.select.length > 0;
   let sampleRows = [];
   const warnings = [];
@@ -827,7 +828,9 @@ function aiSlice(userDataPath, dossierId, query) {
     querySignature: summary.querySignature,
     population: {
       calculationComplete: true,
-      absoluteCountsExposed: includeCounts
+      absoluteCountsExposed: includeCounts,
+      total: includeCounts ? summary.total : null,
+      privacyMode
     },
     summary: {
       percentages: safePercentages,
