@@ -32,6 +32,7 @@ const REQUIRED_FILES = [
   "src/main/settings-service.cjs",
   "src/main/document-engine-registry.cjs",
   "src/main/process-hub-service.cjs",
+  "src/main/engine-schema-service.cjs",
   "src/main/data-ingestion-service.cjs",
   "src/main/ai-provider-service.cjs",
   "src/main/ai-orchestrator.cjs",
@@ -274,6 +275,48 @@ function architectureV3Check() {
   };
 }
 
+function engineLifecycleCheck() {
+  const schema = require(path.join(ROOT, "src/main/engine-schema-service.cjs"));
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+  const base = registry.getEngine("tit.regular.informe-final");
+  const target = Object.assign({}, base, {
+    version: "4.1.0-test",
+    sections: [
+      ...(base.sections || []).filter((item) => item.key !== "REFERENCIAS"),
+      { key: "NUEVA_SECCION", title: "Nueva sección", type: "ai", children: [] }
+    ]
+  });
+  const currentRows = schema.normalizedEngineSections(base).map((item) => ({
+    section_key: item.key,
+    title: item.title,
+    section_type: item.type,
+    parent_key: item.parentKey,
+    section_level: item.level,
+    sort_path: item.sortPath,
+    numbering: item.numbering,
+    page_break_before: item.pageBreakBefore ? 1 : 0,
+    keep_with_next: item.keepWithNext === false ? 0 : 1,
+    layout_json: JSON.stringify({
+      required: item.required !== false,
+      allowedVisuals: item.allowedVisuals || [],
+      derivedFrom: item.derivedFrom || [],
+      maxWords: item.maxWords || null,
+      compact: Boolean(item.compact),
+      layout: item.layout || {}
+    }),
+    active: 1,
+    definition_hash: item.definitionHash
+  }));
+  const plan = schema.planMigration(currentRows, target);
+  return {
+    deterministicHash: schema.engineDefinitionHash(base) === schema.engineDefinitionHash(base),
+    detectsAdded: plan.added.includes("NUEVA_SECCION"),
+    detectsArchived: plan.archived.includes("REFERENCIAS"),
+    keepsExisting: plan.unchanged.length > 0 || plan.updated.length > 0,
+    structuralChange: plan.structuralChange === true
+  };
+}
+
 function editorialV4Check() {
   const editorial = require(path.join(ROOT, "src/main/editorial-structure-service.cjs"));
   const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
@@ -430,6 +473,21 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar arquitectura v3: ${error.message}`);
+  }
+
+  try {
+    const lifecycle = engineLifecycleCheck();
+    if (
+      !lifecycle.deterministicHash ||
+      !lifecycle.detectsAdded ||
+      !lifecycle.detectsArchived ||
+      !lifecycle.keepsExisting ||
+      !lifecycle.structuralChange
+    ) {
+      errors.push("El ciclo de vida de motores no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el ciclo de vida de motores: ${error.message}`);
   }
 
   try {
