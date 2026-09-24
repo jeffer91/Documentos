@@ -1002,6 +1002,179 @@
     await renderInstance(state.instance.id);
   }
 
+  function recommendationCacheKey() {
+    return state.instance ? `documentos-section-recommendations-${state.instance.id}-${state.instance.engineVersion}` : "";
+  }
+
+  function loadCachedRecommendations() {
+    const key = recommendationCacheKey();
+    if (!key) return {};
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function saveCachedRecommendations(items) {
+    const key = recommendationCacheKey();
+    if (!key) return;
+    try { localStorage.setItem(key, JSON.stringify(items || {})); } catch (_error) { /* opcional */ }
+  }
+
+  async function ensureSectionRecommendations(force) {
+    if (!state.instance || recommendingSections) return;
+    const candidates = structureSections().filter((item) => item.required === false && item.layout && item.layout.aiRecommendation);
+    if (!candidates.length) return;
+    if (!force) {
+      const cached = loadCachedRecommendations();
+      if (Object.keys(cached).length) {
+        state.sectionRecommendations = cached;
+        if (state.currentView === "instance" && state.instanceStage === "document") view().innerHTML = instanceStageMarkup();
+        return;
+      }
+    }
+    recommendingSections = true;
+    try {
+      const response = await api.recommendEngineSections(state.instance.id, {});
+      if (!response || !response.ok || !response.result) return;
+      const mapped = {};
+      (response.result.recommendations || []).forEach((item) => {
+        if (item && item.key) mapped[item.key] = item;
+      });
+      state.sectionRecommendations = mapped;
+      saveCachedRecommendations(mapped);
+      if (state.currentView === "instance" && state.instanceStage === "document") {
+        view().innerHTML = instanceStageMarkup();
+      }
+    } finally {
+      recommendingSections = false;
+    }
+  }
+
+  function sectionSaveLabel(textValue) {
+    const element = document.querySelector(".section-save-state");
+    if (element) element.textContent = textValue;
+  }
+
+  async function persistCurrentEditor() {
+    if (!state.instance || state.instance.finalFrozenAt) return true;
+    const section = activeCurrentSection();
+    if (!section || section.locked) return true;
+    const blocks = section.blocks || [];
+    sectionSaveLabel("Guardando...");
+
+    if (!blocks.length) {
+      const editor = document.querySelector('[data-arch-editor="content"]');
+      if (!editor) return true;
+      const value = editor.value;
+      if (String(value) === String(section.content || "")) {
+        sectionSaveLabel("Guardado automáticamente ✓");
+        return true;
+      }
+      const response = await api.updateDocumentSection(state.instance.id, section.key, {
+        content: value,
+        status: "edited",
+        provenance: Object.assign({}, section.provenance || {}, {
+          source: "human",
+          editedAt: new Date().toISOString()
+        })
+      });
+      if (!response || !response.ok) {
+        sectionSaveLabel("Error al guardar");
+        toast(response && response.error || "No se pudo guardar la sección.");
+        return false;
+      }
+      state.instance = response.instance;
+      sectionSaveLabel("Guardado automáticamente ✓");
+      return true;
+    }
+
+    const nextBlocks = blocks.map((block) => {
+      const next = Object.assign({}, block, { data: Object.assign({}, block.data || {}) });
+      const textArea = document.querySelector(`[data-arch-editor="block-text"][data-section-key="${CSS.escape(section.key)}"][data-block-key="${CSS.escape(block.key)}"]`);
+      if (textArea) next.text = textArea.value;
+      const listArea = document.querySelector(`[data-arch-editor="block-list"][data-section-key="${CSS.escape(section.key)}"][data-block-key="${CSS.escape(block.key)}"]`);
+      if (listArea) next.data.items = listArea.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      return next;
+    });
+    const currentSignature = JSON.stringify(blocks.map((item) => ({ key: item.key, text: item.text, data: item.data })));
+    const nextSignature = JSON.stringify(nextBlocks.map((item) => ({ key: item.key, text: item.text, data: item.data })));
+    if (currentSignature === nextSignature) {
+      sectionSaveLabel("Guardado automáticamente ✓");
+      return true;
+    }
+    const response = await api.setDocumentSectionBlocks(state.instance.id, section.key, nextBlocks);
+    if (!response || !response.ok) {
+      sectionSaveLabel("Error al guardar");
+      toast(response && response.error || "No se pudieron guardar los cambios.");
+      return false;
+    }
+    if (response.result && response.result.instance) state.instance = response.result.instance;
+    sectionSaveLabel("Guardado automáticamente ✓");
+    return true;
+  }
+
+  function scheduleSectionSave() {
+    clearTimeout(sectionSaveTimer);
+    sectionSaveLabel("Cambios pendientes...");
+    sectionSaveTimer = setTimeout(() => {
+      persistCurrentEditor().catch((error) => toast(error.message || String(error)));
+    }, 700);
+  }
+
+  async function moveSection(delta) {
+    clearTimeout(sectionSaveTimer);
+    const saved = await persistCurrentEditor();
+    if (!saved) return;
+    const active = state.instance.sections || [];
+    const index = active.findIndex((item) => item.key === state.currentSectionKey);
+    const next = active[index + Number(delta || 0)];
+    if (!next) return;
+    state.currentSectionKey = next.key;
+    await renderInstance(state.instance.id);
+  }
+
+  async function toggleSectionIncluded(sectionKey) {
+    clearTimeout(sectionSaveTimer);
+    const all = structureSections();
+    const section = all.find((item) => item.key === sectionKey);
+    if (!section) return;
+    if (state.currentSectionKey === sectionKey && section.included !== false) {
+      const saved = await persistCurrentEditor();
+      if (!saved) return;
+    }
+    const response = await api.setDocumentSectionIncluded(state.instance.id, sectionKey, section.included === false);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo actualizar la subsección.");
+    state.instance = response.instance;
+    if (!(state.instance.sections || []).some((item) => item.key === state.currentSectionKey)) {
+      state.currentSectionKey = state.instance.sections && state.instance.sections.length ? state.instance.sections[0].key : "";
+    }
+    await renderInstance(state.instance.id);
+  }
+
+  async function approveCurrentSection(key) {
+    clearTimeout(sectionSaveTimer);
+    const saved = await persistCurrentEditor();
+    if (!saved) return;
+    const current = (state.instance.sections || []).find((item) => item.key === key);
+    if (!current) return;
+    const response = await api.updateDocumentSection(state.instance.id, key, {
+      status: "approved",
+      locked: true,
+      content: current.content || "",
+      provenance: Object.assign({}, current.provenance || {}, {
+        approvedBy: "human",
+        approvedAt: new Date().toISOString()
+      })
+    });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo aprobar la sección.");
+    state.instance = response.instance;
+    toast("Sección aprobada.");
+    await renderInstance(state.instance.id);
+  }
+
   async function generateSection(key) {
     const current = state.instance.sections.find((item) => item.key === key);
     const provenance = current && current.provenance || {};
