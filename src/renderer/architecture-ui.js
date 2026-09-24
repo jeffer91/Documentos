@@ -497,7 +497,7 @@
         <div>
           <span class="process-code">${escapeHtml(state.instance.engineId)} · v${escapeHtml(state.instance.engineVersion)}</span>
           <h2>${escapeHtml(state.instance.label)}</h2>
-          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""} · migraciones: ${Number(state.instance.migrationRevision || 0)}${state.instance.lastMigratedAt ? " · última: " + escapeHtml(String(state.instance.lastMigratedAt).slice(0, 10)) : ""}</p>
+          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""} · ${state.instance.engine && state.instance.engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base"} · ${Number(state.instance.engine && state.instance.engine.outlineSummary && state.instance.engine.outlineSummary.nodeCount || state.instance.sections.length)} punto(s) · migraciones: ${Number(state.instance.migrationRevision || 0)}${state.instance.lastMigratedAt ? " · última: " + escapeHtml(String(state.instance.lastMigratedAt).slice(0, 10)) : ""}</p>
         </div>
         <span class="status ${state.instance.status === "final" ? "good" : alerts ? "warn" : ""}">${state.instance.status === "final" ? "Final congelada" : alerts + " alerta(s)"}</span>
       </div>
