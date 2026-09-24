@@ -120,6 +120,33 @@ function buildHtml(instance, options, assetDir, citationRows, referenceRows) {
   }));
 }
 
+function readJsonFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function layoutReportStatus(report) {
+  if (!report) return { available: false, healthy: true, issues: [] };
+  const issues = [];
+  if (Number(report.orphanHeadingCount || 0) > 0) {
+    issues.push(`Word detectó ${Number(report.orphanHeadingCount)} título(s) huérfano(s).`);
+  }
+  if (Number(report.tableHeaderRepeatFailures || 0) > 0) {
+    issues.push(`Word detectó ${Number(report.tableHeaderRepeatFailures)} tabla(s) sin encabezado repetido.`);
+  }
+  if (Number(report.tableRowSplitFailures || 0) > 0) {
+    issues.push(`Word detectó ${Number(report.tableRowSplitFailures)} tabla(s) que podrían partir filas entre páginas.`);
+  }
+  if (Number(report.oversizedFigureCount || 0) > 0) {
+    issues.push(`Word detectó ${Number(report.oversizedFigureCount)} figura(s) sobredimensionada(s).`);
+  }
+  return { available: true, healthy: issues.length === 0, issues };
+}
+
 function healthyOutputs(assessment) {
   return (assessment.files || [])
     .filter((item) => item.healthy)
@@ -209,7 +236,15 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
     issues.push(`No se generó un archivo ${format.toUpperCase()} válido.`);
   });
 
-  const complete = assessment.complete && !(final && missingAssets.length);
+  const wordReportPath = `${base}.word-report.json`;
+  const wordReport = readJsonFile(wordReportPath);
+  const layoutStatus = layoutReportStatus(wordReport);
+  issues.push(...layoutStatus.issues);
+
+  const complete =
+    assessment.complete &&
+    !(final && missingAssets.length) &&
+    layoutStatus.healthy;
   const outputs = healthyOutputs(assessment);
   const status = complete ? "complete" : "incomplete";
 
@@ -234,6 +269,8 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
       error: converter.error
     },
     missingAssets,
+    wordLayoutReport: wordReport,
+    wordLayoutStatus: layoutStatus,
     missingCitations: rendered.missingCitations,
     issues,
     citationSnapshotMode,
@@ -259,6 +296,8 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
       outputs: outputs.map((item) => item.type),
       converter: manifest.converter,
       manifestPath,
+      wordLayoutReport: wordReport,
+      wordLayoutStatus: layoutStatus,
       missingAssets,
       missingCitations: rendered.missingCitations,
       citationSnapshotMode,
@@ -283,6 +322,8 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
     files: assessment.files,
     converter: manifest.converter,
     manifestPath,
+    wordLayoutReport: wordReport,
+    wordLayoutStatus: layoutStatus,
     diagnosticHtmlPath: assessment.htmlHealthy ? htmlPath : "",
     issues,
     missingAssets,
