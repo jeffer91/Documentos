@@ -546,6 +546,7 @@ function filteredRows(userDataPath, dossierId, query) {
     sourceRows: sourceRows.length,
     beforeDistinct: filtered.length,
     duplicateRowsRemoved: filtered.length - rows.length,
+    inputSourceTrace: sourceTrace(sourceRows, false),
     rows
   };
 }
@@ -628,6 +629,7 @@ function queryData(userDataPath, dossierId, query) {
     truncated: total > limit,
     sourceRows: filtered.sourceRows,
     duplicateRowsRemoved: filtered.duplicateRowsRemoved,
+    inputSourceTrace: filtered.inputSourceTrace,
     sourceTrace: sourceTrace(filtered.rows, true)
   };
 }
@@ -713,6 +715,7 @@ function summarize(userDataPath, dossierId, query) {
     percentages: {},
     numeric: {},
     groups: [],
+    inputSourceTrace: filtered.inputSourceTrace,
     sourceTrace: sourceTrace(rows, true),
     calculationComplete: true
   };
@@ -730,9 +733,19 @@ function summarize(userDataPath, dossierId, query) {
 
   summary.groups = groupedSummary(rows, input.groupBy, measures);
   summary.querySignature = hashObject({
-    importHashes: summary.sourceTrace.map((item) => item.sha256),
-    mappingHashes: summary.sourceTrace.map((item) => item.mappingHash),
-    sheetNames: summary.sourceTrace.flatMap((item) => item.sheets.map((sheet) => sheet.name)),
+    imports: (summary.inputSourceTrace || []).map((item) => ({
+      importId: item.importId,
+      sha256: item.sha256,
+      mappingHash: item.mappingHash,
+      scopeType: item.scopeType,
+      scopeKey: item.scopeKey,
+      sheets: item.sheets.map((sheet) => sheet.name)
+    })),
+    requestedImportIds: input.importIds || [],
+    requestedSheets: input.sheet || [],
+    scopeType: input.scopeType || "",
+    scopeKey: input.scopeKey || "",
+    scopePolicy: input.scopePolicy || "inclusive",
     where: input.where || [],
     anyOf: input.anyOf || [],
     distinctBy: input.distinctBy || [],
@@ -838,7 +851,7 @@ function aiSlice(userDataPath, dossierId, query) {
       groups: safeGroups,
       protectedMinimumGroupSize: privacyMinGroup
     },
-    sourceTrace: (summary.sourceTrace || []).map((item) => ({
+    sourceTrace: (summary.inputSourceTrace || []).map((item) => ({
       importId: item.importId,
       sourceName: item.sourceName,
       sha256: item.sha256,
