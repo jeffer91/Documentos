@@ -635,6 +635,7 @@ function syncEngineSchema(db, instanceRow, engine, options) {
   const schemaChanged = previousHash !== targetHash;
   const versionChanged = previousVersion !== targetVersion;
   const changed = schemaChanged || versionChanged || added.length > 0 || archived.length > 0 || reactivated.length > 0;
+  const shouldMarkStale = changed && !opts.initializing;
 
   db.prepare(`
     UPDATE document_instances_v3
@@ -645,9 +646,9 @@ function syncEngineSchema(db, instanceRow, engine, options) {
     WHERE id = ?
   `).run(
     engine.documentId, engine.label, targetVersion, targetHash, changed ? ts : instanceRow.last_migrated_at,
-    changed ? 1 : 0,
-    changed ? 1 : 0,
-    changed ? `Motor documental actualizado: ${previousVersion || "sin versión"} → ${targetVersion || "sin versión"}.` : "",
+    shouldMarkStale ? 1 : 0,
+    shouldMarkStale ? 1 : 0,
+    shouldMarkStale ? `Motor documental actualizado: ${previousVersion || "sin versión"} → ${targetVersion || "sin versión"}.` : "",
     ts,
     instanceRow.id
   );
@@ -710,7 +711,7 @@ function ensureDocumentInstance(userDataPath, dossierId, engineId, scope) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', '', NULL, ?, ?)
     `).run(instanceId, dossierId, engine.documentId, engine.engineId, engine.version, scopeType, scopeKey, engine.label, ts, ts);
     row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
-    const sync = syncEngineSchema(db, row, engine, { skipAudit: true });
+    const sync = syncEngineSchema(db, row, engine, { skipAudit: true, initializing: true });
     audit(db, {
       dossierId,
       instanceId,
@@ -801,9 +802,25 @@ function getDocumentInstance(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
   if (!row) return null;
-  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND is_active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
-  const archivedSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND is_active = 0 ORDER BY archived_at, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const frozenSnapshot = json(row.frozen_snapshot_json, null);
+  const liveSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND is_active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const liveArchivedSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND is_active = 0 ORDER BY archived_at, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const sections = row.final_frozen_at && frozenSnapshot && Array.isArray(frozenSnapshot.sections)
+    ? frozenSnapshot.sections
+    : liveSections;
+  const archivedSections = row.final_frozen_at ? [] : liveArchivedSections;
   const engine = registry.getEngine(row.engine_id);
+  const migrationHistory = db.prepare(`
+    SELECT action, detail_json, created_at
+    FROM audit_events_v3
+    WHERE instance_id = ? AND entity_type = 'engine_schema'
+    ORDER BY created_at DESC
+    LIMIT 25
+  `).all(instanceId).map((event) => ({
+    action: event.action,
+    detail: json(event.detail_json, {}),
+    createdAt: event.created_at
+  }));
   return {
     id: row.id,
     dossierId: row.dossier_id,
@@ -818,12 +835,13 @@ function getDocumentInstance(userDataPath, instanceId) {
     stale: Boolean(row.stale),
     staleReason: row.stale_reason || "",
     finalFrozenAt: row.final_frozen_at,
-    frozenSnapshot: json(row.frozen_snapshot_json, null),
+    frozenSnapshot,
     projectId: row.project_id || "",
     engineSchemaHash: row.engine_schema_hash || "",
     lastMigratedAt: row.last_migrated_at || null,
     sections,
     archivedSections,
+    migrationHistory,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
