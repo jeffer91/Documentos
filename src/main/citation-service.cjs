@@ -575,39 +575,90 @@ function replaceCitationTokens(text, citations) {
 }
 
 
-function citationTokensFromInstance(instance) {
-  const keys = [];
-  const scan = (value) => {
-    const text = String(value || "");
+
+function scanCitationTokens(value, keys) {
+  if (value == null) return;
+  if (typeof value === "string") {
     const regex = /\[\[CITE:([^\]]+)\]\]/g;
     let match;
-    while ((match = regex.exec(text))) keys.push(String(match[1] || "").trim());
-  };
-  (instance && instance.sections || []).forEach((section) => {
-    scan(section.content);
-    (section.blocks || []).forEach((block) => {
-      scan(block.text);
-      scan(block.note);
-      scan(block.caption);
-      scan(block.title);
-    });
-  });
-  return Array.from(new Set(keys.filter(Boolean)));
+    while ((match = regex.exec(value))) {
+      const key = clean(match[1]);
+      if (key) keys.push(key);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => scanCitationTokens(item, keys));
+    return;
+  }
+  if (typeof value === "object") {
+    Object.values(value).forEach((item) => scanCitationTokens(item, keys));
+  }
 }
 
-function validateInstanceCitations(userDataPath, instance) {
-  const keys = citationTokensFromInstance(instance);
+function citationTokensFromInstance(instance, sectionKeys) {
+  const keys = [];
+  const wanted = Array.isArray(sectionKeys) && sectionKeys.length
+    ? new Set(sectionKeys.map(String))
+    : null;
+  (instance && instance.sections || []).forEach((section) => {
+    if (wanted && !wanted.has(String(section.key))) return;
+    scanCitationTokens(section.content, keys);
+    scanCitationTokens(section.blocks || [], keys);
+  });
+  return Array.from(new Set(keys));
+}
+
+function resolveInstanceCitations(userDataPath, instance, options) {
+  const keys = citationTokensFromInstance(instance, options && options.sectionKeys);
   const missing = [];
   const incomplete = [];
+  const warnings = [];
+  const rows = [];
   keys.forEach((key) => {
     const citation = getCitation(userDataPath, instance.dossierId, key);
-    if (!citation) missing.push(key);
-    else if (!citation.complete) incomplete.push(key);
+    if (!citation) {
+      missing.push(key);
+      return;
+    }
+    if (!citation.complete) {
+      incomplete.push(key);
+      (citation.validation && citation.validation.errors || []).forEach((message) => {
+        warnings.push(key + ": " + message);
+      });
+    }
+    rows.push(citation);
   });
-  return { ok: missing.length === 0 && incomplete.length === 0, keys, missing, incomplete };
+  const prepared = prepareCitationSet(rows);
+  return {
+    ok: missing.length === 0 && incomplete.length === 0,
+    keys,
+    missing,
+    incomplete,
+    warnings,
+    citations: prepared.citations,
+    references: prepared.references
+  };
+}
+
+function validateInstanceCitations(userDataPath, instance, options) {
+  const resolved = resolveInstanceCitations(userDataPath, instance, options);
+  return {
+    ok: resolved.ok,
+    keys: resolved.keys,
+    missing: resolved.missing,
+    incomplete: resolved.incomplete,
+    warnings: resolved.warnings,
+    referenceCount: resolved.references.length
+  };
 }
 
 module.exports = {
+  SOURCE_TYPES,
+  sourceTypeOptions,
+  normalizeSourceType,
+  normalizeDoi,
+  validateCitation,
   ensureSchema,
   upsertCitation,
   ensureCitationForSource,
@@ -616,7 +667,11 @@ module.exports = {
   listCitations,
   formatInText,
   formatReference,
+  formatReferenceHtml,
+  prepareCitationSet,
+  referenceIdentity,
   replaceCitationTokens,
   citationTokensFromInstance,
+  resolveInstanceCitations,
   validateInstanceCitations
 };
