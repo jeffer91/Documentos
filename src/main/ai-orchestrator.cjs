@@ -134,6 +134,21 @@ function writerPrompt(instance, engine, section, context) {
     section.type === "executive_summary"
       ? `El resumen ejecutivo debe ser muy concreto, priorizar los hallazgos críticos y no superar aproximadamente ${section.maxWords || 600} palabras.`
       : "",
+    section.contract && section.contract.purpose
+      ? `Propósito específico de la sección: ${section.contract.purpose}`
+      : "",
+    section.contract && section.contract.sourcePolicy
+      ? `Política de fuentes: ${section.contract.sourcePolicy}.`
+      : "",
+    section.contract && section.contract.evidenceRequired
+      ? "Toda afirmación sustantiva de esta sección debe quedar respaldada por datos o fuentes disponibles."
+      : "",
+    section.contract && Array.isArray(section.contract.dataNeeds) && section.contract.dataNeeds.length
+      ? `Datos requeridos por esta sección: ${section.contract.dataNeeds.join(", ")}.`
+      : "",
+    section.contract && Array.isArray(section.contract.promptInstructions) && section.contract.promptInstructions.length
+      ? `Instrucciones específicas: ${section.contract.promptInstructions.join(" | ")}`
+      : "",
     (section.allowedVisuals || []).length
       ? `Herramientas visuales permitidas en esta sección: ${section.allowedVisuals.join(", ")}. Selecciona solo las que sean útiles.`
       : "No generes herramientas visuales en esta sección salvo que la aplicación las habilite.",
@@ -148,7 +163,8 @@ function writerPrompt(instance, engine, section, context) {
         level: section.level,
         numbering: section.numbering,
         allowedVisuals: section.allowedVisuals || [],
-        derivedFrom: section.derivedFrom || []
+        derivedFrom: section.derivedFrom || [],
+        contract: section.contract || {}
       },
       masterData: context.masterData,
       imports: context.imports,
@@ -180,7 +196,8 @@ function reviewerPrompt(engine, section, draft, context) {
         key: section.key,
         type: section.type,
         allowedVisuals: section.allowedVisuals || [],
-        derivedFrom: section.derivedFrom || []
+        derivedFrom: section.derivedFrom || [],
+        contract: section.contract || {}
       },
       draft,
       masterData: context.masterData,
