@@ -364,8 +364,24 @@ function registerIpc() {
       const result = draftExport.exportInstance(userData(), instanceId, options || {}, __dirname);
       const preferred = result.outputs.find((item) => item.type === "pdf")
         || result.outputs.find((item) => item.type === "docx")
-        || result.outputs[0];
+        || result.outputs.find((item) => item.type === "html");
       if (preferred && preferred.path) await shell.openPath(preferred.path);
+      if (!result.complete) {
+        return {
+          ok: false,
+          result,
+          error: [
+            "Exportación incompleta.",
+            result.missingFormats && result.missingFormats.length
+              ? `Falta: ${result.missingFormats.map((item) => item.toUpperCase()).join(", ")}.`
+              : "",
+            result.missingAssets && result.missingAssets.length
+              ? `Recursos visuales pendientes: ${result.missingAssets.length}.`
+              : "",
+            result.diagnosticHtmlPath ? "Se abrió el HTML de diagnóstico." : ""
+          ].filter(Boolean).join(" ")
+        };
+      }
       return { ok: true, result };
     } catch (error) {
       return failure("document-export", "v3", error);
