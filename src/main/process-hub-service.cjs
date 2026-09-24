@@ -254,6 +254,7 @@ function ensureSchema(db) {
   ensureColumn(db, "document_sections_v3", "archived_at", "TEXT");
   ensureColumn(db, "document_sections_v3", "archived_reason", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "document_sections_v3", "definition_hash", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "included", "INTEGER NOT NULL DEFAULT 1");
 
   ensureColumn(db, "document_instances_v3", "engine_schema_hash", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "document_instances_v3", "migration_revision", "INTEGER NOT NULL DEFAULT 0");
@@ -552,8 +553,8 @@ function insertSectionDefinition(db, instanceId, sectionItem, ts) {
     INSERT INTO document_sections_v3
       (id, instance_id, section_key, section_order, title, section_type, status, content, data_json, provenance_json, alerts_json, locked,
        parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next, layout_json,
-       active, archived_at, archived_reason, definition_hash, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '', ?, ?, ?)
+       active, included, archived_at, archived_reason, definition_hash, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, 1, 1, NULL, '', ?, ?, ?)
   `).run(
     id("section"), instanceId, sectionItem.key, sectionItem.order || 0, sectionItem.title, sectionItem.type,
     sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
@@ -580,6 +581,7 @@ function migrationSnapshot(rows) {
     level: Number(row.section_level || 1),
     numbering: row.numbering || "",
     active: Number(row.active == null ? 1 : row.active) !== 0,
+    included: Number(row.included == null ? 1 : row.included) !== 0,
     definitionHash: row.definition_hash || ""
   }));
 }
@@ -883,7 +885,8 @@ function getDocumentInstance(userDataPath, instanceId) {
   const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
   if (!row) return null;
   const frozenSnapshot = json(row.frozen_snapshot_json, null);
-  const liveSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const liveSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND active = 1 AND included = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const omittedSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND active = 1 AND included = 0 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
   const sections = row.final_frozen_at && frozenSnapshot && Array.isArray(frozenSnapshot.sections)
     ? frozenSnapshot.sections
     : liveSections;
@@ -903,6 +906,7 @@ function getDocumentInstance(userDataPath, instanceId) {
     lastMigratedAt: row.last_migrated_at || null,
     migrationPending,
     archivedSectionCount: Number(archivedSectionCount || 0),
+    omittedSections,
     engineState: row.final_frozen_at
       ? ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
         ? "frozen_historical"
@@ -953,7 +957,7 @@ function refreshInstanceAfterContentChange(db, instanceId, ts) {
   const pending = Number(db.prepare(`
     SELECT COUNT(*) AS total
     FROM document_sections_v3
-    WHERE instance_id = ? AND active = 1 AND status = 'migration_pending'
+    WHERE instance_id = ? AND active = 1 AND included = 1 AND status = 'migration_pending'
   `).get(instanceId).total || 0);
 
   db.prepare(`
@@ -1009,7 +1013,7 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada.");
-  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1").get(instanceId, sectionKey);
+  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1 AND included = 1").get(instanceId, sectionKey);
   if (!sectionRow) throw new Error("Sección no válida.");
   const normalized = editorial.normalizeBlocks(blocks || []);
   const validation = editorial.validateSectionBlocks(rowToSection(sectionRow, db), normalized);
@@ -1045,7 +1049,7 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada. Crea una nueva versión de trabajo.");
-  const current = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1").get(instanceId, sectionKey);
+  const current = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1 AND included = 1").get(instanceId, sectionKey);
   if (!current) throw new Error("Sección no válida.");
   if (current.locked && patch && patch.force !== true) throw new Error("La sección está aprobada y bloqueada.");
   const ts = now();
@@ -1077,6 +1081,40 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   return getDocumentInstance(userDataPath, instanceId);
 }
 
+function setSectionIncluded(userDataPath, instanceId, sectionKey, included) {
+  const db = dbFor(userDataPath);
+  const instance = getDocumentInstance(userDataPath, instanceId);
+  if (!instance) throw new Error("Documento no válido.");
+  if (instance.finalFrozenAt) throw new Error("La versión final está congelada. Crea una nueva versión de trabajo.");
+
+  const row = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1").get(instanceId, sectionKey);
+  if (!row) throw new Error("Sección no válida.");
+  const layout = json(row.layout_json, {});
+  const required = layout.required !== false;
+  const nextIncluded = included !== false;
+  if (required && !nextIncluded) {
+    throw new Error("Las secciones obligatorias no pueden excluirse del documento.");
+  }
+
+  const ts = now();
+  db.prepare(`
+    UPDATE document_sections_v3
+    SET included = ?, updated_at = ?
+    WHERE id = ?
+  `).run(nextIncluded ? 1 : 0, ts, row.id);
+
+  refreshInstanceAfterContentChange(db, instanceId, ts);
+  audit(db, {
+    dossierId: instance.dossierId,
+    instanceId,
+    entityType: "section",
+    entityId: sectionKey,
+    action: nextIncluded ? "include" : "omit",
+    detail: { required, included: nextIncluded }
+  });
+  return getDocumentInstance(userDataPath, instanceId);
+}
+
 function freezeFinal(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const instance = getDocumentInstance(userDataPath, instanceId);
@@ -1088,6 +1126,14 @@ function freezeFinal(userDataPath, instanceId) {
   if (migrationReview.length) {
     throw new Error(`La migración del motor tiene ${migrationReview.length} sección(es) pendientes de revisión.`);
   }
+  const unapprovedRequired = instance.sections.filter((sectionItem) =>
+    sectionItem.required !== false && sectionItem.status !== "approved"
+  );
+  if (unapprovedRequired.length) {
+    const labels = unapprovedRequired.slice(0, 6).map((sectionItem) => `${sectionItem.numbering ? sectionItem.numbering + ". " : ""}${sectionItem.title}`);
+    throw new Error(`Aprueba todas las secciones obligatorias antes de crear la versión final: ${labels.join(" · ")}${unapprovedRequired.length > 6 ? "…" : ""}`);
+  }
+
   const editorialValidation = editorial.validateDocumentInstance(instance);
   if (!editorialValidation.ok) {
     throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
@@ -1251,12 +1297,25 @@ function cloneDossierToPeriod(userDataPath, sourceDossierId, targetPeriodId, lab
 function dashboard(userDataPath) {
   const periods = listPeriods(userDataPath);
   const dossiers = listDossiers(userDataPath);
+  const instances = dossiers.flatMap((dossier) =>
+    listDocumentInstances(userDataPath, dossier.id).map((instance) => Object.assign({}, instance, {
+      dossierLabel: dossier.label,
+      periodId: dossier.periodId,
+      periodCode: dossier.periodCode,
+      periodLabel: dossier.periodLabel,
+      processKey: dossier.processKey,
+      population: dossier.population
+    }))
+  ).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   return {
     periods,
     dossiers,
+    instances,
+    recentInstances: instances.slice(0, 8),
     engineCount: registry.allEngines().length,
     documentTypeCount: registry.SELECTED_DOCUMENT_IDS.length,
-    finalCount: dossiers.reduce((sum, dossier) => sum + listDocumentInstances(userDataPath, dossier.id).filter((item) => item.status === "final").length, 0)
+    draftCount: instances.filter((item) => item.status !== "final").length,
+    finalCount: instances.filter((item) => item.status === "final").length
   };
 }
 
@@ -1281,6 +1340,7 @@ module.exports = {
   synchronizeEngineInstance,
   listEngineMigrations,
   updateSection,
+  setSectionIncluded,
   setSectionBlocks,
   freezeFinal,
   createWorkingCopy,
