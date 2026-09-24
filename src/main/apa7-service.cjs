@@ -3,6 +3,7 @@ const path = require("path");
 const editorial = require("./editorial-structure-service.cjs");
 const visuals = require("./visual-renderer-service.cjs");
 const citationService = require("./citation-service.cjs");
+const alertPolicy = require("./alert-policy-service.cjs");
 
 const PROFILE = Object.freeze({
   name: "APA 7",
@@ -195,8 +196,12 @@ function sectionHtml(section, maps, assetDir, citations, references, includeAler
     missing.push(...rendered.missing);
   }
 
-  const alerts = includeAlerts && Array.isArray(section.alerts) && section.alerts.length
-    ? `<div class="draft-alerts"><b>Alertas del borrador</b>${section.alerts.map((alert) => `<p>${esc(alert.severity || "aviso")} · ${esc(alert.message || "")}</p>`).join("")}</div>`
+  const draftAlerts = includeAlerts ? alertPolicy.draftAlertsForSection(section) : [];
+  const alerts = draftAlerts.length
+    ? `<div class="draft-alerts"><b>Alertas del borrador</b>${draftAlerts.map((alert) => {
+        const location = alert.source === "block" && alert.blockKey ? ` · bloque ${alert.blockKey}` : "";
+        return `<p>${esc(alert.severity || "warning")} · ${esc(alert.type || "notice")}${esc(location)} · ${esc(alert.message || "")}</p>`;
+      }).join("")}</div>`
     : "";
 
   return {
