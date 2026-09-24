@@ -183,6 +183,7 @@ function deactivateSource(userDataPath, sourceId) {
   const row = db.prepare("SELECT * FROM knowledge_sources_v3 WHERE id = ?").get(sourceId);
   if (!row) throw new Error("Fuente no válida.");
   db.prepare("UPDATE knowledge_sources_v3 SET active = 0, updated_at = ? WHERE id = ?").run(now(), sourceId);
+  citations.deactivateCitationBySource(userDataPath, row.dossier_id, sourceId);
   hub.audit(db, {
     dossierId: row.dossier_id,
     entityType: "knowledge_source",
