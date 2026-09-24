@@ -33,6 +33,7 @@ const REQUIRED_FILES = [
   "src/main/document-engine-registry.cjs",
   "src/main/document-outline-service.cjs",
   "src/main/document-data-binding-service.cjs",
+  "src/main/alert-policy-service.cjs",
   "src/main/process-hub-service.cjs",
   "src/main/engine-schema-service.cjs",
   "src/main/data-ingestion-service.cjs",
@@ -639,6 +640,61 @@ function documentDataBindingCheck() {
   };
 }
 
+function draftFinalAlertCheck() {
+  const alerts = require(path.join(ROOT, "src/main/alert-policy-service.cjs"));
+  const hubSource = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+
+  const trace = alerts.trace({
+    sections: [{
+      key: "RESULTADOS",
+      title: "Resultados",
+      alerts: [
+        { type: "inferred", severity: "warning", message: "Dato inferido", blocking: true },
+        { type: "review", severity: "info", message: "Revisar redacción", blocking: false }
+      ],
+      blocks: [{
+        key: "tabla-1",
+        type: "table",
+        alerts: [{ type: "source", severity: "error", message: "Fuente pendiente", blocking: true }]
+      }]
+    }]
+  });
+
+  return {
+    traceSummary:
+      trace.summary.total === 3 &&
+      trace.summary.sectionAlerts === 2 &&
+      trace.summary.blockAlerts === 1 &&
+      trace.summary.legacyBlockingFlags === 2 &&
+      trace.summary.finalizationPolicy === "trace_only",
+    blockTrace:
+      trace.items.some((item) =>
+        item.source === "block" &&
+        item.blockKey === "tabla-1" &&
+        item.message === "Fuente pendiente"
+      ),
+    noAlertGate:
+      !hubSource.includes('if (pendingAlerts.length) throw new Error("El borrador todavía tiene alertas pendientes.")') &&
+      hubSource.includes("alertsDidNotBlockFinal: true"),
+    frozenTrace:
+      hubSource.includes("alertTrace: Object.assign({}, alertTrace") &&
+      hubSource.includes('policy: "trace_only"') &&
+      hubSource.includes("frozenWithUnresolvedAlerts"),
+    draftIncludesBlockAlerts:
+      apaSource.includes("draftAlertsForSection") &&
+      apaSource.includes('alert.source === "block"'),
+    finalHidesAlerts:
+      apaSource.includes("opts.includeAlerts !== false && !opts.final") &&
+      renderer.includes("state.instance && state.instance.finalFrozenAt") &&
+      renderer.includes("No forman parte de la versión final visible"),
+    workingCopy:
+      hubSource.includes("copiedAlertCount") &&
+      hubSource.includes("alerts: sectionItem.alerts")
+  };
+}
+
 function apaCitationCheck() {
   const citations = require(path.join(ROOT, "src/main/citation-service.cjs"));
   const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
@@ -1035,6 +1091,23 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudieron validar los bindings de datos por documento: ${error.message}`);
+  }
+
+  try {
+    const draftFinalAlerts = draftFinalAlertCheck();
+    if (
+      !draftFinalAlerts.traceSummary ||
+      !draftFinalAlerts.blockTrace ||
+      !draftFinalAlerts.noAlertGate ||
+      !draftFinalAlerts.frozenTrace ||
+      !draftFinalAlerts.draftIncludesBlockAlerts ||
+      !draftFinalAlerts.finalHidesAlerts ||
+      !draftFinalAlerts.workingCopy
+    ) {
+      errors.push("El flujo borrador/final y trazabilidad de alertas del Bloque 4 no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el flujo borrador/final del Bloque 4: ${error.message}`);
   }
 
   try {
