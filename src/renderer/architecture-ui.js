@@ -19,6 +19,10 @@
     citationValidation: null,
     dataReadiness: null,
     generationRun: null,
+    sectionRecommendations: {},
+    currentSectionKey: "",
+    instanceStage: "document",
+    launchDocumentId: "",
     busy: false,
     currentView: "home"
   };
@@ -27,6 +31,8 @@
   const title = () => document.getElementById("screenTitle");
   const breadcrumb = () => document.getElementById("breadcrumb");
   const backButton = () => document.getElementById("backButton");
+  let sectionSaveTimer = null;
+  let recommendingSections = false;
 
   const escapeHtml = (value) => String(value == null ? "" : value)
     .replace(/&/g, "&amp;")
@@ -95,6 +101,13 @@
     state.citationValidation = response.citationValidation || null;
     state.dataReadiness = response.dataReadiness || null;
     state.generationRun = response.generationRun || null;
+    if (!state.dossier || state.dossier.id !== state.instance.dossierId) {
+      await loadDossier(state.instance.dossierId);
+    }
+    const visible = state.instance.sections || [];
+    if (!visible.some((item) => item.key === state.currentSectionKey)) {
+      state.currentSectionKey = visible.length ? visible[0].key : "";
+    }
     return state.instance;
   }
 
