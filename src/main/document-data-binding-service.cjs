@@ -92,10 +92,21 @@ const PROFILES = Object.freeze({
     groupBy: ["career"],
     distinctBy: ["student_id", "attendance_date"]
   }),
-  needs: binding("RESULTADOS", {
-    requiredAny: [["need", "priority", "competency", "area"]],
-    optionalFields: ["person_id", "teacher_id", "teacher_name", "career", "campus", "need", "priority", "competency", "area", "status"],
-    dimensions: ["career", "campus", "need", "priority", "competency", "area", "status"],
+  needs: binding("ANALISIS_GLOBAL", {
+    requiredAny: [["need", "priority", "competency", "area", "formation_interest", "interest"]],
+    optionalFields: [
+      "person_id", "teacher_id", "teacher_name", "career", "coordination", "academic_unit", "campus",
+      "need", "priority", "competency", "area", "status", "availability", "preferred_schedule",
+      "formation_interest", "interest", "qualitative_response", "comment", "years_experience",
+      "formation_level", "degree_level", "contract_type", "dedication", "recurrence", "recurrence_percent",
+      "impact", "alignment", "viability", "priority_score"
+    ],
+    dimensions: [
+      "career", "coordination", "academic_unit", "campus", "need", "priority", "competency", "area",
+      "status", "availability", "preferred_schedule", "formation_interest", "interest",
+      "formation_level", "degree_level", "contract_type", "dedication"
+    ],
+    measures: ["years_experience", "recurrence", "recurrence_percent", "impact", "alignment", "viability", "priority_score"],
     groupBy: ["career"],
     distinctBy: ["person_id", "teacher_id", "need"]
   }),
@@ -185,7 +196,25 @@ const ENGINE_DATA_PLANS = Object.freeze({
   "cap.deteccion": [fromProfile("needs", "RESULTADOS")],
   "cap.plan": [fromProfile("schedule", "CRONOGRAMA")],
   "cap.informe-cumplimiento": [fromProfile("training", "RESULTADOS")],
-  "form.deteccion": [fromProfile("needs", "RESULTADOS")],
+  "form.deteccion": [
+    fromProfile("needs", "METODOLOGIA_POBLACION_MUESTRA", { requirement: "recommended" }),
+    fromProfile("needs", "CARACTERIZACION_COORDINACIONES", { requirement: "recommended" }),
+    fromProfile("needs", "CARACTERIZACION_FORMACION", { requirement: "recommended" }),
+    fromProfile("needs", "CARACTERIZACION_EXPERIENCIA", { requirement: "recommended" }),
+    fromProfile("needs", "CARACTERIZACION_VINCULACION", { requirement: "recommended" }),
+    fromProfile("needs", "CARACTERIZACION_AREAS", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_GLOBAL", { requirement: "required" }),
+    fromProfile("needs", "ANALISIS_BRECHAS", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_DISPONIBILIDAD", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_INTERESES", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_COMPARATIVO_CARRERA", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_CUALITATIVO", { requirement: "recommended", includeSampleRows: true, sampleLimit: 30 }),
+    fromProfile("needs", "ANALISIS_TRIANGULACION", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_MATRIZ_PRIORIZACION", { requirement: "recommended" }),
+    fromProfile("needs", "ANALISIS_MAPA_CALOR", { requirement: "recommended" }),
+    fromProfile("needs", "LINEAS_FORMACION_COORDINACION", { requirement: "recommended" }),
+    fromProfile("needs", "COBERTURA_INSTITUCIONAL", { requirement: "recommended" })
+  ],
   "form.plan": [fromProfile("schedule", "CRONOGRAMA")],
   "form.informe": [fromProfile("formation", "RESULTADOS")],
 
