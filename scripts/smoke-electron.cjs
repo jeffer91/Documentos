@@ -595,6 +595,85 @@ async function run() {
     assert.ok(visualSvg.includes("<svg"));
     assert.ok(visualSvg.includes("Núcleo 4"));
 
+    // Bloque 1 · ciclo de vida de motores y migraciones.
+    const lifecycleEngine = Object.assign({}, instanceV4.engine, {
+      version: "4.1.0-smoke",
+      sections: [
+        ...instanceV4.engine.sections.filter((item) => item.key !== "BASE_LEGAL"),
+        {
+          key: "SECCION_NUEVA_SMOKE",
+          title: "Sección nueva smoke",
+          type: "stable_ai",
+          required: false,
+          allowManualEdit: true,
+          lockAfterApproval: true,
+          regenerateOnDependencyChange: true,
+          pageBreakBefore: true,
+          keepWithNext: true,
+          allowedVisuals: [],
+          children: []
+        }
+      ]
+    });
+
+    processHub.updateSection(temp, instanceV4.id, "BASE_LEGAL", {
+      content: "Contenido histórico que debe conservarse al archivar.",
+      status: "edited",
+      provenance: { source: "human" }
+    });
+    const rawBeforeMigration = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceV4.id);
+    const migration = processHub.syncEngineSchema(db, rawBeforeMigration, lifecycleEngine);
+    assert.strictEqual(migration.changed, true);
+    assert.ok(migration.archived.includes("BASE_LEGAL"));
+    assert.ok(migration.added.includes("SECCION_NUEVA_SMOKE"));
+
+    let migratedInstance = processHub.getDocumentInstance(temp, instanceV4.id);
+    assert.strictEqual(migratedInstance.engineVersion, "4.1.0-smoke");
+    assert.strictEqual(migratedInstance.stale, true);
+    assert.ok(migratedInstance.sections.some((item) => item.key === "SECCION_NUEVA_SMOKE"));
+    assert.ok(!migratedInstance.sections.some((item) => item.key === "BASE_LEGAL"));
+    const archivedBase = migratedInstance.archivedSections.find((item) => item.key === "BASE_LEGAL");
+    assert.ok(archivedBase);
+    assert.strictEqual(archivedBase.content, "Contenido histórico que debe conservarse al archivar.");
+    assert.ok(migratedInstance.migrationHistory.length >= 1);
+    assert.strictEqual(migratedInstance.migrationHistory[0].detail.toVersion, "4.1.0-smoke");
+
+    // Una sección archivada se reactiva con su contenido histórico si vuelve al motor.
+    const rawBeforeRestore = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceV4.id);
+    const restore = processHub.syncEngineSchema(db, rawBeforeRestore, instanceV4.engine);
+    assert.ok(restore.reactivated.includes("BASE_LEGAL"));
+    assert.ok(restore.archived.includes("SECCION_NUEVA_SMOKE"));
+    migratedInstance = processHub.getDocumentInstance(temp, instanceV4.id);
+    const restoredBase = migratedInstance.sections.find((item) => item.key === "BASE_LEGAL");
+    assert.ok(restoredBase);
+    assert.strictEqual(restoredBase.content, "Contenido histórico que debe conservarse al archivar.");
+    assert.strictEqual(migratedInstance.engineVersion, instanceV4.engine.version);
+
+    // Una final congelada nunca se sincroniza contra un motor posterior.
+    const frozenAtSmoke = new Date().toISOString();
+    const frozenSnapshotSmoke = {
+      engineId: migratedInstance.engineId,
+      engineVersion: migratedInstance.engineVersion,
+      engineSchemaHash: migratedInstance.engineSchemaHash,
+      scopeType: migratedInstance.scopeType,
+      scopeKey: migratedInstance.scopeKey,
+      sections: migratedInstance.sections,
+      frozenAt: frozenAtSmoke
+    };
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET status = 'final', final_frozen_at = ?, frozen_snapshot_json = ?, stale = 0, stale_reason = ''
+      WHERE id = ?
+    `).run(frozenAtSmoke, JSON.stringify(frozenSnapshotSmoke), migratedInstance.id);
+
+    const rawFrozen = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(migratedInstance.id);
+    const frozenAttempt = processHub.syncEngineSchema(db, rawFrozen, lifecycleEngine);
+    assert.strictEqual(frozenAttempt.skipped, "frozen");
+    const frozenInstance = processHub.getDocumentInstance(temp, migratedInstance.id);
+    assert.strictEqual(frozenInstance.engineVersion, instanceV4.engine.version);
+    assert.ok(frozenInstance.sections.some((item) => item.key === "BASE_LEGAL"));
+    assert.ok(!frozenInstance.sections.some((item) => item.key === "SECCION_NUEVA_SMOKE"));
+
     const citationV4 = citationService.upsertCitation(temp, dossierV4.id, {
       citationKey: "SRC:SMOKE",
       sourceType: "institutional",
