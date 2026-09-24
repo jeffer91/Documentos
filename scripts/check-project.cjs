@@ -1219,7 +1219,7 @@ function main() {
       !exportVisualQuality.multipageTables ||
       !exportVisualQuality.wordLayout
     ) {
-      errors.push("La exportación Word/PDF y el motor gráfico del Bloque 5 no superaron la validación interna.");
+      errors.push(`La exportación Word/PDF y el motor gráfico del Bloque 5 no superaron la validación interna: ${JSON.stringify(exportVisualQuality)}`);
     }
   } catch (error) {
     errors.push(`No se pudo validar Word/PDF y visuales del Bloque 5: ${error.message}`);
