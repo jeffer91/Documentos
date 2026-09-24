@@ -1081,6 +1081,10 @@ function freezeFinal(userDataPath, instanceId) {
   if (instance.engineState === "migration_pending") {
     throw new Error("El motor documental cambió. Migra el borrador antes de aprobar la versión final.");
   }
+  const migrationReview = instance.sections.filter((sectionItem) => sectionItem.status === "migration_pending");
+  if (migrationReview.length) {
+    throw new Error(`La migración del motor tiene ${migrationReview.length} sección(es) pendientes de revisión.`);
+  }
   const editorialValidation = editorial.validateDocumentInstance(instance);
   if (!editorialValidation.ok) {
     throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
