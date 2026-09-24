@@ -221,11 +221,28 @@ async function callProvider(userDataPath, providerId, request) {
       const message = payload && payload.error && (payload.error.message || payload.error.type)
         ? payload.error.message || payload.error.type
         : raw.slice(0, 500);
-      throw new Error(`${provider.name}: ${message || "Error de IA"}`);
+      const error = new Error(`${provider.name}: ${message || "Error de IA"}`);
+      error.statusCode = Number(response.status || 0);
+      error.providerId = provider.id;
+      const retryAfter = response.headers && response.headers.get ? response.headers.get("retry-after") : "";
+      if (retryAfter) error.retryAfter = retryAfter;
+      throw error;
     }
     const text = provider.kind === "anthropic" ? responseTextFromAnthropic(payload) : responseTextFromOpenAi(payload);
-    if (!text) throw new Error(`${provider.name}: respuesta vacía.`);
+    if (!text) {
+      const error = new Error(`${provider.name}: respuesta vacía.`);
+      error.providerId = provider.id;
+      throw error;
+    }
     return { provider, text, raw: payload };
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      const timeoutError = new Error(`${provider.name}: tiempo de espera agotado.`);
+      timeoutError.code = "ETIMEDOUT";
+      timeoutError.providerId = provider.id;
+      throw timeoutError;
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
