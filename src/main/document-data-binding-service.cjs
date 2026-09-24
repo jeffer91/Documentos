@@ -19,6 +19,8 @@ function binding(sectionKey, options) {
     groupBy: [],
     distinctBy: [],
     select: [],
+    where: [],
+    anyOf: [],
     scopeFields: [],
     privacyMode: "aggregate",
     includeCountsForAi: false,
@@ -58,6 +60,7 @@ const PROFILES = Object.freeze({
     optionalFields: ["student_name", "career", "status", "document_title"],
     measures: ["plagiarism_percent"],
     select: ["student_id", "student_name", "career", "plagiarism_percent", "status", "document_title"],
+    where: [{ field: "plagiarism_percent", op: "exists" }],
     scopeFields: ["student_id"],
     privacyMode: "student_specific",
     includeCountsForAi: true,
@@ -257,6 +260,23 @@ function pickAvailable(fields, available) {
   return (fields || []).filter((field) => available.has(field));
 }
 
+function compatibleFieldSet(bindingConfig, availability) {
+  const sets = [];
+  (availability && availability.imports || []).forEach((item) => {
+    (item.sheets || []).forEach((sheet) => {
+      sets.push(new Set((sheet.canonicalFields || []).map(String)));
+    });
+  });
+  if (!sets.length) return false;
+  const requiredAll = bindingConfig.requiredAll || [];
+  const requiredAny = bindingConfig.requiredAny || [];
+  if (!requiredAll.length && !requiredAny.length) return true;
+  return sets.some((set) =>
+    requiredAll.every((field) => set.has(field)) &&
+    requiredAny.every((group) => !Array.isArray(group) || !group.length || group.some((field) => set.has(field)))
+  );
+}
+
 function requiredState(bindingConfig, available) {
   const missingAll = (bindingConfig.requiredAll || []).filter((field) => !available.has(field));
   const missingAny = (bindingConfig.requiredAny || [])
@@ -285,6 +305,7 @@ function resolveBinding(bindingConfig, instance, availability) {
   const hasImports = Boolean(availability && availability.hasImports);
   const mappedCount = Number(availability && availability.availableFields && availability.availableFields.length || 0);
   const scopeFilter = resolveScopeFilter(bindingConfig, instance, available);
+  const compatibleSheet = compatibleFieldSet(bindingConfig, availability);
   const scopeRequired = Boolean(
     String(instance && instance.scopeKey || "").trim() &&
     (bindingConfig.scopeFields || []).length &&
@@ -295,11 +316,14 @@ function resolveBinding(bindingConfig, instance, availability) {
   let status = "ready";
   if (!hasImports) status = "no_imports";
   else if (!mappedCount) status = "mapping_pending";
-  else if (!required.ok || missingScope) status = "missing_fields";
+  else if (!required.ok || missingScope || !compatibleSheet) status = "missing_fields";
 
   const ready = status === "ready";
+  const baseWhere = (bindingConfig.where || []).filter((condition) => condition && available.has(condition.field));
+  const baseAnyOf = (bindingConfig.anyOf || []).filter((condition) => condition && available.has(condition.field));
   const query = ready ? {
-    where: scopeFilter ? [scopeFilter] : [],
+    where: baseWhere.concat(scopeFilter ? [scopeFilter] : []),
+    anyOf: baseAnyOf,
     dimensions: pickAvailable(bindingConfig.dimensions, available),
     measures: pickAvailable(bindingConfig.measures, available),
     groupBy: pickAvailable(bindingConfig.groupBy, available),
@@ -317,6 +341,9 @@ function resolveBinding(bindingConfig, instance, availability) {
   if (status === "mapping_pending") warnings.push("Hay archivos importados, pero todavía no tienen campos canónicos mapeados.");
   if (required.missingAll.length) warnings.push(`Faltan campos requeridos: ${required.missingAll.join(", ")}.`);
   required.missingAny.forEach((group) => warnings.push(`Falta al menos uno de estos campos: ${group.join(" / ")}.`));
+  if (!compatibleSheet && hasImports && mappedCount && required.ok) {
+    warnings.push("Los campos requeridos existen, pero no coinciden en una misma hoja de datos.");
+  }
   if (missingScope) warnings.push(`No se pudo vincular el alcance ${instance.scopeType || ""} al Excel; falta uno de: ${(bindingConfig.scopeFields || []).join(", ")}.`);
 
   return {
