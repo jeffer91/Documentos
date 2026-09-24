@@ -1,7 +1,7 @@
 {
   "name": "documentos",
-  "version": "3.0.0",
-  "description": "Sistema documental ITSQMET por períodos, expedientes, motores independientes e IA por bloques",
+  "version": "4.0.0",
+  "description": "Sistema documental ITSQMET con motores independientes, estructura multinivel, visuales y salida APA 7",
   "main": "main.cjs",
   "author": "Jefferson Villarreal",
   "license": "MIT",
