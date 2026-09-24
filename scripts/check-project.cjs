@@ -329,11 +329,46 @@ function editorialV4Check() {
       children: [{
         key: "B",
         title: "B",
-        children: [{ key: "C", title: "C" }]
+        pageBreakBefore: true,
+        children: [{
+          key: "C",
+          title: "C",
+          children: [{
+            key: "C1",
+            title: "C1",
+            children: [{
+              key: "C2",
+              title: "C2",
+              children: [{
+                key: "C3",
+                title: "C3",
+                children: [{ key: "C4", title: "C4" }]
+              }]
+            }]
+          }]
+        }]
       }]
     },
     { key: "D", title: "D" }
   ]);
+
+  let duplicateRejected = false;
+  let missingKeyRejected = false;
+  try {
+    editorial.flattenSections([
+      { key: "DUP", title: "Uno" },
+      { key: "DUP", title: "Dos" }
+    ]);
+  } catch (_error) {
+    duplicateRejected = true;
+  }
+  try {
+    editorial.flattenSections([{ title: "Sin clave" }]);
+  } catch (_error) {
+    missingKeyRejected = true;
+  }
+
+  const hierarchyValidation = editorial.validateHierarchy(nested);
 
   const validBlocks = editorial.validateSectionBlocks(
     { title: "Resultados", type: "data_ai", allowedVisuals: ["foda"] },
@@ -346,6 +381,18 @@ function editorialV4Check() {
   const orphanBlocks = editorial.validateSectionBlocks(
     { title: "Resultados", type: "data_ai", allowedVisuals: [] },
     [{ type: "table", title: "Huérfana", data: { headers: ["A"], rows: [["1"]] } }]
+  );
+  const imageWithoutNarrative = editorial.validateSectionBlocks(
+    { title: "Resultados", type: "data_ai", allowedVisuals: [] },
+    [{ type: "image", title: "Imagen explicativa", data: { path: "demo.png" } }]
+  );
+  const bodyAfterTable = editorial.validateSectionBlocks(
+    { title: "Resultados", type: "data_ai", allowedVisuals: [] },
+    [
+      { type: "prose", role: "context", text: "La tabla presenta los datos consolidados del período analizado." },
+      { type: "table", title: "Resultados", data: { headers: ["A"], rows: [["1"]] } },
+      { type: "prose", role: "body", text: "Este párrafo continúa el texto, pero no constituye análisis de resultados." }
+    ]
   );
 
   const tools = visual.listTools();
@@ -365,15 +412,29 @@ function editorialV4Check() {
 
   return {
     hierarchy:
-      nested.length === 4 &&
+      nested.length === 8 &&
       nested[0].numbering === "1" &&
       nested[1].numbering === "1.1" &&
       nested[2].numbering === "1.1.1" &&
-      nested[3].numbering === "2",
-    topLevelPageBreak: nested[0].pageBreakBefore === true && nested[3].pageBreakBefore === true,
+      nested[6].numbering === "1.1.1.1.1.1.1" &&
+      nested[7].numbering === "2" &&
+      hierarchyValidation.ok,
+    topLevelPageBreak:
+      nested[0].pageBreakBefore === true &&
+      nested[7].pageBreakBefore === true &&
+      nested.slice(1, 7).every((item) => item.pageBreakBefore === false),
+    stableKeys: duplicateRejected && missingKeyRejected,
+    deepHierarchyWarning: hierarchyValidation.warnings.some((item) => item.includes("nivel 7")),
     tablePolicy: validBlocks.ok && !orphanBlocks.ok &&
       orphanBlocks.errors.some((item) => item.includes("contexto previo")) &&
       orphanBlocks.errors.some((item) => item.includes("análisis posterior")),
+    imagePolicy:
+      !imageWithoutNarrative.ok &&
+      imageWithoutNarrative.errors.some((item) => item.includes("contexto previo")) &&
+      imageWithoutNarrative.errors.some((item) => item.includes("análisis posterior")),
+    strictAnalysisRole:
+      !bodyAfterTable.ok &&
+      bodyAfterTable.errors.some((item) => item.includes("análisis posterior")),
     visualTools: tools.length >= 13 && tools.some((item) => item.id === "ishikawa") &&
       tools.some((item) => item.id === "foda") &&
       tools.some((item) => item.id === "came") &&
@@ -389,7 +450,14 @@ function editorialV4Check() {
     wordPagination:
       wordSource.includes("PageBreakBefore") &&
       wordSource.includes("KeepWithNext") &&
-      wordSource.includes("WidowControl"),
+      wordSource.includes("WidowControl") &&
+      wordSource.includes("Apply-ObjectKeepRules") &&
+      wordSource.includes("AllowBreakAcrossPages") &&
+      wordSource.includes("$outline -le 9"),
+    semanticHeadings:
+      apaSource.includes("semanticLevel") &&
+      apaSource.includes("data-actual-level") &&
+      apaSource.includes("break-before:page"),
     reportSections:
       reportKeys.includes("ANALISIS_RESULTADOS") &&
       reportKeys.includes("RESUMEN_EJECUTIVO") &&
@@ -495,7 +563,12 @@ function main() {
     if (
       !editorialV4.hierarchy ||
       !editorialV4.topLevelPageBreak ||
+      !editorialV4.stableKeys ||
+      !editorialV4.deepHierarchyWarning ||
       !editorialV4.tablePolicy ||
+      !editorialV4.imagePolicy ||
+      !editorialV4.strictAnalysisRole ||
+      !editorialV4.semanticHeadings ||
       !editorialV4.visualTools ||
       !editorialV4.svgRenderer ||
       !editorialV4.apaRenderer ||

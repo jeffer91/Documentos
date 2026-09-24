@@ -65,11 +65,12 @@ function blockNumberMaps(instance) {
 }
 
 function headingHtml(section) {
-  const level = Math.max(1, Math.min(5, Number(section.level || 1)));
+  const actualLevel = Math.max(1, Number(section.level || 1));
+  const semanticLevel = Math.max(1, Math.min(6, actualLevel));
+  const styleLevel = Math.max(1, Math.min(5, actualLevel));
   const number = section.numbering ? `${section.numbering}. ` : "";
   const title = `${number}${section.title || ""}`;
-  if (level <= 3) return `<h${level} class="apa-heading level-${level}">${esc(title)}</h${level}>`;
-  return `<p class="apa-heading level-${level}"><span class="runin-heading">${esc(title)}.</span></p>`;
+  return `<h${semanticLevel} class="apa-heading level-${styleLevel}" data-actual-level="${actualLevel}">${esc(title)}</h${semanticLevel}>`;
 }
 
 function tableHtml(block, number, citations) {
@@ -195,23 +196,22 @@ function css() {
     body{font-family:${PROFILE.fontFamily},sans-serif;font-size:${PROFILE.fontSizePt}pt;line-height:${PROFILE.lineHeight};margin:${PROFILE.marginCm}cm;}
     .document-title{font-size:16pt;font-weight:700;text-align:center;margin:0 0 24pt;}
     .document-meta{font-size:9pt;line-height:1.25;color:#475569;margin:0 0 18pt;text-align:center;}
-    .apa-section.level-1{page-break-before:always;}
-    .apa-section.level-1:first-of-type{page-break-before:always;}
-    .apa-heading{font-family:${PROFILE.fontFamily},sans-serif;font-size:${PROFILE.fontSizePt}pt;line-height:2;margin:0 0 0;font-weight:700;page-break-after:avoid;break-after:avoid;}
+    .apa-section.level-1{page-break-before:always;break-before:page;}
+    .apa-heading{font-family:${PROFILE.fontFamily},sans-serif;font-size:${PROFILE.fontSizePt}pt;line-height:2;margin:0;font-weight:700;page-break-after:avoid;break-after:avoid;orphans:2;widows:2;}
     .apa-heading.level-1{text-align:center;}
     .apa-heading.level-2{text-align:left;}
     .apa-heading.level-3{text-align:left;font-style:italic;}
     .apa-heading.level-4,.apa-heading.level-5{text-align:left;text-indent:${PROFILE.firstLineIndentCm}cm;}
     .apa-heading.level-5{font-style:italic;}
-    .runin-heading{font-weight:700;}
     .apa-paragraph{font-family:${PROFILE.fontFamily},sans-serif;font-size:${PROFILE.fontSizePt}pt;line-height:2;text-align:left;text-indent:${PROFILE.firstLineIndentCm}cm;margin:0;}
     .apa-list{font-size:${PROFILE.fontSizePt}pt;line-height:2;margin:0 0 0 ${PROFILE.firstLineIndentCm}cm;padding-left:${PROFILE.firstLineIndentCm}cm;}
-    .apa-object-number{font-size:${PROFILE.fontSizePt}pt;font-weight:700;line-height:1.25;margin:12pt 0 0;page-break-after:avoid;}
-    .apa-object-title{font-size:${PROFILE.fontSizePt}pt;font-style:italic;line-height:1.25;margin:0 0 6pt;page-break-after:avoid;}
-    .apa-table-block,.apa-figure-block{margin:12pt 0;page-break-inside:avoid;}
+    .apa-object-number{font-size:${PROFILE.fontSizePt}pt;font-weight:700;line-height:1.25;margin:12pt 0 0;page-break-after:avoid;break-after:avoid;}
+    .apa-object-title{font-size:${PROFILE.fontSizePt}pt;font-style:italic;line-height:1.25;margin:0 0 6pt;page-break-after:avoid;break-after:avoid;}
+    .apa-table-block{margin:12pt 0;}
+    .apa-figure-block{margin:12pt 0;page-break-inside:avoid;break-inside:avoid;}
     .apa-table{border-collapse:collapse;width:100%;font-size:${PROFILE.tableFontSizePt}pt;line-height:1.25;margin:0;}
     .apa-table th{font-weight:700;text-align:left;border-top:1.5pt solid #111;border-bottom:1pt solid #111;padding:5pt 6pt;}
-    .apa-table td{border:0;padding:5pt 6pt;vertical-align:top;}
+    .apa-table td{border:0;padding:5pt 6pt;vertical-align:top;orphans:2;widows:2;}
     .apa-table tbody tr:last-child td{border-bottom:1.5pt solid #111;}
     .apa-figure-image{display:block;max-width:100%;height:auto;margin:6pt auto;}
     .apa-missing-figure{border:1pt dashed #94a3b8;padding:30pt;text-align:center;color:#64748b;}

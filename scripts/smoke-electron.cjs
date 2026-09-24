@@ -570,6 +570,71 @@ async function run() {
     assert.strictEqual(instanceV4.migrationRevision, 0);
     assert.strictEqual(instanceV4.engineState, "current");
 
+    // Bloque 2: jerarquía multinivel y reglas editoriales.
+    const hierarchyInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
+      type: "period_population",
+      key: "hierarchy-block-2"
+    });
+    const hierarchyBaseEngine = documentEngineRegistry.getEngine("tit.regular.informe-final");
+    const hierarchyEngine = Object.assign({}, hierarchyBaseEngine, {
+      version: "4.0.0-hierarchy-smoke",
+      sections: [{
+        key: "METODOLOGIA_SMOKE",
+        title: "Metodología",
+        type: "semi_stable_ai",
+        children: [{
+          key: "DISENO_SMOKE",
+          title: "Diseño",
+          type: "semi_stable_ai",
+          pageBreakBefore: true,
+          children: [{
+            key: "POBLACION_SMOKE",
+            title: "Población",
+            type: "data_ai",
+            children: [{
+              key: "MUESTRA_SMOKE",
+              title: "Muestra",
+              type: "data_ai"
+            }]
+          }]
+        }]
+      }]
+    });
+    const hierarchyMigration = processHub.synchronizeEngineInstance(temp, hierarchyInstance.id, hierarchyEngine);
+    assert.strictEqual(hierarchyMigration.migrated, true);
+    const hierarchyReloaded = processHub.getDocumentInstance(temp, hierarchyInstance.id);
+    assert.deepStrictEqual(
+      hierarchyReloaded.sections.map((item) => item.numbering),
+      ["1", "1.1", "1.1.1", "1.1.1.1"]
+    );
+    assert.deepStrictEqual(
+      hierarchyReloaded.sections.map((item) => item.level),
+      [1, 2, 3, 4]
+    );
+    assert.strictEqual(hierarchyReloaded.sections[0].pageBreakBefore, true);
+    assert.ok(hierarchyReloaded.sections.slice(1).every((item) => item.pageBreakBefore === false));
+    assert.ok(hierarchyReloaded.sections.every((item) => item.keepWithNext === true));
+    assert.strictEqual(hierarchyReloaded.sections[1].parentKey, "METODOLOGIA_SMOKE");
+    assert.strictEqual(hierarchyReloaded.sections[2].parentKey, "DISENO_SMOKE");
+    assert.strictEqual(editorial.validateHierarchy(hierarchyReloaded.sections).ok, true);
+
+    assert.throws(
+      () => editorial.flattenSections([{ key: "DUP_SMOKE", title: "A" }, { key: "DUP_SMOKE", title: "B" }]),
+      /duplicada/
+    );
+    assert.throws(
+      () => editorial.flattenSections([{ title: "Sin key" }]),
+      /key estable/
+    );
+
+    const imageNarrativeValidation = editorial.validateSectionBlocks(
+      { title: "Resultados", type: "data_ai", allowedVisuals: [] },
+      [{ type: "image", title: "Imagen explicativa", data: { path: "demo.png" } }]
+    );
+    assert.strictEqual(imageNarrativeValidation.ok, false);
+    assert.ok(imageNarrativeValidation.errors.some((item) => item.includes("contexto previo")));
+    assert.ok(imageNarrativeValidation.errors.some((item) => item.includes("análisis posterior")));
+
     // Bloque 1: migraciones de motores sin secciones fantasma ni pérdida histórica.
     const currentEngine = documentEngineRegistry.getEngine("tit.regular.informe-final");
     const legacySectionId = "section-legacy-smoke";

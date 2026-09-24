@@ -405,3 +405,30 @@ Para continuar trabajando desde una final histórica se crea una nueva copia de 
 ### Detección de cambios
 
 El hash del motor contempla estructura, reglas, cardinalidad, población, dependencias y configuración relevante. Por ello, un cambio estructural puede detectarse aunque accidentalmente no se haya incrementado el número de versión.
+
+
+## Reglas jerárquicas y de paginación
+
+La estructura documental usa claves estables por sección y numeración calculada por árbol:
+
+```text
+1
+1.1
+1.1.1
+1.1.1.1
+...
+```
+
+Reglas obligatorias:
+
+- cada sección y subpunto debe tener una `key` única y estable;
+- solo las secciones de nivel 1 usan salto de página automático;
+- los niveles 2 o superiores continúan en la página disponible;
+- todo título usa `keepWithNext` para evitar títulos huérfanos;
+- la relación padre/hijo debe respetar niveles consecutivos;
+- la numeración y la ruta de orden se derivan del árbol, no se escriben manualmente;
+- los niveles profundos conservan numeración aunque visualmente reutilicen el estilo editorial de nivel profundo.
+
+Las tablas, figuras, imágenes y herramientas visuales usadas en el cuerpo del documento deben estar precedidas por contexto y seguidas por análisis o interpretación. Los anexos quedan exceptuados de esta obligación narrativa.
+
+En Word se aplican controles de viudas/huérfanas, repetición del encabezado de tablas, filas no partidas y reglas para mantener juntos el número, título y objeto de tablas/figuras. No se insertan saltos de página manuales entre subniveles.

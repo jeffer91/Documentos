@@ -18,7 +18,7 @@ function Apply-ApaParagraph {
   $Paragraph.Format.WidowControl = -1
 
   $outline = [int]$Paragraph.OutlineLevel
-  if ($outline -ge 1 -and $outline -le 5) {
+  if ($outline -ge 1 -and $outline -le 9) {
     $Paragraph.Format.KeepWithNext = -1
     $Paragraph.Format.KeepTogether = -1
     $Paragraph.Format.FirstLineIndent = 0
@@ -45,6 +45,12 @@ function Apply-ApaParagraph {
       $Paragraph.Range.Font.Italic = 0
     }
     elseif ($outline -eq 5) {
+      $Paragraph.Alignment = 0
+      $Paragraph.Format.LeftIndent = 36
+      $Paragraph.Range.Font.Italic = -1
+    }
+    else {
+      # Niveles 6-9 conservan la jerarquía/numeración y usan el estilo profundo.
       $Paragraph.Alignment = 0
       $Paragraph.Format.LeftIndent = 36
       $Paragraph.Range.Font.Italic = -1
@@ -111,7 +117,105 @@ function Apply-ApaTables {
       $table.Borders.Item(-3).LineWidth = 6
       $table.Rows.Item(1).Borders.Item(-3).LineStyle = 1
       $table.Rows.Item(1).Borders.Item(-3).LineWidth = 4
+      $table.Rows.AllowBreakAcrossPages = 0
     } catch {}
+  }
+}
+
+function Apply-ObjectKeepRules {
+  param($Document)
+
+  $count = $Document.Paragraphs.Count
+  for ($i = 1; $i -le $count; $i++) {
+    $paragraph = $Document.Paragraphs.Item($i)
+    $text = ([string]$paragraph.Range.Text).Trim()
+
+    if ($text -match '^(Tabla|Figura)\s+\d+\s*
+  foreach ($shape in @($Document.InlineShapes)) {
+    try {
+      if ($shape.Width -gt 450) {
+        $ratio = 450 / $shape.Width
+        $shape.Width = 450
+        $shape.Height = $shape.Height * $ratio
+      }
+      $shape.Range.ParagraphFormat.KeepTogether = -1
+      $shape.Range.ParagraphFormat.WidowControl = -1
+      $shape.Range.ParagraphFormat.Alignment = 1
+    } catch {}
+  }
+}
+
+function Apply-ApaDocument {
+  param($Document)
+
+  $section = $Document.Sections.Item(1)
+  foreach ($sec in @($Document.Sections)) {
+    $sec.TopMargin = 72
+    $sec.BottomMargin = 72
+    $sec.LeftMargin = 72
+    $sec.RightMargin = 72
+  }
+
+  $Document.Content.Font.Name = "Arial"
+  $Document.Content.Font.Size = 11
+
+  foreach ($p in @($Document.Paragraphs)) {
+    Apply-ApaParagraph -Paragraph $p
+  }
+
+  Apply-ApaReferences -Document $Document
+  Apply-ApaTables -Document $Document
+  Apply-ApaFigures -Document $Document
+  Apply-ObjectKeepRules -Document $Document
+}
+
+try {
+  $word = New-Object -ComObject Word.Application
+  $word.Visible = $false
+  $word.DisplayAlerts = 0
+  $doc = $word.Documents.Open($InputHtml, $false, $false)
+
+  Apply-ApaDocument -Document $doc
+
+  $items = $Formats.Split(",") | ForEach-Object { $_.Trim().ToLowerInvariant() }
+  if ($items -contains "docx") {
+    $doc.SaveAs2("$OutputBase.docx", 16)
+  }
+  if ($items -contains "pdf") {
+    $doc.ExportAsFixedFormat("$OutputBase.pdf", 17)
+  }
+}
+finally {
+  if ($doc -ne $null) {
+    try { $doc.Close([ref]$false) } catch {}
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($doc) | Out-Null
+  }
+  if ($word -ne $null) {
+    try { $word.Quit() } catch {}
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+}
+) {
+      try {
+        $paragraph.Format.KeepWithNext = -1
+        $paragraph.Format.KeepTogether = -1
+      } catch {}
+
+      # El siguiente párrafo no vacío es el título del objeto.
+      for ($j = $i + 1; $j -le [Math]::Min($count, $i + 3); $j++) {
+        $next = $Document.Paragraphs.Item($j)
+        $nextText = ([string]$next.Range.Text).Trim()
+        if ($nextText) {
+          try {
+            $next.Format.KeepWithNext = -1
+            $next.Format.KeepTogether = -1
+          } catch {}
+          break
+        }
+      }
+    }
   }
 }
 
