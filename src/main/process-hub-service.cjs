@@ -725,6 +725,14 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
   };
 }
 
+function ensureCurrentDocumentInstance(userDataPath, instanceId) {
+  const db = dbFor(userDataPath);
+  const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
+  if (!row) throw new Error("Documento no válido.");
+  if (!row.final_frozen_at) synchronizeEngineInstance(userDataPath, instanceId);
+  return getDocumentInstance(userDataPath, instanceId);
+}
+
 function listEngineMigrations(userDataPath, instanceId) {
   return dbFor(userDataPath)
     .prepare("SELECT * FROM engine_migrations_v4 WHERE instance_id = ? ORDER BY migration_revision DESC")
@@ -1176,6 +1184,7 @@ module.exports = {
   getDocumentInstance,
   listDocumentInstances,
   listArchivedSections,
+  ensureCurrentDocumentInstance,
   synchronizeEngineInstance,
   listEngineMigrations,
   updateSection,
