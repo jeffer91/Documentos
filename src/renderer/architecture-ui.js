@@ -1306,11 +1306,38 @@
     await renderHome();
   }
 
+  document.addEventListener("input", (event) => {
+    if (!event.target.closest('[data-arch-editor]')) return;
+    if (!state.instance || state.currentView !== "instance" || state.instanceStage !== "document") return;
+    scheduleSectionSave();
+  });
+
   document.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-arch-action]");
     if (!button || state.busy) return;
     const action = button.dataset.archAction;
     try {
+      if (action === "instance-stage") {
+        clearTimeout(sectionSaveTimer);
+        if (state.instanceStage === "document") await persistCurrentEditor();
+        state.instanceStage = button.dataset.stage || "document";
+        return renderInstance(state.instance.id);
+      }
+      if (action === "select-section") {
+        clearTimeout(sectionSaveTimer);
+        const saved = await persistCurrentEditor();
+        if (!saved) return;
+        state.currentSectionKey = button.dataset.key;
+        return renderInstance(state.instance.id);
+      }
+      if (action === "previous-section") return moveSection(-1);
+      if (action === "next-section") return moveSection(1);
+      if (action === "toggle-section-included" || action === "include-section") return toggleSectionIncluded(button.dataset.key);
+      if (action === "recommend-sections") {
+        await ensureSectionRecommendations(true);
+        return toast("Recomendación de subsecciones actualizada.");
+      }
+      if (action === "open-current-dossier") return renderDossier(state.dossier.id);
       if (action === "new-period") return newPeriod();
       if (action === "create-dossier") return createDossier(button);
       if (action === "open-dossier") { state.instance = null; return renderDossier(button.dataset.id); }
@@ -1333,10 +1360,7 @@
         return saveSection(button.dataset.key, { content: input ? input.value : "", status: "edited", provenance: { source: "human", editedAt: new Date().toISOString() } });
       }
       if (action === "save-blocks") return saveBlocks(button.dataset.key);
-      if (action === "approve-section") {
-        const current = state.instance.sections.find((item) => item.key === button.dataset.key);
-        return saveSection(button.dataset.key, { status: "approved", locked: true, content: current && current.content || "", provenance: Object.assign({}, current && current.provenance || {}, { approvedBy: "human", approvedAt: new Date().toISOString() }) });
-      }
+      if (action === "approve-section") return approveCurrentSection(button.dataset.key);
       if (action === "generate-section") return generateSection(button.dataset.key);
       if (action === "generate-document") return generateDocument();
       if (action === "resume-document") return resumeDocument();
