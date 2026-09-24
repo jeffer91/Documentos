@@ -362,9 +362,11 @@ function registerIpc() {
   ipcMain.handle("document-export:v3", async (_event, instanceId, options) => {
     try {
       const result = draftExport.exportInstance(userData(), instanceId, options || {}, __dirname);
-      const preferred = result.outputs.find((item) => item.type === "pdf")
-        || result.outputs.find((item) => item.type === "docx")
-        || result.outputs.find((item) => item.type === "html");
+      const preferred = !result.complete
+        ? result.outputs.find((item) => item.type === "html")
+        : result.outputs.find((item) => item.type === "pdf")
+          || result.outputs.find((item) => item.type === "docx")
+          || result.outputs.find((item) => item.type === "html");
       if (preferred && preferred.path) await shell.openPath(preferred.path);
       if (!result.complete) {
         return {
