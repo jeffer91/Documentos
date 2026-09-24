@@ -15,9 +15,11 @@ const processHub = require("../src/main/process-hub-service.cjs");
 const editorial = require("../src/main/editorial-structure-service.cjs");
 const visualRenderer = require("../src/main/visual-renderer-service.cjs");
 const citationService = require("../src/main/citation-service.cjs");
+const dataIngestion = require("../src/main/data-ingestion-service.cjs");
 const documentEngineRegistry = require("../src/main/document-engine-registry.cjs");
 const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
+const XLSX = require("xlsx");
 const catalog = require("../src/renderer/catalog.js");
 
 async function run() {
@@ -634,6 +636,125 @@ async function run() {
     assert.strictEqual(imageNarrativeValidation.ok, false);
     assert.ok(imageNarrativeValidation.errors.some((item) => item.includes("contexto previo")));
     assert.ok(imageNarrativeValidation.errors.some((item) => item.includes("análisis posterior")));
+
+    // Bloque 3: motor de datos completo, filtrable y seguro para IA.
+    const largeDataPath = path.join(temp, "datos-complexivo-6001.xlsx");
+    const largeRows = [["Cédula", "Carrera", "Sede", "Núcleo", "Componente", "Nota"]];
+    for (let i = 1; i <= 6001; i += 1) {
+      largeRows.push([
+        `EST-${String(i).padStart(5, "0")}`,
+        "Enfermería",
+        i % 2 === 0 ? "Norte" : "Sur",
+        i <= 5997 ? "Núcleo 1" : "Núcleo especial",
+        "Teórico",
+        i <= 5000 ? 0 : 100
+      ]);
+    }
+    const largeWorkbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(largeWorkbook, XLSX.utils.aoa_to_sheet(largeRows), "Notas");
+    XLSX.writeFile(largeWorkbook, largeDataPath);
+
+    const importedData = dataIngestion.importDataFile(temp, dossierV4.id, largeDataPath, { type: "dossier", key: "" });
+    assert.strictEqual(importedData.profile.totalRows, 6001);
+    const suggestions = dataIngestion.suggestMapping(temp, importedData.id);
+    assert.strictEqual(suggestions.sheets[0].suggestions.career.source, "Carrera");
+    assert.strictEqual(suggestions.sheets[0].suggestions.student_id.source, "Cédula");
+    assert.strictEqual(suggestions.sheets[0].suggestions.core.source, "Núcleo");
+    assert.strictEqual(suggestions.sheets[0].suggestions.grade.source, "Nota");
+
+    const mappedData = dataIngestion.setMapping(temp, importedData.id, {
+      fields: {
+        student_id: "Cédula",
+        career: "Carrera",
+        campus: "Sede",
+        core: "Núcleo",
+        component: "Componente",
+        grade: "Nota"
+      }
+    });
+    assert.strictEqual(mappedData.mappingValidation.ok, true);
+
+    const pagedData = dataIngestion.queryData(temp, dossierV4.id, {
+      scopeType: "period_population",
+      scopeKey: "regular",
+      scopePolicy: "inclusive",
+      where: [
+        { field: "career", op: "eq", value: "enfermeria" },
+        { field: "component", op: "eq", value: "teorico" }
+      ],
+      select: ["student_id", "career", "core", "grade"],
+      limit: 5000
+    });
+    assert.strictEqual(pagedData.total, 6001);
+    assert.strictEqual(pagedData.returnedRows, 5000);
+    assert.strictEqual(pagedData.truncated, true);
+    assert.strictEqual(pagedData.sourceTrace.length, 1);
+
+    const fullSummary = dataIngestion.summarize(temp, dossierV4.id, {
+      scopeType: "period_population",
+      scopeKey: "regular",
+      scopePolicy: "inclusive",
+      where: [
+        { field: "career", op: "eq", value: "ENFERMERÍA" },
+        { field: "component", op: "eq", value: "TEÓRICO" }
+      ],
+      dimensions: ["core", "campus"],
+      measures: ["grade"],
+      groupBy: ["core"]
+    });
+    assert.strictEqual(fullSummary.total, 6001);
+    assert.strictEqual(fullSummary.analyzedRows, 6001);
+    assert.strictEqual(fullSummary.calculationComplete, true);
+    assert.strictEqual(fullSummary.numeric.grade.count, 6001);
+    assert.strictEqual(fullSummary.numeric.grade.average, 16.6806);
+    assert.ok(fullSummary.numeric.grade.average > 0, "El promedio debe usar las 6001 filas, no solo las primeras 5000.");
+    assert.strictEqual(fullSummary.percentages.core.find((item) => item.value === "Núcleo especial").count, 4);
+    assert.strictEqual(fullSummary.groups.length, 2);
+    assert.strictEqual(fullSummary.sourceTrace[0].sheets[0].firstRow, 2);
+    assert.strictEqual(fullSummary.sourceTrace[0].sheets[0].lastRow, 6002);
+    assert.strictEqual(fullSummary.querySignature.length, 64);
+
+    const aggregateSlice = dataIngestion.aiSlice(temp, dossierV4.id, {
+      where: [{ field: "career", op: "eq", value: "Enfermería" }],
+      dimensions: ["core"],
+      measures: ["grade"],
+      groupBy: ["core"],
+      privacyMinGroup: 5
+    });
+    assert.strictEqual(aggregateSlice.population.calculationComplete, true);
+    assert.strictEqual(aggregateSlice.population.absoluteCountsExposed, false);
+    assert.strictEqual(aggregateSlice.sampleRows.length, 0);
+    const protectedCore = aggregateSlice.summary.percentages.core.find((item) => item.suppressed);
+    assert.ok(protectedCore);
+    assert.strictEqual(protectedCore.value, "Grupo protegido");
+    assert.strictEqual(protectedCore.percentage, null);
+    assert.ok(aggregateSlice.note.includes("todas las filas filtradas"));
+
+    const studentSlice = dataIngestion.aiSlice(temp, dossierV4.id, {
+      where: [{ field: "student_id", op: "eq", value: "EST-06001" }],
+      measures: ["grade"],
+      privacyMode: "student_specific",
+      includeSampleRows: true,
+      select: ["student_id", "career", "grade"],
+      sampleLimit: 5
+    });
+    assert.strictEqual(studentSlice.sampleRows.length, 1);
+    assert.deepStrictEqual(Object.keys(studentSlice.sampleRows[0]).sort(), ["career", "grade", "student_id"]);
+    assert.strictEqual(studentSlice.sampleRows[0].student_id, "EST-06001");
+    assert.strictEqual(studentSlice.sampleRows[0].grade, 100);
+
+    const rawDenied = dataIngestion.aiSlice(temp, dossierV4.id, {
+      where: [{ field: "student_id", op: "eq", value: "EST-06001" }],
+      includeSampleRows: true,
+      select: ["student_id", "grade"]
+    });
+    assert.strictEqual(rawDenied.sampleRows.length, 0);
+    assert.ok(rawDenied.warnings.some((item) => item.includes("modo de privacidad")));
+
+    const duplicateData = dataIngestion.importDataFile(temp, dossierV4.id, largeDataPath, { type: "dossier", key: "" });
+    assert.strictEqual(duplicateData.id, importedData.id);
+    assert.strictEqual(duplicateData.duplicateIgnored, true);
+    assert.strictEqual(dataIngestion.listImports(temp, dossierV4.id).length, 1);
 
     // Bloque 1: migraciones de motores sin secciones fantasma ni pérdida histórica.
     const currentEngine = documentEngineRegistry.getEngine("tit.regular.informe-final");
