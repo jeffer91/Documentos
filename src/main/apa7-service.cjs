@@ -98,17 +98,17 @@ function tableHtml(block, number, citations) {
   }).join("");
 
   return {
-    html: \`
+    html: `
       <div class="apa-table-block" data-keep-together="true">
-        <p class="apa-object-number">Tabla \${number}</p>
-        <p class="apa-object-title">\${esc(block.title || "Tabla")}</p>
+        <p class="apa-object-number">Tabla ${number}</p>
+        <p class="apa-object-title">${esc(block.title || "Tabla")}</p>
         <table class="apa-table">
-          <thead><tr>\${renderedHeaders}</tr></thead>
-          <tbody>\${renderedRows}</tbody>
+          <thead><tr>${renderedHeaders}</tr></thead>
+          <tbody>${renderedRows}</tbody>
         </table>
-        \${block.note ? \`<div class="apa-note"><span>Nota.</span> \${note.html}</div>\` : ""}
+        ${block.note ? `<div class="apa-note"><span>Nota.</span> ${note.html}</div>` : ""}
       </div>
-    \`,
+    `,
     missing: Array.from(new Set(missing))
   };
 }
