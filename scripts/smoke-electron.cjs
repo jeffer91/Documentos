@@ -724,6 +724,17 @@ async function run() {
     assert.strictEqual(fullSummary.sourceTrace[0].sheets[0].lastRow, 6002);
     assert.strictEqual(fullSummary.querySignature.length, 64);
     assert.strictEqual(fullSummary.sourceTrace[0].mappingHash.length, 64);
+    assert.strictEqual(fullSummary.inputSourceTrace[0].mappingHash.length, 64);
+
+    const zeroSummary = dataIngestion.summarize(temp, dossierV4.id, {
+      where: [{ field: "career", op: "eq", value: "Carrera inexistente" }],
+      dimensions: ["core"],
+      measures: ["grade"]
+    });
+    assert.strictEqual(zeroSummary.total, 0);
+    assert.strictEqual(zeroSummary.sourceTrace.length, 0);
+    assert.strictEqual(zeroSummary.inputSourceTrace.length, 1);
+    assert.strictEqual(zeroSummary.querySignature.length, 64);
 
     const aggregateSlice = dataIngestion.aiSlice(temp, dossierV4.id, {
       where: [{ field: "career", op: "eq", value: "Enfermería" }],
@@ -753,6 +764,10 @@ async function run() {
     assert.deepStrictEqual(Object.keys(studentSlice.sampleRows[0]).sort(), ["career", "grade", "student_id"]);
     assert.strictEqual(studentSlice.sampleRows[0].student_id, "EST-06001");
     assert.strictEqual(studentSlice.sampleRows[0].grade, 100);
+    assert.strictEqual(studentSlice.population.total, 1);
+    assert.strictEqual(studentSlice.population.privacyMode, "student_specific");
+    assert.strictEqual(studentSlice.summary.numeric.grade.suppressed, false);
+    assert.strictEqual(studentSlice.summary.numeric.grade.average, 100);
 
     const rawDenied = dataIngestion.aiSlice(temp, dossierV4.id, {
       where: [{ field: "student_id", op: "eq", value: "EST-06001" }],
