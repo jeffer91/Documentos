@@ -741,7 +741,16 @@ function exportVisualQualityCheck() {
     fs.writeFileSync(base + ".pdf", Buffer.from("%PDF-1.7\nquality-check\n", "ascii"));
     fs.writeFileSync(base + ".docx", Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]), Buffer.alloc(64, 1)]));
     const all = quality.assessOutputs(base, htmlPath, ["html", "docx", "pdf"]);
-    signatures = all.complete && all.generatedFormats.length === 3;
+    const signatureMap = Object.fromEntries(all.files.map((item) => [item.type, item]));
+    signatures =
+      all.complete &&
+      all.generatedFormats.length === 3 &&
+      signatureMap.html && signatureMap.html.healthy &&
+      signatureMap.docx && signatureMap.docx.healthy &&
+      signatureMap.pdf && signatureMap.pdf.healthy;
+    if (!signatures) {
+      throw new Error("Detalle firmas Bloque 5: " + JSON.stringify(all));
+    }
     fs.unlinkSync(base + ".pdf");
     const partial = quality.assessOutputs(base, htmlPath, ["docx", "pdf"]);
     incomplete = !partial.complete && partial.missingFormats.includes("pdf") && partial.generatedFormats.includes("docx");
