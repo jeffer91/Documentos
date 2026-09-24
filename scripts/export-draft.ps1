@@ -183,6 +183,72 @@ function Apply-ApaFigures {
   }
 }
 
+function Build-LayoutReport {
+  param($Document)
+
+  $orphanHeadings = 0
+  $headingCount = 0
+  $tableHeaderFailures = 0
+  $tableSplitFailures = 0
+  $oversizedShapes = 0
+
+  try {
+    $paragraphCount = $Document.Paragraphs.Count
+    for ($i = 1; $i -le $paragraphCount; $i++) {
+      $paragraph = $Document.Paragraphs.Item($i)
+      $outline = [int]$paragraph.OutlineLevel
+      $text = ([string]$paragraph.Range.Text).Trim()
+      if ($outline -ge 1 -and $outline -le 9 -and $text) {
+        $headingCount++
+        $headingPage = 0
+        try { $headingPage = [int]$paragraph.Range.Information(3) } catch {}
+        for ($j = $i + 1; $j -le $paragraphCount; $j++) {
+          $next = $Document.Paragraphs.Item($j)
+          $nextText = ([string]$next.Range.Text).Trim()
+          if ($nextText) {
+            $nextPage = 0
+            try { $nextPage = [int]$next.Range.Information(3) } catch {}
+            if ($headingPage -gt 0 -and $nextPage -gt 0 -and $headingPage -ne $nextPage) {
+              $orphanHeadings++
+            }
+            break
+          }
+        }
+      }
+    }
+  } catch {}
+
+  foreach ($table in @($Document.Tables)) {
+    try {
+      if ([int]$table.Rows.Item(1).HeadingFormat -eq 0) { $tableHeaderFailures++ }
+    } catch { $tableHeaderFailures++ }
+    try {
+      if ([int]$table.Rows.AllowBreakAcrossPages -ne 0) { $tableSplitFailures++ }
+    } catch {}
+  }
+
+  foreach ($shape in @($Document.InlineShapes)) {
+    try {
+      if ($shape.Width -gt 451 -or $shape.Height -gt 521) { $oversizedShapes++ }
+    } catch {}
+  }
+
+  $pages = 0
+  try { $pages = [int]$Document.ComputeStatistics(2) } catch {}
+
+  return [ordered]@{
+    pageCount = $pages
+    paragraphCount = $Document.Paragraphs.Count
+    headingCount = $headingCount
+    orphanHeadingCount = $orphanHeadings
+    tableCount = $Document.Tables.Count
+    tableHeaderRepeatFailures = $tableHeaderFailures
+    tableRowSplitFailures = $tableSplitFailures
+    figureCount = $Document.InlineShapes.Count
+    oversizedFigureCount = $oversizedShapes
+  }
+}
+
 function Apply-ApaDocument {
   param($Document)
 
@@ -213,6 +279,11 @@ try {
   $doc = $word.Documents.Open($InputHtml, $false, $false)
 
   Apply-ApaDocument -Document $doc
+
+  $layoutReport = Build-LayoutReport -Document $doc
+  try {
+    $layoutReport | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$OutputBase.word-report.json" -Encoding UTF8
+  } catch {}
 
   $items = $Formats.Split(",") | ForEach-Object { $_.Trim().ToLowerInvariant() }
   if ($items -contains "docx") {
