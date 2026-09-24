@@ -1,6 +1,6 @@
 const fs = require("fs");
 
-const TOOL_VERSION = "1.1.0";
+const TOOL_VERSION = "1.2.0";
 const TOOLS = Object.freeze({
   ishikawa: { label: "Ishikawa", category: "qualitative", version: TOOL_VERSION },
   foda: { label: "FODA", category: "strategic", version: TOOL_VERSION },
@@ -10,6 +10,7 @@ const TOOLS = Object.freeze({
   objective_tree: { label: "Árbol de objetivos", category: "qualitative", version: TOOL_VERSION },
   stakeholders: { label: "Mapa de actores", category: "qualitative", version: TOOL_VERSION },
   gap_analysis: { label: "Análisis de brechas", category: "qualitative", version: TOOL_VERSION },
+  heatmap: { label: "Mapa de calor", category: "quantitative", version: TOOL_VERSION },
   process_flow: { label: "Flujo de proceso", category: "process", version: TOOL_VERSION },
   pestel: { label: "PESTEL", category: "strategic", version: TOOL_VERSION },
   cards: { label: "Tarjetas informativas", category: "explanatory", version: TOOL_VERSION },
@@ -254,6 +255,57 @@ function renderGap(data) {
   return svgShell(d.title || "Análisis de brechas", body, Math.max(600, 210 + items.length*70));
 }
 
+function renderHeatmap(data) {
+  const d = data || {};
+  const rows = arr(d.rows || d.data || d.items).slice(0, 12);
+  const columns = arr(d.columns || d.headers).slice(0, 10);
+  const rowLabels = rows.map((row, index) => String(row.label || row.name || row.career || row.coordination || `Fila ${index + 1}`));
+  const inferredColumns = columns.length
+    ? columns.map((item) => typeof item === "string" ? item : String(item.label || item.name || ""))
+    : Array.from(new Set(rows.flatMap((row) => Object.keys(row && row.values && typeof row.values === "object" ? row.values : {}).filter(Boolean)))).slice(0, 10);
+  const matrix = rows.map((row) => {
+    if (Array.isArray(row.values)) return row.values.slice(0, inferredColumns.length).map((value) => Number(value));
+    const values = row && row.values && typeof row.values === "object" ? row.values : row || {};
+    return inferredColumns.map((column) => Number(values[column]));
+  });
+  const finite = matrix.flat().filter((value) => Number.isFinite(value));
+  const min = finite.length ? Math.min(...finite) : 0;
+  const max = finite.length ? Math.max(...finite) : 100;
+  const span = max - min || 1;
+  const left = 250;
+  const top = 150;
+  const width = 880;
+  const cellW = Math.max(62, Math.floor(width / Math.max(1, inferredColumns.length)));
+  const cellH = 48;
+  const height = Math.max(560, top + Math.max(1, rows.length) * cellH + 120);
+  let body = "";
+
+  inferredColumns.forEach((column, index) => {
+    body += multiline(left + index * cellW + cellW / 2, top - 34, column, {
+      size: 13, weight: 700, anchor: "middle", width: Math.max(8, Math.floor(cellW / 8)), fill: P.muted
+    });
+  });
+
+  rows.forEach((row, rowIndex) => {
+    body += multiline(56, top + rowIndex * cellH + 29, rowLabels[rowIndex], {
+      size: 14, weight: 700, width: 24
+    });
+    matrix[rowIndex].forEach((value, colIndex) => {
+      const safe = Number.isFinite(value) ? value : min;
+      const ratio = Math.max(0, Math.min(1, (safe - min) / span));
+      const fill = ratio >= .67 ? P.redSoft : ratio >= .34 ? P.warmSoft : P.accentSoft;
+      const stroke = ratio >= .67 ? P.red : ratio >= .34 ? P.warm : P.accent;
+      const x = left + colIndex * cellW;
+      const y = top + rowIndex * cellH;
+      body += `<rect x="${x}" y="${y}" width="${cellW - 4}" height="${cellH - 4}" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+      body += `<text x="${x + (cellW - 4)/2}" y="${y + 29}" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="${P.ink}">${esc(Number.isFinite(value) ? value : "—")}</text>`;
+    });
+  });
+
+  body += `<text x="${left}" y="${top + Math.max(1, rows.length) * cellH + 45}" font-family="Arial" font-size="13" fill="${P.muted}">Escala relativa: menor intensidad → mayor intensidad</text>`;
+  return svgShell(d.title || "Mapa de calor de necesidades", body, height);
+}
+
 function renderFlow(data) {
   const d = data || {};
   const steps = arr(d.steps || d.pasos || d.nodes).slice(0, 10);
@@ -460,6 +512,18 @@ function validateVisualData(tool, data) {
     if (items.length > 8) warnings.push("El análisis de brechas mostrará como máximo 8 indicadores.");
   }
 
+  if (type === "heatmap") {
+    const rows = arr(d.rows || d.data || d.items);
+    if (!rows.length) errors.push("El mapa de calor necesita al menos una fila de datos.");
+    const values = rows.flatMap((row) => {
+      if (Array.isArray(row && row.values)) return row.values;
+      if (row && row.values && typeof row.values === "object") return Object.values(row.values);
+      return [];
+    }).filter(validNumeric);
+    if (!values.length) errors.push("El mapa de calor necesita valores numéricos.");
+    if (rows.length > 12) warnings.push("El mapa de calor mostrará como máximo 12 filas.");
+  }
+
   if (type === "process_flow") {
     const steps = arr(d.steps || d.pasos || d.nodes).filter((item) =>
       nonEmpty(typeof item === "string" ? item : item && (item.label || item.name || item.title))
@@ -516,6 +580,7 @@ function samplePayload(tool) {
     objective_tree: { title: "Objetivos", objective: "Mejorar cumplimiento", means: ["Seguimiento periódico"], ends: ["Entregas oportunas"] },
     stakeholders: { title: "Actores", items: [{ label: "Docentes", interest: 80, power: 70 }] },
     gap_analysis: { title: "Brechas", items: [{ label: "Cumplimiento", current: 65, target: 90 }] },
+    heatmap: { title: "Necesidades", columns: ["Pedagogía", "Digital"], rows: [{ label: "Administración", values: [78, 54] }, { label: "Redes", values: [61, 88] }] },
     process_flow: { title: "Proceso", steps: ["Inicio", "Validación", "Cierre"] },
     pestel: { title: "PESTEL", political: ["Normativa"], economic: ["Presupuesto"], social: ["Participación"], technological: ["Plataforma"], environmental: ["Digitalización"], legal: ["Reglamento"] },
     cards: { title: "Núcleos", items: [{ number: 1, title: "Núcleo 1", value: "85%" }, { number: 2, title: "Núcleo 2", value: "90%" }] },
@@ -539,6 +604,7 @@ function renderSvg(tool, data, options) {
   if (type === "objective_tree") return renderTree(payload, true);
   if (type === "stakeholders") return renderStakeholders(payload);
   if (type === "gap_analysis") return renderGap(payload);
+  if (type === "heatmap") return renderHeatmap(payload);
   if (type === "process_flow") return renderFlow(payload);
   if (type === "pestel") return renderPestel(payload);
   if (type === "cards") return renderCards(payload);
