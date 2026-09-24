@@ -242,7 +242,7 @@ function registerIpc() {
   ));
   ipcMain.handle("instances:get", (_event, instanceId) => safeResponse(
     () => {
-      const instance = processHub.getDocumentInstance(userData(), instanceId);
+      const instance = processHub.ensureCurrentDocumentInstance(userData(), instanceId);
       return {
         ok: true,
         instance,
@@ -257,6 +257,16 @@ function registerIpc() {
     () => ({ ok: true, instances: processHub.listDocumentInstances(userData(), dossierId) }),
     "instances",
     "list"
+  ));
+  ipcMain.handle("instances:migrations", (_event, instanceId) => safeResponse(
+    () => ({ ok: true, migrations: processHub.listEngineMigrations(userData(), instanceId) }),
+    "instances",
+    "migrations"
+  ));
+  ipcMain.handle("instances:archived-sections", (_event, instanceId) => safeResponse(
+    () => ({ ok: true, sections: processHub.listArchivedSections(userData(), instanceId) }),
+    "instances",
+    "archived-sections"
   ));
   ipcMain.handle("instances:update-section", (_event, instanceId, sectionKey, patch) => safeResponse(
     () => ({ ok: true, instance: processHub.updateSection(userData(), instanceId, sectionKey, patch || {}) }),
