@@ -260,21 +260,32 @@ function pickAvailable(fields, available) {
   return (fields || []).filter((field) => available.has(field));
 }
 
-function compatibleFieldSet(bindingConfig, availability) {
-  const sets = [];
-  (availability && availability.imports || []).forEach((item) => {
-    (item.sheets || []).forEach((sheet) => {
-      sets.push(new Set((sheet.canonicalFields || []).map(String)));
-    });
-  });
-  if (!sets.length) return false;
+function compatibleSources(bindingConfig, availability) {
   const requiredAll = bindingConfig.requiredAll || [];
   const requiredAny = bindingConfig.requiredAny || [];
-  if (!requiredAll.length && !requiredAny.length) return true;
-  return sets.some((set) =>
-    requiredAll.every((field) => set.has(field)) &&
-    requiredAny.every((group) => !Array.isArray(group) || !group.length || group.some((field) => set.has(field)))
-  );
+  const output = [];
+  (availability && availability.imports || []).forEach((item) => {
+    (item.sheets || []).forEach((sheet) => {
+      const set = new Set((sheet.canonicalFields || []).map(String));
+      const compatible =
+        requiredAll.every((field) => set.has(field)) &&
+        requiredAny.every((group) => !Array.isArray(group) || !group.length || group.some((field) => set.has(field)));
+      if (compatible) {
+        output.push({
+          importId: item.importId,
+          sheet: sheet.name,
+          fields: Array.from(set)
+        });
+      }
+    });
+  });
+  return output;
+}
+
+function fieldsFromSources(sources) {
+  const set = new Set();
+  (sources || []).forEach((source) => (source.fields || []).forEach((field) => set.add(String(field))));
+  return set;
 }
 
 function requiredState(bindingConfig, available) {
@@ -300,12 +311,15 @@ function resolveBinding(bindingConfig, instance, availability) {
     warnings: ["Esta sección no tiene binding de datos."]
   };
 
-  const available = mappedSet(availability);
-  const required = requiredState(bindingConfig, available);
+  const allAvailable = mappedSet(availability);
+  const required = requiredState(bindingConfig, allAvailable);
+  const compatible = compatibleSources(bindingConfig, availability);
+  const compatibleAvailable = fieldsFromSources(compatible);
+  const available = compatible.length ? compatibleAvailable : allAvailable;
   const hasImports = Boolean(availability && availability.hasImports);
   const mappedCount = Number(availability && availability.availableFields && availability.availableFields.length || 0);
   const scopeFilter = resolveScopeFilter(bindingConfig, instance, available);
-  const compatibleSheet = compatibleFieldSet(bindingConfig, availability);
+  const compatibleSheet = compatible.length > 0;
   const scopeRequired = Boolean(
     String(instance && instance.scopeKey || "").trim() &&
     (bindingConfig.scopeFields || []).length &&
@@ -322,6 +336,8 @@ function resolveBinding(bindingConfig, instance, availability) {
   const baseWhere = (bindingConfig.where || []).filter((condition) => condition && available.has(condition.field));
   const baseAnyOf = (bindingConfig.anyOf || []).filter((condition) => condition && available.has(condition.field));
   const query = ready ? {
+    importIds: Array.from(new Set(compatible.map((item) => item.importId))),
+    sheet: Array.from(new Set(compatible.map((item) => item.sheet))),
     where: baseWhere.concat(scopeFilter ? [scopeFilter] : []),
     anyOf: baseAnyOf,
     dimensions: pickAvailable(bindingConfig.dimensions, available),
@@ -354,6 +370,7 @@ function resolveBinding(bindingConfig, instance, availability) {
     ready,
     query,
     availableFields: Array.from(available).sort(),
+    compatibleSources: compatible.map((item) => ({ importId: item.importId, sheet: item.sheet })),
     missingAll: required.missingAll,
     missingAny: required.missingAny,
     warnings
