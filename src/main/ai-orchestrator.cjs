@@ -97,7 +97,8 @@ function sectionDataContext(userDataPath, instance, section) {
     const query = Object.assign({
       scopeType: instance.scopeType,
       scopeKey: instance.scopeKey,
-      scopePolicy: "inclusive"
+      scopePolicy: "inclusive",
+      privacyMode: instance.scopeType === "student" ? "student_specific" : "aggregate"
     }, configuredQuery);
     filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, query);
   }
