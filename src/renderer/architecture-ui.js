@@ -841,13 +841,14 @@
     if (!response) return toast("No se pudo exportar.");
     if (!response.ok) {
       const result = response.result || {};
+      if (response.error) return toast(response.error);
       const missing = Array.isArray(result.missingFormats) && result.missingFormats.length
         ? ` Falta: ${result.missingFormats.map((item) => String(item).toUpperCase()).join(", ")}.`
         : "";
       const assets = Array.isArray(result.missingAssets) && result.missingAssets.length
         ? ` Recursos visuales pendientes: ${result.missingAssets.length}.`
         : "";
-      return toast((response.error || "Exportación incompleta.") + missing + assets);
+      return toast("Exportación incompleta." + missing + assets);
     }
     const generated = response.result && Array.isArray(response.result.generatedFormats)
       ? response.result.generatedFormats.map((item) => String(item).toUpperCase()).join(" + ")
