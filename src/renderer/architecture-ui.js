@@ -469,93 +469,268 @@
     `;
   }
 
-  function sectionCard(section) {
-    const level = Math.max(1, Number(section.level || 1));
-    const allowed = section.allowedVisuals || [];
-    const contract = section.contract || {};
-    const number = section.numbering || String(section.order || "");
-    const readiness = state.dataReadiness && Array.isArray(state.dataReadiness.sections)
-      ? state.dataReadiness.sections.find((item) => item.sectionKey === section.key)
+  function sectionStatusLabel(status) {
+    return ({
+      pending: "Pendiente",
+      generated: "Generada",
+      reviewed: "Generada",
+      edited: "Editada",
+      needs_review: "Revisar",
+      migration_pending: "Revisar",
+      approved: "Aprobada"
+    }[status] || "Pendiente");
+  }
+
+  function sectionStatusClass(status) {
+    if (status === "approved") return "good";
+    if (status === "needs_review" || status === "migration_pending") return "warn";
+    return "";
+  }
+
+  function readinessFor(sectionKey) {
+    return state.dataReadiness && Array.isArray(state.dataReadiness.sections)
+      ? state.dataReadiness.sections.find((item) => item.sectionKey === sectionKey) || null
       : null;
-    const readinessLabel = !readiness || !readiness.bindingId
-      ? ""
-      : readiness.ready
-        ? "Datos listos"
-        : readiness.status === "no_imports"
-          ? "Sin Excel/CSV"
-          : readiness.status === "mapping_pending"
-            ? "Mapeo pendiente"
-            : readiness.status === "missing_fields"
-              ? "Campos faltantes"
-              : "Datos pendientes";
-    const readinessClass = readiness && readiness.ready ? "good" : "warn";
-    return `
-      <article class="arch-section-card level-${level}" style="--section-level:${level}">
-        <div class="arch-section-head">
-          <div class="arch-section-title-wrap">
-            <label><input type="checkbox" data-arch-section-select value="${escapeHtml(section.key)}"> <b>${escapeHtml(number)}.</b> ${escapeHtml(section.title)}</label>
-            <small>Nivel ${level} · ${escapeHtml(section.type)} · ${(section.blocks || []).length} bloque(s)${readinessLabel ? " · " + escapeHtml(readinessLabel) : ""}</small>
-          </div>
-          <div class="button-row">
-            <span class="status ${section.status === "approved" ? "good" : section.alerts && section.alerts.length ? "warn" : ""}">${escapeHtml(section.status)}</span>
-            <button class="ghost small-inline" data-arch-action="generate-section" data-key="${escapeHtml(section.key)}">IA</button>
-            <button class="ghost small-inline" data-arch-action="export-section" data-key="${escapeHtml(section.key)}">Borrador</button>
-            <button class="secondary small-inline" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">${section.locked ? "Aprobada" : "Aprobar"}</button>
-          </div>
+  }
+
+  function structureSections() {
+    return [].concat(state.instance && state.instance.sections || [], state.instance && state.instance.omittedSections || [])
+      .sort((a, b) => String(a.sortPath || "").localeCompare(String(b.sortPath || ""), undefined, { numeric: true }));
+  }
+
+  function activeCurrentSection() {
+    const list = state.instance && state.instance.sections || [];
+    return list.find((item) => item.key === state.currentSectionKey) || list[0] || null;
+  }
+
+  function recommendationFor(sectionKey) {
+    return state.sectionRecommendations && state.sectionRecommendations[sectionKey] || null;
+  }
+
+  function sectionIndexMarkup() {
+    const items = structureSections();
+    return `<div class="section-nav-list">${items.map((section) => {
+      const included = section.included !== false;
+      const recommendation = recommendationFor(section.key);
+      const current = included && state.currentSectionKey === section.key;
+      const optional = section.required === false && section.layout && section.layout.optionalToggle;
+      return `
+        <div class="section-nav-row ${current ? "active" : ""} ${included ? "" : "omitted"}" style="--section-level:${Math.max(1, Number(section.level || 1))}">
+          <button class="section-nav-open" type="button" data-arch-action="${included ? "select-section" : "include-section"}" data-key="${escapeHtml(section.key)}">
+            <span class="section-nav-number">${escapeHtml(section.numbering || "")}</span>
+            <span class="section-nav-copy">
+              <b>${escapeHtml(section.title)}</b>
+              <small>${included ? sectionStatusLabel(section.status) : "No incluida"}${recommendation ? ` · IA: ${recommendation.include ? "incluir" : "omitir"}` : ""}</small>
+            </span>
+            ${included ? `<i class="status ${sectionStatusClass(section.status)}">${escapeHtml(sectionStatusLabel(section.status))}</i>` : ""}
+          </button>
+          ${optional ? `
+            <button class="section-toggle ${included ? "on" : ""}" type="button" data-arch-action="toggle-section-included" data-key="${escapeHtml(section.key)}" data-included="${included ? "true" : "false"}" title="${included ? "Omitir del documento" : "Incluir en el documento"}">
+              ${included ? "✓" : "+"}
+            </button>
+          ` : ""}
         </div>
-        ${readiness && readiness.bindingId ? `<div class="notice-${readiness.ready ? "soft" : "warn"}"><b class="${readinessClass === "good" ? "arch-ok-text" : "arch-warn-text"}">${escapeHtml(readinessLabel)}</b><span>${escapeHtml((readiness.warnings || []).slice(0, 2).join(" · ") || (readiness.ready ? "La sección tiene los campos necesarios para consultar los datos." : "Revisa el archivo y su mapeo."))}</span></div>` : ""}
-        ${contract.purpose ? `<div class="notice-soft arch-contract"><b>Regla propia</b><span>${escapeHtml(contract.purpose)}</span></div>` : ""}
-        ${allowed.length ? `<div class="arch-visual-tools"><span>Herramientas habilitadas:</span>${allowed.map((id) => `<em>${escapeHtml(visualLabel(id))}</em>`).join("")}</div>` : ""}
-        <div class="arch-block-summary">${blockSummary(section)}</div>
-        ${alertBlock(section)}
-        ${blockEditor(section)}
-      </article>
+      `;
+    }).join("")}</div>`;
+  }
+
+  function sectionEditorMarkup(section) {
+    const locked = Boolean(section.locked || state.instance.finalFrozenAt);
+    const blocks = section.blocks || [];
+    if (!blocks.length) {
+      return `<textarea class="arch-section-text arch-current-editor" data-arch-editor="content" data-section-key="${escapeHtml(section.key)}" ${locked ? "disabled" : ""}>${escapeHtml(section.content || "")}</textarea>`;
+    }
+  
+    return `<div class="arch-block-editor">${blocks.map((block, index) => {
+      const heading = block.type === "visual" && block.visualType
+        ? `${index + 1}. Visual · ${visualLabel(block.visualType)}`
+        : `${index + 1}. ${block.type} · ${block.role || "body"}`;
+      if (["prose", "quote", "callout"].includes(block.type)) {
+        return `<div class="arch-block-edit-card">
+          <b>${escapeHtml(heading)}</b>
+          <textarea data-arch-editor="block-text" data-section-key="${escapeHtml(section.key)}" data-block-key="${escapeHtml(block.key)}" ${locked ? "disabled" : ""}>${escapeHtml(block.text || "")}</textarea>
+        </div>`;
+      }
+      if (block.type === "list") {
+        const items = block.data && Array.isArray(block.data.items) ? block.data.items : [];
+        return `<div class="arch-block-edit-card">
+          <b>${escapeHtml(heading)}</b>
+          <textarea data-arch-editor="block-list" data-section-key="${escapeHtml(section.key)}" data-block-key="${escapeHtml(block.key)}" ${locked ? "disabled" : ""}>${escapeHtml(items.join("\n"))}</textarea>
+        </div>`;
+      }
+      return `<div class="arch-block-static">
+        <div><b>${escapeHtml(heading)}</b><small>${escapeHtml(block.title || block.caption || "Bloque estructurado")}</small></div>
+        <span class="status good">Preservado</span>
+      </div>`;
+    }).join("")}</div>`;
+  }
+
+  function traceMarkup(section) {
+    const readiness = readinessFor(section.key);
+    const provenance = section.provenance || {};
+    const allowed = section.allowedVisuals || [];
+    const alerts = [];
+    (section.alerts || []).forEach((alert) => alerts.push(alert));
+    (section.blocks || []).forEach((block) => (block.alerts || []).forEach((alert) => alerts.push(alert)));
+    return `<details class="section-trace">
+      <summary>Ver respaldo y trazabilidad</summary>
+      <div class="section-trace-grid">
+        <div><b>Datos</b><span>${readiness && readiness.bindingId ? (readiness.ready ? "Listos" : (readiness.warnings || []).join(" · ") || "Pendientes") : "No requiere datos estructurados"}</span></div>
+        <div><b>Origen</b><span>${escapeHtml(provenance.source || "sin generar")}${provenance.writerProvider ? " · " + escapeHtml(provenance.writerProvider) : ""}</span></div>
+        <div><b>Visuales</b><span>${allowed.length ? escapeHtml(allowed.map(visualLabel).join(", ")) : "No requeridos"}</span></div>
+        <div><b>Alertas</b><span>${alerts.length ? escapeHtml(alerts.slice(0, 4).map((item) => item.message || item.type || "Alerta").join(" · ")) : "Sin alertas"}</span></div>
+      </div>
+    </details>`;
+  }
+
+  function documentStageMarkup() {
+    const section = activeCurrentSection();
+    if (!section) return '<div class="empty"><b>Sin secciones activas</b>Incluye al menos una sección para continuar.</div>';
+    const active = state.instance.sections || [];
+    const index = active.findIndex((item) => item.key === section.key);
+    const previous = index > 0 ? active[index - 1] : null;
+    const next = index >= 0 && index < active.length - 1 ? active[index + 1] : null;
+    const readiness = readinessFor(section.key);
+    const recommendation = recommendationFor(section.key);
+    return `
+      <div class="section-workspace">
+        <aside class="section-workspace-nav">
+          <div class="section-nav-head">
+            <div><b>Índice</b><small>${active.filter((item) => item.status === "approved").length}/${active.filter((item) => item.required !== false).length} obligatorias aprobadas</small></div>
+            ${(structureSections().some((item) => item.required === false && item.layout && item.layout.aiRecommendation))
+              ? `<button class="home-link" type="button" data-arch-action="recommend-sections">${Object.keys(state.sectionRecommendations || {}).length ? "Actualizar IA" : "Recomendar con IA"}</button>`
+              : ""}
+          </div>
+          ${sectionIndexMarkup()}
+        </aside>
+        <section class="section-workspace-editor">
+          <div class="section-editor-head">
+            <div>
+              <span class="process-code">${escapeHtml(section.numbering || "")} · ${escapeHtml(section.type)}</span>
+              <h2>${escapeHtml(section.numbering ? section.numbering + ". " + section.title : section.title)}</h2>
+              <p>${section.contract && section.contract.purpose ? escapeHtml(section.contract.purpose) : "Redacta, revisa y aprueba esta sección antes de continuar."}</p>
+            </div>
+            <span class="status ${sectionStatusClass(section.status)}">${escapeHtml(sectionStatusLabel(section.status))}</span>
+          </div>
+          ${recommendation ? `<div class="notice-soft"><b>Recomendación de IA</b><span>${recommendation.include ? "Conviene incluir esta subsección." : "Puede omitirse en este caso."} ${escapeHtml(recommendation.reason || "")}</span></div>` : ""}
+          ${readiness && readiness.bindingId ? `<div class="notice-${readiness.ready ? "soft" : "warn"}"><b>${readiness.ready ? "Datos listos" : "Datos por revisar"}</b><span>${escapeHtml((readiness.warnings || []).join(" · ") || "La sección puede consultar los datos mapeados.")}</span></div>` : ""}
+          ${alertBlock(section)}
+          <div class="section-editor-actions">
+            ${state.instance.finalFrozenAt ? "" : `<button class="primary" type="button" data-arch-action="generate-section" data-key="${escapeHtml(section.key)}">Generar / regenerar con IA</button>`}
+            <button class="ghost" type="button" data-arch-action="export-section" data-key="${escapeHtml(section.key)}">Borrador de esta sección</button>
+            ${state.instance.finalFrozenAt || section.locked
+              ? '<span class="status good">Aprobada</span>'
+              : `<button class="secondary" type="button" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">Aprobar sección</button>`}
+            <span class="section-save-state">Guardado automáticamente ✓</span>
+          </div>
+          ${sectionEditorMarkup(section)}
+          ${traceMarkup(section)}
+          <div class="section-step-footer">
+            <button class="ghost" type="button" data-arch-action="previous-section" ${previous ? "" : "disabled"}>← Anterior</button>
+            <span>Sección ${index + 1} de ${active.length}</span>
+            <button class="primary" type="button" data-arch-action="next-section" ${next ? "" : "disabled"}>Siguiente →</button>
+          </div>
+        </section>
+      </div>
     `;
+  }
+
+  function preparationStageMarkup() {
+    const readiness = state.dataReadiness && state.dataReadiness.sections || [];
+    const requiredPending = readiness.filter((item) => item.requirement === "required" && !item.ready);
+    const activeProviders = (state.providers || []).filter((item) => item.enabled).length;
+    return `<div class="instance-preparation">
+      <div class="prep-grid">
+        <div class="prep-card"><span>Período</span><b>${escapeHtml(state.dossier && state.dossier.periodLabel || "Sin período")}</b><small>Expediente: ${escapeHtml(state.dossier && state.dossier.label || "")}</small></div>
+        <div class="prep-card"><span>Excel / CSV</span><b>${(state.imports || []).length}</b><small>${requiredPending.length ? requiredPending.length + " requisito(s) de datos pendientes" : "Datos obligatorios listos o no requeridos"}</small></div>
+        <div class="prep-card"><span>Fuentes institucionales</span><b>${(state.knowledgeSources || []).length}</b><small>Normativa, políticas y documentos citables</small></div>
+        <div class="prep-card"><span>IA automática</span><b>${activeProviders}</b><small>Proveedor(es) habilitado(s)</small></div>
+      </div>
+      ${requiredPending.length ? `<div class="notice-warn"><b>Preparación incompleta</b><span>${escapeHtml(requiredPending.slice(0, 5).map((item) => item.title + ": " + (item.warnings || []).join(" ")).join(" · "))}</span></div>` : '<div class="notice-soft"><b>Preparación lista</b><span>Puedes trabajar sección por sección. Las fuentes y datos siguen disponibles en el expediente maestro.</span></div>'}
+      <button class="secondary" type="button" data-arch-action="open-current-dossier">Gestionar datos, fuentes y mapeos</button>
+    </div>`;
+  }
+
+  function reviewStageMarkup() {
+    const sections = state.instance.sections || [];
+    const required = sections.filter((item) => item.required !== false);
+    const pendingApproval = required.filter((item) => item.status !== "approved");
+    const reviewNeeded = sections.filter((item) => item.status === "needs_review" || item.status === "migration_pending");
+    const citationIssues = state.citationValidation
+      ? (state.citationValidation.missing || []).concat(state.citationValidation.incomplete || [])
+      : [];
+    const editorialErrors = state.editorialValidation && state.editorialValidation.errors || [];
+    return `<div class="instance-review">
+      <div class="review-summary-grid">
+        <div><b>${sections.filter((item) => item.status === "approved").length}</b><span>Aprobadas</span></div>
+        <div><b>${pendingApproval.length}</b><span>Obligatorias por aprobar</span></div>
+        <div><b>${reviewNeeded.length}</b><span>Requieren revisión</span></div>
+        <div><b>${citationIssues.length + editorialErrors.length}</b><span>Controles finales</span></div>
+      </div>
+      ${pendingApproval.length ? `<div class="notice-warn"><b>Aún no puede cerrarse la versión final</b><span>${escapeHtml(pendingApproval.slice(0, 8).map((item) => (item.numbering ? item.numbering + ". " : "") + item.title).join(" · "))}</span></div>` : '<div class="notice-soft"><b>Secciones obligatorias aprobadas</b><span>Revisa ahora citas, estructura y salida antes de congelar la versión final.</span></div>'}
+      ${citationIssues.length ? `<div class="notice-warn"><b>Citas APA pendientes</b><span>${escapeHtml(citationIssues.slice(0, 6).join(", "))}</span></div>` : ""}
+      ${editorialErrors.length ? `<div class="notice-warn"><b>Control editorial pendiente</b><span>${escapeHtml(editorialErrors.slice(0, 5).join(" · "))}</span></div>` : ""}
+      <button class="primary" type="button" data-arch-action="instance-stage" data-stage="output">Ir a salida</button>
+    </div>`;
+  }
+
+  function outputStageMarkup() {
+    return `<div class="instance-output">
+      <div class="output-choice">
+        <div><h3>Borrador</h3><p>Puedes generar Word/PDF en cualquier momento. Incluye alertas de revisión cuando existan.</p></div>
+        <button class="ghost" type="button" data-arch-action="export-draft">Generar borrador Word + PDF</button>
+      </div>
+      <div class="output-choice">
+        <div><h3>Versión final</h3><p>Solo puede cerrarse cuando todas las secciones obligatorias estén aprobadas y los controles finales sean válidos.</p></div>
+        ${state.instance.finalFrozenAt
+          ? '<div class="button-row"><button class="secondary" type="button" data-arch-action="export-final">Exportar final Word + PDF</button><button class="ghost" type="button" data-arch-action="working-copy">Nueva versión de trabajo</button></div>'
+          : '<button class="secondary" type="button" data-arch-action="freeze-final">Aprobar y congelar versión final</button>'}
+      </div>
+    </div>`;
+  }
+
+  function instanceStageMarkup() {
+    if (state.instanceStage === "preparation") return preparationStageMarkup();
+    if (state.instanceStage === "review") return reviewStageMarkup();
+    if (state.instanceStage === "output") return outputStageMarkup();
+    return documentStageMarkup();
   }
 
   async function renderInstance(instanceId) {
     state.currentView = "instance";
     await loadInstance(instanceId || state.instance && state.instance.id);
     setHeader(state.instance.label, `Procesos / ${state.dossier ? state.dossier.label : "Documento"}`, true);
-    const alertSummary = state.instance.alertTrace && state.instance.alertTrace.summary || { total: 0, bySeverity: {} };
+    const alertSummary = state.instance.alertTrace && state.instance.alertTrace.summary || { total: 0 };
     const alerts = state.instance.finalFrozenAt ? 0 : Number(alertSummary.total || 0);
-    const editorialErrors = state.editorialValidation && state.editorialValidation.errors || [];
-    const editorialWarnings = state.editorialValidation && state.editorialValidation.warnings || [];
-    const citationIssues = state.citationValidation
-      ? (state.citationValidation.missing || []).concat(state.citationValidation.incomplete || [])
-      : [];
+    const required = (state.instance.sections || []).filter((item) => item.required !== false);
+    const approved = required.filter((item) => item.status === "approved").length;
+    const steps = [
+      ["preparation", "Preparación"],
+      ["document", "Documento"],
+      ["review", "Revisión"],
+      ["output", "Salida"]
+    ];
+  
     view().innerHTML = `
-      ${editorialErrors.length ? `<div class="notice-warn"><b>Control editorial pendiente</b><span>${escapeHtml(editorialErrors.slice(0,3).join(" · "))}</span></div>` : ""}
-      ${!editorialErrors.length && editorialWarnings.length ? `<div class="notice-soft"><b>Observaciones editoriales</b><span>${escapeHtml(editorialWarnings.slice(0,3).join(" · "))}</span></div>` : ""}
-      ${citationIssues.length ? `<div class="notice-warn"><b>Citas APA pendientes</b><span>${escapeHtml(citationIssues.slice(0,6).join(", "))}</span></div>` : ""}
       ${state.generationRun && state.generationRun.status === "partial" ? `<div class="notice-warn"><b>Generación parcial</b><span>${escapeHtml(generationMessage(state.generationRun))}</span></div>` : ""}
-      ${state.instance.finalFrozenAt && Number(alertSummary.total || 0) ? `<div class="notice-soft"><b>Trazabilidad interna</b><span>${Number(alertSummary.total || 0)} alerta(s) quedaron congeladas para auditoría. No forman parte de la versión final visible.</span></div>` : ""}
-      ${state.instance.engineState === "frozen_historical" ? `<div class="notice-soft"><b>Versión final histórica</b><span>Esta versión permanece congelada con el motor v${escapeHtml(state.instance.engineVersion)}. El motor vigente es v${escapeHtml(state.instance.currentEngineVersion)} y no modificará esta final.</span></div>` : ""}
-      ${state.instance.archivedSectionCount ? `<div class="notice-soft"><b>Historial estructural preservado</b><span>${Number(state.instance.archivedSectionCount)} sección(es) retirada(s) del motor permanecen archivadas y fuera del documento activo.</span></div>` : ""}
-      ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Regenera las secciones no bloqueadas.</span></div>` : ""}
-      <div class="arch-dossier-head">
+      ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Revisa las secciones afectadas.</span></div>` : ""}
+      <div class="arch-dossier-head compact-document-head">
         <div>
           <span class="process-code">${escapeHtml(state.instance.engineId)} · v${escapeHtml(state.instance.engineVersion)}</span>
           <h2>${escapeHtml(state.instance.label)}</h2>
-          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""} · ${state.instance.engine && state.instance.engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base"} · ${Number(state.instance.engine && state.instance.engine.outlineSummary && state.instance.engine.outlineSummary.nodeCount || state.instance.sections.length)} punto(s) · migraciones: ${Number(state.instance.migrationRevision || 0)}${state.instance.lastMigratedAt ? " · última: " + escapeHtml(String(state.instance.lastMigratedAt).slice(0, 10)) : ""}</p>
+          <p>${escapeHtml(state.dossier && state.dossier.periodLabel || "")} · ${approved}/${required.length} secciones obligatorias aprobadas${alerts ? " · " + alerts + " alerta(s)" : ""}</p>
         </div>
-        <span class="status ${state.instance.status === "final" ? "good" : alerts ? "warn" : ""}">${state.instance.status === "final" ? "Final congelada" : alerts + " alerta(s)"}</span>
+        <span class="status ${state.instance.status === "final" ? "good" : ""}">${state.instance.status === "final" ? "Final congelada" : "Borrador"}</span>
       </div>
-
-      <div class="button-row arch-toolbar">
-        <button class="primary" data-arch-action="generate-document">Generar / revisar todo</button>
-        ${state.generationRun && state.generationRun.result && state.generationRun.result.resumable
-          ? '<button class="ghost" data-arch-action="resume-document">Reanudar pendientes</button>'
-          : ''}
-        <button class="ghost" data-arch-action="export-selected">Borrador seleccionado</button>
-        <button class="ghost" data-arch-action="export-draft">Borrador completo</button>
-        ${state.instance.finalFrozenAt
-          ? '<button class="secondary" data-arch-action="export-final">Versión final limpia</button><button class="ghost" data-arch-action="working-copy">Nueva versión de trabajo</button>'
-          : '<button class="secondary" data-arch-action="freeze-final">Aprobar versión final</button>'}
+      <div class="instance-stage-tabs">
+        ${steps.map(([id, label], index) => `<button type="button" data-arch-action="instance-stage" data-stage="${id}" class="${state.instanceStage === id ? "active" : ""}"><span>${index + 1}</span>${label}</button>`).join("")}
       </div>
-
-      <div class="arch-sections">${state.instance.sections.map(sectionCard).join("")}</div>
+      ${instanceStageMarkup()}
     `;
+  
+    if (!Object.keys(state.sectionRecommendations || {}).length) {
+      window.setTimeout(() => ensureSectionRecommendations(false), 50);
+    }
   }
 
   async function refreshCurrent() {
