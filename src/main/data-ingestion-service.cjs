@@ -531,8 +531,13 @@ function sourceTrace(rows, includeMatchedCounts) {
     const item = map.get(key);
     item.matchedRows += 1;
     const sheet = String(row.__sheet || "");
-    if (!item.sheets.has(sheet)) item.sheets.set(sheet, { name: sheet, rows: [] });
-    item.sheets.get(sheet).rows.push(Number(row.__row || 0));
+    if (!item.sheets.has(sheet)) item.sheets.set(sheet, { name: sheet, firstRow: null, lastRow: null });
+    const sheetTrace = item.sheets.get(sheet);
+    const rowNumber = Number(row.__row || 0);
+    if (rowNumber > 0) {
+      if (sheetTrace.firstRow == null || rowNumber < sheetTrace.firstRow) sheetTrace.firstRow = rowNumber;
+      if (sheetTrace.lastRow == null || rowNumber > sheetTrace.lastRow) sheetTrace.lastRow = rowNumber;
+    }
   });
   return Array.from(map.values()).map((item) => {
     const trace = {
@@ -543,8 +548,8 @@ function sourceTrace(rows, includeMatchedCounts) {
       scopeKey: item.scopeKey,
       sheets: Array.from(item.sheets.values()).map((sheet) => ({
         name: sheet.name,
-        firstRow: sheet.rows.length ? Math.min(...sheet.rows) : null,
-        lastRow: sheet.rows.length ? Math.max(...sheet.rows) : null
+        firstRow: sheet.firstRow,
+        lastRow: sheet.lastRow
       }))
     };
     if (includeMatchedCounts) trace.matchedRows = item.matchedRows;
