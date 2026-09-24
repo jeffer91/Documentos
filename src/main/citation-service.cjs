@@ -228,20 +228,25 @@ function rowToCitation(row) {
 function upsertCitation(userDataPath, dossierId, input) {
   const db = dbFor(userDataPath);
   const ts = now();
-  const citationKey = String(input && input.citationKey || "").trim();
+  const supplied = input || {};
+  const citationKey = clean(supplied.citationKey);
   if (!citationKey) throw new Error("La cita necesita una clave.");
   const existing = db.prepare("SELECT * FROM citations_v4 WHERE dossier_id = ? AND citation_key = ?").get(dossierId, citationKey);
+  const previous = rowToCitation(existing) || {};
   const citationId = existing ? existing.id : id("citation");
-  const sourceId = String(input && input.sourceId || existing && existing.source_id || "");
-  const sourceType = String(input && input.sourceType || existing && existing.source_type || "institutional");
-  const author = String(input && input.author || "");
-  const corporateAuthor = String(input && input.corporateAuthor || "");
-  const year = String(input && input.year || "");
-  const title = String(input && input.title || "");
-  const publisher = String(input && input.publisher || "");
-  const url = String(input && input.url || "");
-  const doi = String(input && input.doi || "");
-  const metadata = input && input.metadata || parseJson(existing && existing.metadata_json, {});
+  const sourceId = Object.prototype.hasOwnProperty.call(supplied, "sourceId") ? clean(supplied.sourceId) : clean(previous.sourceId);
+  const sourceType = normalizeSourceType(Object.prototype.hasOwnProperty.call(supplied, "sourceType") ? supplied.sourceType : previous.sourceType);
+  const author = Object.prototype.hasOwnProperty.call(supplied, "author") ? clean(supplied.author) : clean(previous.author);
+  const corporateAuthor = Object.prototype.hasOwnProperty.call(supplied, "corporateAuthor") ? clean(supplied.corporateAuthor) : clean(previous.corporateAuthor);
+  const title = Object.prototype.hasOwnProperty.call(supplied, "title") ? clean(supplied.title) : clean(previous.title);
+  const publisher = Object.prototype.hasOwnProperty.call(supplied, "publisher") ? clean(supplied.publisher) : clean(previous.publisher);
+  const url = Object.prototype.hasOwnProperty.call(supplied, "url") ? normalizeUrl(supplied.url) : normalizeUrl(previous.url);
+  const doi = Object.prototype.hasOwnProperty.call(supplied, "doi") ? normalizeDoi(supplied.doi) : normalizeDoi(previous.doi);
+  const metadata = Object.assign({}, previous.metadata || {}, supplied.metadata || {});
+  const year = canonicalYear(
+    Object.prototype.hasOwnProperty.call(supplied, "year") ? supplied.year : previous.year,
+    metadata
+  );
   db.prepare(`
     INSERT INTO citations_v4
       (id, dossier_id, source_id, citation_key, source_type, author, corporate_author, year, title, publisher, url, doi, metadata_json, active, created_at, updated_at)
@@ -277,7 +282,7 @@ function ensureCitationForSource(userDataPath, dossierId, source) {
   return upsertCitation(userDataPath, dossierId, {
     citationKey: key,
     sourceId,
-    sourceType: source && source.sourceType || "institutional",
+    sourceType: metadata.citationType || source && source.sourceType || "institutional",
     author: metadata.author || "",
     corporateAuthor: metadata.corporateAuthor || "",
     year: metadata.year || "",
@@ -285,7 +290,7 @@ function ensureCitationForSource(userDataPath, dossierId, source) {
     publisher: metadata.publisher || "",
     url: metadata.url || "",
     doi: metadata.doi || "",
-    metadata: { provisional: true }
+    metadata: Object.assign({}, metadata, { provisional: true })
   });
 }
 
