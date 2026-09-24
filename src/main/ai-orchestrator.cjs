@@ -51,7 +51,7 @@ function baseSystem(engine, section) {
     "Para prose usa {type:'prose',role:'context|body|analysis|summary',text:'...'}",
     "Para table usa {type:'table',title:'...',data:{headers:[...],rows:[[...]]},note:'...'}",
     "Para visual usa {type:'visual',visualType:'...',title:'...',data:{...},note:'...'}",
-    "Antes de toda tabla o figura debe existir un bloque prose con role context/body; después debe existir prose con role analysis.",
+    "Antes de toda tabla, figura, imagen o visual debe existir un bloque prose con role context/body/summary; después debe existir prose con role analysis/interpretation/summary.",
     "No fuerces una herramienta visual. Úsala únicamente cuando aporte comprensión.",
     "Cuando sustentes texto en una fuente institucional, usa el token [[CITE:CLAVE]] con una citationKey proporcionada; nunca inventes claves.",
     "alerts es una lista de objetos {type,severity,message,blocking}.",
@@ -116,7 +116,7 @@ function writerPrompt(instance, engine, section, context) {
   });
   return [
     "Redacta la sección solicitada.",
-    "Respeta la jerarquía definida por la aplicación; no inventes nuevos títulos de primer nivel.",
+    "Respeta exactamente la jerarquía definida por la aplicación; no inventes títulos ni subniveles fuera de la sección solicitada.",
     "Mantén coherencia con las secciones previas y con las secciones de las que deriva.",
     "Si un dato es simulado o inferido, NO lo presentes como verificado: inclúyelo en alerts.",
     section.type === "executive_summary"
@@ -152,7 +152,7 @@ function reviewerPrompt(engine, section, draft, context) {
   return [
     "Revisa el borrador de esta sección.",
     "Comprueba coherencia, trazabilidad, privacidad institucional, datos no sustentados, contradicciones y redacción.",
-    "Verifica que cada tabla/figura tenga contexto previo y análisis posterior.",
+    "Verifica que cada tabla, figura, imagen o visual tenga contexto previo y análisis/interpretación posterior.",
     "Verifica que las herramientas visuales estén dentro de las permitidas para la sección.",
     "Si detectas problemas, corrige content y blocks.",
     "Devuelve SOLO JSON válido con: approved, issues, correctedContent, correctedBlocks, alerts.",
