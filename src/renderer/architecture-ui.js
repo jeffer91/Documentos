@@ -838,8 +838,21 @@
     setBusy(true);
     const response = await api.exportEngineDocument(state.instance.id, options || {});
     setBusy(false);
-    if (!response || !response.ok) return toast(response && response.error || "No se pudo exportar.");
-    toast("Exportación creada.");
+    if (!response) return toast("No se pudo exportar.");
+    if (!response.ok) {
+      const result = response.result || {};
+      const missing = Array.isArray(result.missingFormats) && result.missingFormats.length
+        ? ` Falta: ${result.missingFormats.map((item) => String(item).toUpperCase()).join(", ")}.`
+        : "";
+      const assets = Array.isArray(result.missingAssets) && result.missingAssets.length
+        ? ` Recursos visuales pendientes: ${result.missingAssets.length}.`
+        : "";
+      return toast((response.error || "Exportación incompleta.") + missing + assets);
+    }
+    const generated = response.result && Array.isArray(response.result.generatedFormats)
+      ? response.result.generatedFormats.map((item) => String(item).toUpperCase()).join(" + ")
+      : "";
+    toast(generated ? `Exportación creada: ${generated}.` : "Exportación creada.");
   }
 
   async function freezeFinal() {
