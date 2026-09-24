@@ -253,18 +253,24 @@
     const missingBlueprints = engineIds.filter((engineId) => !ENGINE_BLUEPRINTS[engineId]);
     const orphanBlueprints = ids.filter((engineId) => !engineIds.includes(engineId));
     const owners = engines.map((item) => item.definitionOwner);
+    const invalidStructures = engines
+      .map((item) => engineStructureReport(item.engineId))
+      .filter((item) => item && !item.ok)
+      .map((item) => ({ engineId: item.engineId, errors: item.errors }));
     return {
       engineCount: engines.length,
       blueprintCount: ids.length,
       uniqueDefinitionOwners: new Set(owners).size,
       missingBlueprints,
       orphanBlueprints,
+      invalidStructures,
       independent: (
         engines.length > 0 &&
         engines.length === ids.length &&
         new Set(owners).size === engines.length &&
         missingBlueprints.length === 0 &&
-        orphanBlueprints.length === 0
+        orphanBlueprints.length === 0 &&
+        invalidStructures.length === 0
       )
     };
   }
@@ -274,7 +280,8 @@
     if (engines.some((item) => item.engineId === engineId)) {
       throw new Error(`Motor duplicado: ${engineId}.`);
     }
-    const input = deepClone(options || {});
+    const input = outline.deepClone(options || {});
+    const compiled = compileSectionsForEngine(engineId);
     const engine = Object.assign({
       documentId,
       engineId,
@@ -289,7 +296,10 @@
       independentDefinition: true,
       cardinality,
       version: VERSION,
-      sections: cloneSectionsForEngine(engineId),
+      outlineStatus: "scaffold",
+      outlineVersion: 1,
+      outlineSummary: compiled.validation.summary,
+      sections: compiled.sections,
       rules: BASE_RULES.slice(),
       dependencies: [],
       scopeKeys: [],
@@ -298,7 +308,7 @@
       active: true
     }, input);
     // options.sections no puede sustituir silenciosamente la definición del registro.
-    engine.sections = cloneSectionsForEngine(engineId);
+    engine.sections = compiled.sections;
     engine.definitionOwner = engineId;
     engine.definitionSource = "engine_blueprint";
     engine.independentDefinition = true;
@@ -434,7 +444,7 @@
 
   function blueprintForEngine(engineId) {
     const blueprint = ENGINE_BLUEPRINTS[engineId];
-    return blueprint ? deepClone(blueprint) : null;
+    return blueprint ? outline.deepClone(blueprint) : null;
   }
 
   function filterCatalog(catalog) {
@@ -457,6 +467,8 @@
     allEngines,
     blueprintForEngine,
     registryIndependenceReport,
+    engineStructureReport,
+    allStructureReports,
     getEngine,
     enginesForDocument,
     filterCatalog
