@@ -116,6 +116,7 @@ function registerIpc() {
   ipcMain.handle("editorial:capabilities", () => ({
     ok: true,
     apaProfile: apa7.PROFILE,
+    citationTypes: citationService.sourceTypeOptions(),
     visualTools: visualRenderer.listTools(),
     blockTypes: Array.from(editorial.BLOCK_TYPES)
   }));
