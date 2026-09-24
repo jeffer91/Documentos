@@ -305,11 +305,12 @@ function requiredState(bindingConfig, available) {
   return { missingAll, missingAny, ok: !missingAll.length && !missingAny.length };
 }
 
-function resolveScopeFilter(bindingConfig, instance, available) {
+function resolveScopeConditions(bindingConfig, instance, available) {
   const value = String(instance && instance.scopeKey || "").trim();
-  if (!value || !(bindingConfig.scopeFields || []).length) return null;
-  const field = (bindingConfig.scopeFields || []).find((candidate) => available.has(candidate));
-  return field ? { field, op: "eq", value } : null;
+  if (!value || !(bindingConfig.scopeFields || []).length) return [];
+  return (bindingConfig.scopeFields || [])
+    .filter((candidate) => available.has(candidate))
+    .map((field) => ({ field, op: "eq", value }));
 }
 
 function resolveBinding(bindingConfig, instance, availability) {
@@ -327,7 +328,7 @@ function resolveBinding(bindingConfig, instance, availability) {
   const available = compatible.length ? compatibleAvailable : allAvailable;
   const hasImports = Boolean(availability && availability.hasImports);
   const mappedCount = Number(availability && availability.availableFields && availability.availableFields.length || 0);
-  const scopeFilter = resolveScopeFilter(bindingConfig, instance, available);
+  const scopeConditions = resolveScopeConditions(bindingConfig, instance, available);
   const compatibleSheet = compatible.length > 0;
   const scopeRequired = Boolean(
     String(instance && instance.scopeKey || "").trim() &&
@@ -338,7 +339,7 @@ function resolveBinding(bindingConfig, instance, availability) {
       bindingConfig.mode === "individual"
     )
   );
-  const missingScope = scopeRequired && !scopeFilter;
+  const missingScope = scopeRequired && !scopeConditions.length;
 
   let status = "ready";
   if (!hasImports) status = "no_imports";
@@ -348,11 +349,13 @@ function resolveBinding(bindingConfig, instance, availability) {
   const ready = status === "ready";
   const baseWhere = (bindingConfig.where || []).filter((condition) => condition && available.has(condition.field));
   const baseAnyOf = (bindingConfig.anyOf || []).filter((condition) => condition && available.has(condition.field));
+  const scopeWhere = scopeConditions.length === 1 ? scopeConditions : [];
+  const scopeAnyOf = scopeConditions.length > 1 ? scopeConditions : [];
   const query = ready ? {
     importIds: Array.from(new Set(compatible.map((item) => item.importId))),
     sheet: Array.from(new Set(compatible.map((item) => item.sheet))),
-    where: baseWhere.concat(scopeFilter ? [scopeFilter] : []),
-    anyOf: baseAnyOf,
+    where: baseWhere.concat(scopeWhere),
+    anyOf: baseAnyOf.concat(scopeAnyOf),
     dimensions: pickAvailable(bindingConfig.dimensions, available),
     measures: pickAvailable(bindingConfig.measures, available),
     groupBy: pickAvailable(bindingConfig.groupBy, available),
