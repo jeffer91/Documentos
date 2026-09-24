@@ -43,6 +43,7 @@ function baseSystem(engine, section) {
     "Trabaja únicamente con los datos proporcionados.",
     "No inventes hechos. Si falta información, crea una alerta y redacta sin afirmar el dato ausente.",
     "Respeta privacidad institucional: en resultados agregados prefiere porcentajes y evita cantidades absolutas innecesarias.",
+    "Los cálculos y agregados de Excel/CSV ya vienen hechos por la aplicación. Interprétalos; no recalcules promedios, porcentajes, conteos ni filtros.",
     "Nunca introduzcas conclusiones que no estén respaldadas por resultados.",
     "La estructura final y APA 7 los aplica la aplicación; tú debes devolver contenido semántico estructurado.",
     "Devuelve SOLO JSON válido con las claves: content, blocks, alerts, claims.",
@@ -82,14 +83,25 @@ function sectionDataContext(userDataPath, instance, section) {
     scopeType: item.scopeType,
     scopeKey: item.scopeKey,
     sha256: item.sha256,
+    mapping: item.mapping || {},
+    totalRows: Number(item.profile && item.profile.totalRows || 0),
     sheets: ((item.profile && item.profile.sheets) || []).map((sheet) => ({
       name: sheet.name,
+      rowCount: Number(sheet.rowCount || 0),
       headers: (sheet.columns || []).map((column) => column.name)
     }))
   }));
   let filteredData = null;
-  const query = section && section.data && section.data.query;
-  if (query) filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, query);
+  const configuredQuery = section && section.data && section.data.query;
+  if (configuredQuery) {
+    const query = Object.assign({
+      scopeType: instance.scopeType,
+      scopeKey: instance.scopeKey,
+      scopePolicy: "inclusive",
+      privacyMode: instance.scopeType === "student" ? "student_specific" : "aggregate"
+    }, configuredQuery);
+    filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, query);
+  }
   const sourceQuery = `${section && section.title || ""} ${section && section.key || ""} ${instance.label || ""}`;
   const institutionalSources = knowledge.searchKnowledge(userDataPath, instance.dossierId, sourceQuery, 5);
   return {
@@ -141,6 +153,12 @@ function writerPrompt(instance, engine, section, context) {
       masterData: context.masterData,
       imports: context.imports,
       filteredData: context.filteredData,
+      dataContract: context.filteredData ? {
+        calculationComplete: true,
+        querySignature: context.filteredData.querySignature,
+        rawRowsDefault: "disabled",
+        instruction: "Interpretar los agregados suministrados sin recalcularlos."
+      } : null,
       institutionalSources: context.institutionalSources,
       derivedSections: derived,
       previousSections: prior

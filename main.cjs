@@ -224,6 +224,11 @@ function registerIpc() {
     "data-imports",
     "mapping"
   ));
+  ipcMain.handle("data-imports:suggest-mapping", (_event, importId) => safeResponse(
+    () => ({ ok: true, suggestion: dataIngestion.suggestMapping(userData(), importId) }),
+    "data-imports",
+    "suggest-mapping"
+  ));
   ipcMain.handle("data-query", (_event, dossierId, query) => safeResponse(
     () => ({ ok: true, result: dataIngestion.queryData(userData(), dossierId, query || {}) }),
     "data",
@@ -233,6 +238,11 @@ function registerIpc() {
     () => ({ ok: true, result: dataIngestion.summarize(userData(), dossierId, query || {}) }),
     "data",
     "summary"
+  ));
+  ipcMain.handle("data-ai-slice", (_event, dossierId, query) => safeResponse(
+    () => ({ ok: true, result: dataIngestion.aiSlice(userData(), dossierId, query || {}) }),
+    "data",
+    "ai-slice"
   ));
 
   ipcMain.handle("instances:ensure", (_event, dossierId, engineId, scope) => safeResponse(

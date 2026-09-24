@@ -432,3 +432,170 @@ Reglas obligatorias:
 Las tablas, figuras, imágenes y herramientas visuales usadas en el cuerpo del documento deben estar precedidas por contexto y seguidas por análisis o interpretación. Los anexos quedan exceptuados de esta obligación narrativa.
 
 En Word se aplican controles de viudas/huérfanas, repetición del encabezado de tablas, filas no partidas y reglas para mantener juntos el número, título y objeto de tablas/figuras. No se insertan saltos de página manuales entre subniveles.
+
+
+## Bloque 3 · Motor de datos Excel/CSV
+
+La importación de datos se separa en cuatro capas:
+
+```text
+Excel/CSV original
+  → perfil de hojas y columnas
+  → mapeo canónico confirmado
+  → consultas determinísticas
+  → agregado seguro para IA
+```
+
+### Cálculo completo
+
+El límite de filas existe únicamente para la **visualización** de resultados en la interfaz. Los cálculos de porcentajes, promedios, medianas, sumas, grupos y filtros se ejecutan sobre **todas las filas filtradas**.
+
+Una consulta puede devolver, por ejemplo:
+
+```text
+total = 6001
+returnedRows = 5000
+truncated = true
+```
+
+sin que el resumen estadístico quede truncado. `summarize()` utiliza las 6001 filas.
+
+### Mapeo canónico
+
+Cada archivo puede mapear sus columnas reales a nombres estables que consumen los motores documentales:
+
+```json
+{
+  "fields": {
+    "student_id": "Cédula",
+    "student_name": "Estudiante",
+    "career": "Carrera",
+    "campus": "Sede",
+    "core": "Núcleo",
+    "component": "Componente",
+    "grade": "Nota"
+  }
+}
+```
+
+También se admiten mapeos específicos por hoja. El sistema puede **sugerir** equivalencias comunes, pero nunca las aplica automáticamente.
+
+Si una consulta solicita un campo inexistente o no mapeado, la aplicación falla de forma explícita. No devuelve silenciosamente un conjunto vacío.
+
+### Filtros
+
+Las consultas admiten, entre otros:
+
+- igualdad normalizada sin depender de mayúsculas o tildes;
+- distinto;
+- contiene;
+- inicia/termina con;
+- listas `in / not_in`;
+- comparaciones numéricas;
+- rangos;
+- condiciones AND mediante `where`;
+- condiciones OR mediante `anyOf`;
+- selección de hojas o importaciones;
+- alcance del expediente;
+- eliminación opcional de duplicados mediante `distinctBy`.
+
+Esto permite filtrar, por ejemplo:
+
+```text
+Carrera = Enfermería
+Componente = Teórico
+Núcleo = Núcleo 1
+```
+
+antes de entregar el resultado a la IA.
+
+### Alcances
+
+Un archivo puede pertenecer a:
+
+- todo el expediente;
+- una población;
+- un segmento;
+- un estudiante;
+- otro alcance declarado por el motor.
+
+La política `inclusive` permite que un documento específico consuma tanto datos generales del expediente como datos cargados exactamente para su ámbito.
+
+### Prevención de duplicados
+
+Si se intenta volver a importar el mismo archivo, con el mismo SHA-256 y el mismo alcance, la aplicación reutiliza la importación existente. Esto evita duplicar accidentalmente registros y alterar los resultados.
+
+Archivos distintos pueden coexistir en el mismo expediente. Si contienen registros superpuestos, el motor documental puede declarar `distinctBy` con la clave apropiada, por ejemplo `student_id`.
+
+### Agregados
+
+El motor puede calcular:
+
+- distribuciones y porcentajes por dimensión;
+- mínimo;
+- máximo;
+- suma;
+- promedio;
+- mediana;
+- agrupaciones por una o varias dimensiones;
+- estadísticas numéricas dentro de cada grupo.
+
+Estos resultados se calculan localmente antes de invocar IA.
+
+### Privacidad y contrato con IA
+
+Por defecto, la IA recibe **agregados**, no filas individuales.
+
+El paquete enviado a IA contiene:
+
+- filtros aplicados;
+- firma de consulta;
+- porcentajes;
+- métricas numéricas;
+- agrupaciones;
+- trazabilidad de fuentes;
+- umbral de privacidad.
+
+Los conteos absolutos no se exponen por defecto. Los grupos menores al umbral configurado se suprimen.
+
+Las filas crudas solo pueden salir cuando:
+
+1. el motor las solicita explícitamente;
+2. el modo es individual / por estudiante o se autoriza explícitamente;
+3. existe una lista `select` de campos permitidos.
+
+### Trazabilidad
+
+Cada resultado conserva:
+
+- ID de importación;
+- nombre del archivo;
+- SHA-256 del archivo;
+- hash del mapeo utilizado;
+- hoja;
+- primera y última fila fuente involucrada;
+- firma SHA-256 de la consulta.
+
+La firma cambia si cambia el archivo, el mapeo o la consulta.
+
+### Consultas como parte del motor
+
+Las reglas de filtrado declaradas en `section.data.query` forman parte de la definición versionada del motor.
+
+Por tanto, cambiar un filtro como:
+
+```text
+Enfermería + Teórico
+```
+
+por:
+
+```text
+Enfermería + Núcleo 1
+```
+
+modifica el hash del motor y activa el ciclo de migración/revisión correspondiente. Las consultas no quedan como lógica invisible fuera del motor.
+
+### Adaptadores futuros
+
+El motor está preparado para uno o varios Excel/CSV sin asumir todavía una estructura definitiva. Cuando se proporcionen los archivos reales de Complexivo, PVC, Formación, Capacitación, etc., se configurarán sus mapeos/adaptadores específicos sobre esta capa sin modificar el núcleo de cálculo.

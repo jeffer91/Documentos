@@ -32,6 +32,7 @@ function sectionDefinition(section) {
     derivedFrom: Array.isArray(section.derivedFrom) ? section.derivedFrom.slice() : [],
     maxWords: section.maxWords || null,
     compact: Boolean(section.compact),
+    data: section.data || {},
     layout: section.layout || {}
   };
 }
@@ -87,6 +88,7 @@ function rowDefinition(row) {
     derivedFrom: Array.isArray(layout.derivedFrom) ? layout.derivedFrom : [],
     maxWords: layout.maxWords || null,
     compact: Boolean(layout.compact),
+    data: layout.data || {},
     layout: layout.layout || {}
   };
 }

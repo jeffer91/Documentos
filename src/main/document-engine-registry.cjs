@@ -171,6 +171,7 @@
       order,
       allowedVisuals: Array.isArray(item.allowedVisuals) ? item.allowedVisuals.slice() : [],
       derivedFrom: Array.isArray(item.derivedFrom) ? item.derivedFrom.slice() : [],
+      data: item.data ? JSON.parse(JSON.stringify(item.data)) : {},
       children: []
     });
     copy.children = (item.children || []).map((child, index) => cloneNode(child, index + 1));
