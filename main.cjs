@@ -286,6 +286,11 @@ function registerIpc() {
     "instances",
     "update-section"
   ));
+  ipcMain.handle("instances:set-section-included", (_event, instanceId, sectionKey, included) => safeResponse(
+    () => ({ ok: true, instance: processHub.setSectionIncluded(userData(), instanceId, sectionKey, included !== false) }),
+    "instances",
+    "set-section-included"
+  ));
   ipcMain.handle("instances:set-blocks", (_event, instanceId, sectionKey, blocks) => safeResponse(
     () => ({ ok: true, result: processHub.setSectionBlocks(userData(), instanceId, sectionKey, blocks || []) }),
     "instances",
@@ -335,6 +340,14 @@ function registerIpc() {
       return { ok: true, result: await aiProviders.testProvider(userData(), providerId) };
     } catch (error) {
       return failure("ai-providers", "test", error);
+    }
+  });
+
+  ipcMain.handle("ai-engine:recommend-sections", async (_event, instanceId, options) => {
+    try {
+      return { ok: true, result: await aiOrchestrator.recommendOptionalSections(userData(), instanceId, options || {}) };
+    } catch (error) {
+      return failure("ai-engine", "recommend-sections", error);
     }
   });
 
