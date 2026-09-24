@@ -20,6 +20,8 @@ const dataIngestion = require("../src/main/data-ingestion-service.cjs");
 const dataBindings = require("../src/main/document-data-binding-service.cjs");
 const aiOrchestrator = require("../src/main/ai-orchestrator.cjs");
 const draftExport = require("../src/main/draft-export-service.cjs");
+const exportQuality = require("../src/main/export-quality-service.cjs");
+const apa7 = require("../src/main/apa7-service.cjs");
 const documentEngineRegistry = require("../src/main/document-engine-registry.cjs");
 const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
@@ -1586,6 +1588,157 @@ async function run() {
     );
     assert.ok(workingCopyDraftHtml.includes("Dato inferido pendiente de confirmación humana."));
     assert.ok(workingCopyDraftHtml.includes("Dato simulado utilizado únicamente para revisión del borrador."));
+
+    // Bloque 5: motor gráfico, tablas largas y estado real de exportación.
+    const visualTools = visualRenderer.listTools();
+    assert.strictEqual(visualTools.length, 13);
+    for (const tool of visualTools) {
+      const payload = visualRenderer.samplePayload(tool.id);
+      const validation = visualRenderer.validateVisualData(tool.id, payload);
+      assert.strictEqual(validation.ok, true, `Visual inválido: ${tool.id} -> ${validation.errors.join(" | ")}`);
+      const svg = visualRenderer.renderSvg(tool.id, payload);
+      assert.ok(svg.includes("<svg"));
+      assert.ok(svg.includes("viewBox"));
+      const pngPath = path.join(temp, `visual-${tool.id}.png`);
+      visualRenderer.savePng(tool.id, payload, pngPath);
+      assert.ok(fs.existsSync(pngPath));
+      const png = fs.readFileSync(pngPath);
+      assert.ok(png.length > 64);
+      assert.strictEqual(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+    }
+
+    assert.strictEqual(visualRenderer.validateVisualData("foda", {}).ok, false);
+    assert.strictEqual(
+      visualRenderer.validateVisualData("line", { items: [{ label: "Solo", value: 1 }] }).ok,
+      false
+    );
+    const invalidVisualEditorial = editorial.validateSectionBlocks(
+      { title: "Análisis", type: "analysis_ai", allowedVisuals: ["foda"] },
+      [
+        { type: "prose", role: "context", text: "El siguiente análisis visual sintetiza los hallazgos cualitativos disponibles." },
+        { type: "visual", visualType: "foda", title: "FODA vacío", data: {} },
+        { type: "prose", role: "analysis", text: "El análisis posterior interpreta los hallazgos presentados por la herramienta visual." }
+      ]
+    );
+    assert.strictEqual(invalidVisualEditorial.ok, false);
+    assert.ok(invalidVisualEditorial.errors.some((item) => item.includes("FODA necesita")));
+
+    const longRows = Array.from({ length: 120 }, (_item, index) => [
+      `Fila ${index + 1}`,
+      `Carrera ${(index % 8) + 1}`,
+      `${70 + (index % 25)}%`,
+      "Cumplimiento"
+    ]);
+    const longTableInstance = {
+      label: "Prueba tabla multipágina",
+      engineId: "smoke.long-table",
+      engineVersion: "1",
+      sections: [{
+        key: "RESULTADOS",
+        title: "Resultados",
+        type: "data_ai",
+        level: 1,
+        numbering: "1",
+        alerts: [],
+        blocks: [
+          { key: "ctx", type: "prose", role: "context", text: "La tabla siguiente presenta un conjunto extenso de resultados para comprobar su comportamiento multipágina." },
+          {
+            key: "tabla-larga",
+            type: "table",
+            title: "Resultados consolidados",
+            data: {
+              headers: ["Registro", "Carrera", "Porcentaje", "Estado"],
+              rows: longRows
+            }
+          },
+          { key: "analysis", type: "prose", role: "analysis", text: "La tabla permite verificar que los encabezados permanezcan disponibles y las filas puedan continuar en páginas sucesivas." }
+        ]
+      }]
+    };
+    const longAssetDir = path.join(temp, "long-table-assets");
+    const longHtml = apa7.buildDocumentHtml(longTableInstance, {
+      assetDir: longAssetDir,
+      citations: [],
+      references: [],
+      includeAlerts: false,
+      final: false
+    });
+    assert.ok(longHtml.html.includes("Fila 120"));
+    assert.ok(longHtml.html.includes("<thead>"));
+    assert.ok(longHtml.html.includes("display:table-header-group"));
+    assert.ok(longHtml.html.includes("page-break-inside:auto"));
+    assert.deepStrictEqual(longHtml.missingAssets, []);
+
+    const qualityBase = path.join(temp, "quality-output");
+    const qualityHtml = qualityBase + ".html";
+    fs.writeFileSync(qualityHtml, "<!doctype html><html><body>quality</body></html>", "utf8");
+    fs.writeFileSync(qualityBase + ".docx", Buffer.concat([
+      Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      Buffer.alloc(128, 1)
+    ]));
+    fs.writeFileSync(qualityBase + ".pdf", Buffer.from("%PDF-1.7\nsmoke quality output\n", "ascii"));
+    const completeQuality = exportQuality.assessOutputs(
+      qualityBase,
+      qualityHtml,
+      ["html", "docx", "pdf"]
+    );
+    assert.strictEqual(completeQuality.complete, true);
+    assert.deepStrictEqual(completeQuality.missingFormats, []);
+    fs.unlinkSync(qualityBase + ".pdf");
+    const partialQuality = exportQuality.assessOutputs(
+      qualityBase,
+      qualityHtml,
+      ["docx", "pdf"]
+    );
+    assert.strictEqual(partialQuality.complete, false);
+    assert.ok(partialQuality.generatedFormats.includes("docx"));
+    assert.ok(partialQuality.missingFormats.includes("pdf"));
+
+    let missingAssetInstance = processHub.ensureDocumentInstance(
+      temp,
+      dossierV4.id,
+      "tit.regular.comunicado-complexivo",
+      { type: "period", key: "missing-asset-final" }
+    );
+    for (const sectionItem of missingAssetInstance.sections) {
+      missingAssetInstance = processHub.updateSection(temp, missingAssetInstance.id, sectionItem.key, {
+        content: `Contenido válido para ${sectionItem.title} antes de insertar la figura.`,
+        status: "edited",
+        alerts: []
+      });
+    }
+    const missingAssetBlocks = processHub.setSectionBlocks(temp, missingAssetInstance.id, "INFORMACION", [
+      { type: "prose", role: "context", text: "La siguiente figura sirve para comprobar que un archivo inexistente no pueda pasar silenciosamente a la versión final." },
+      {
+        key: "imagen-faltante",
+        type: "image",
+        role: "evidence",
+        title: "Evidencia pendiente",
+        data: { path: path.join(temp, "archivo-que-no-existe.png") }
+      },
+      { type: "prose", role: "analysis", text: "La ausencia del recurso debe reportarse como problema de exportación y conservar el HTML de diagnóstico." }
+    ]);
+    assert.strictEqual(missingAssetBlocks.validation.ok, true);
+    missingAssetInstance = processHub.freezeFinal(temp, missingAssetInstance.id);
+    const missingAssetExport = draftExport.exportInstance(
+      temp,
+      missingAssetInstance.id,
+      { final: true, includeAlerts: false, formats: ["html"] },
+      path.join(__dirname, "..")
+    );
+    assert.strictEqual(missingAssetExport.complete, false);
+    assert.strictEqual(missingAssetExport.status, "incomplete");
+    assert.strictEqual(missingAssetExport.missingAssets.length, 1);
+    assert.strictEqual(missingAssetExport.missingAssets[0].blockKey, "imagen-faltante");
+    assert.ok(missingAssetExport.diagnosticHtmlPath);
+    assert.ok(fs.existsSync(missingAssetExport.manifestPath));
+    const missingManifest = JSON.parse(fs.readFileSync(missingAssetExport.manifestPath, "utf8"));
+    assert.strictEqual(missingManifest.complete, false);
+    assert.strictEqual(missingManifest.missingAssets.length, 1);
+
+    assert.strictEqual(finalApaExport.complete, true);
+    assert.deepStrictEqual(finalApaExport.generatedFormats, ["html"]);
+    assert.ok(fs.existsSync(finalApaExport.manifestPath));
 
     errorService.record(temp, {
       module: "smoke",
