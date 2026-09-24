@@ -158,6 +158,192 @@
     SEGUIMIENTO_INDIVIDUAL: section("SEGUIMIENTO", "Seguimiento", "data_ai")
   });
 
+  const FORM_DETECTION_BLUEPRINT = Object.freeze([
+    { use: "INTRODUCCION", overrides: {
+      title: "Introducción",
+      contract: {
+        purpose: "Presentar el propósito, alcance y contexto del diagnóstico de necesidades de formación docente.",
+        sourcePolicy: "datos_maestros_y_fuentes_institucionales",
+        evidenceRequired: true,
+        visualPolicy: "none",
+        dataNeeds: [],
+        promptInstructions: ["No anticipar resultados que todavía no hayan sido analizados."]
+      }
+    }},
+    { use: "BASE_LEGAL", overrides: {
+      title: "Base Legal",
+      contract: {
+        purpose: "Sustentar el diagnóstico exclusivamente en normativa y fuentes institucionales registradas.",
+        sourcePolicy: "fuentes_institucionales_citables",
+        evidenceRequired: true,
+        visualPolicy: "none",
+        dataNeeds: [],
+        promptInstructions: ["Usar únicamente fuentes con metadatos de cita completos cuando se incorporen citas."]
+      }
+    }},
+    { use: "ALINEACION_INSTITUCIONAL", overrides: {
+      title: "Alineación Estratégica",
+      contract: {
+        purpose: "Relacionar las necesidades de formación con la planificación, objetivos y prioridades institucionales disponibles.",
+        sourcePolicy: "fuentes_institucionales_y_datos_maestros",
+        evidenceRequired: true,
+        visualPolicy: "optional",
+        dataNeeds: [],
+        promptInstructions: ["Explicar la relación estratégica sin inventar planes, objetivos ni indicadores."]
+      }
+    }},
+    section("METODOLOGIA", "Metodología y Enfoque", "semi_stable_ai", {
+      contract: {
+        purpose: "Describir de forma reproducible cómo se levantó, organizó y analizó la información.",
+        sourcePolicy: "datos_maestros_instrumentos_y_metadatos_del_levantamiento",
+        evidenceRequired: true,
+        visualPolicy: "recommended",
+        dataNeeds: [],
+        promptInstructions: ["La metodología debe corresponder con los datos realmente disponibles y no describir procedimientos que no hayan sido ejecutados."]
+      },
+      children: [
+        section("METODOLOGIA_OBJETIVO_GENERAL", "Objetivo General", "stable_ai"),
+        section("METODOLOGIA_OBJETIVOS_ESPECIFICOS", "Objetivos Específicos", "stable_ai"),
+        section("METODOLOGIA_ESTRATEGIA_LEVANTAMIENTO", "Estrategia de levantamiento", "semi_stable_ai"),
+        section("METODOLOGIA_POBLACION_MUESTRA", "Población y muestra", "data_ai"),
+        section("METODOLOGIA_INSTRUMENTOS", "Instrumentos", "semi_stable_ai"),
+        section("METODOLOGIA_PROCEDIMIENTO", "Procedimiento", "semi_stable_ai"),
+        section("METODOLOGIA_FLUJO", "Diagrama de flujo del proceso", "analysis_ai", {
+          allowedVisuals: ["process_flow"],
+          contract: {
+            purpose: "Representar visualmente las etapas reales del levantamiento y análisis.",
+            sourcePolicy: "metodologia_verificada",
+            evidenceRequired: true,
+            visualPolicy: "required",
+            dataNeeds: [],
+            promptInstructions: ["Generar un visual process_flow solo con pasos respaldados por el procedimiento descrito."]
+          }
+        }),
+        section("METODOLOGIA_CRITERIOS_ANALISIS", "Criterios de análisis", "semi_stable_ai")
+      ]
+    }),
+    section("CARACTERIZACION_CLAUSTRO", "Caracterización del Claustro Docente", "data_ai", {
+      contract: {
+        purpose: "Describir el claustro utilizando únicamente dimensiones presentes en la base de datos.",
+        sourcePolicy: "datos_estructurados",
+        evidenceRequired: true,
+        visualPolicy: "recommended",
+        dataNeeds: [],
+        promptInstructions: ["Omitir dimensiones sin datos suficientes."]
+      },
+      children: [
+        section("CARACTERIZACION_COORDINACIONES", "Distribución por coordinación académica o carrera", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
+        section("CARACTERIZACION_FORMACION", "Perfil académico y nivel de formación", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
+        section("CARACTERIZACION_EXPERIENCIA", "Experiencia docente", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
+        section("CARACTERIZACION_VINCULACION", "Vinculación y dedicación docente", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
+        section("CARACTERIZACION_AREAS", "Áreas o campos de conocimiento", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } })
+      ]
+    }),
+    section("ANALISIS_INTERPRETACION", "Análisis e Interpretación de Resultados", "analysis_ai", {
+      contract: {
+        purpose: "Integrar el análisis cuantitativo y cualitativo del diagnóstico sin recalcular los agregados entregados por la aplicación.",
+        sourcePolicy: "datos_estructurados_y_fuentes_institucionales",
+        evidenceRequired: true,
+        visualPolicy: "recommended",
+        dataNeeds: [],
+        promptInstructions: ["Cada interpretación debe señalar la evidencia que la sustenta."]
+      },
+      children: [
+        section("ANALISIS_GLOBAL", "Análisis global", "data_ai", { allowedVisuals: ["bar", "cards"] }),
+        section("ANALISIS_BRECHAS", "Análisis de brechas", "analysis_ai", { allowedVisuals: ["gap_analysis"] }),
+        section("ANALISIS_DISPONIBILIDAD", "Disponibilidad para formación", "data_ai", { allowedVisuals: ["bar", "cards"] }),
+        section("ANALISIS_INTERESES", "Intereses formativos", "data_ai", { allowedVisuals: ["bar", "cards"] }),
+        section("ANALISIS_COMPARATIVO_CARRERA", "Comparativo por carrera", "data_ai", { allowedVisuals: ["bar", "cards"] }),
+        section("ANALISIS_CUALITATIVO", "Análisis cualitativo", "analysis_ai", { allowedVisuals: ["cards"] }),
+        section("ANALISIS_TRIANGULACION", "Triangulación de información", "analysis_ai"),
+        section("ANALISIS_MATRIZ_PRIORIZACION", "Matriz de priorización", "analysis_ai", {
+          allowedVisuals: ["impact_matrix"],
+          contract: {
+            purpose: "Explicar la priorización calculada por la aplicación; la IA no asigna puntajes arbitrarios.",
+            sourcePolicy: "calculos_deterministicos_y_datos",
+            evidenceRequired: true,
+            visualPolicy: "recommended",
+            dataNeeds: [],
+            promptInstructions: ["Interpretar la matriz recibida sin modificar puntajes ni recalcular resultados."]
+          }
+        }),
+        section("ANALISIS_ARBOL_PROBLEMAS", "Árbol de problemas", "analysis_ai", {
+          allowedVisuals: ["problem_tree"],
+          contract: {
+            purpose: "Representar causas y efectos sustentados por los hallazgos.",
+            sourcePolicy: "hallazgos_analizados",
+            evidenceRequired: true,
+            visualPolicy: "required",
+            dataNeeds: [],
+            promptInstructions: ["No incorporar causas o efectos sin respaldo en resultados."]
+          }
+        }),
+        section("ANALISIS_MAPA_CALOR", "Mapa de calor de necesidades", "data_ai", {
+          allowedVisuals: ["heatmap"],
+          contract: {
+            purpose: "Visualizar intensidad o recurrencia de necesidades por carrera o dimensión.",
+            sourcePolicy: "datos_estructurados",
+            evidenceRequired: true,
+            visualPolicy: "required",
+            dataNeeds: [],
+            promptInstructions: ["Usar exclusivamente los valores calculados suministrados por la aplicación."]
+          }
+        }),
+        section("ANALISIS_FODA", "Análisis estratégico FODA", "analysis_ai", { allowedVisuals: ["foda"] }),
+        section("ANALISIS_SINTESIS", "Síntesis de hallazgos", "derived_ai", {
+          derivedFrom: ["ANALISIS_GLOBAL","ANALISIS_BRECHAS","ANALISIS_DISPONIBILIDAD","ANALISIS_INTERESES","ANALISIS_COMPARATIVO_CARRERA","ANALISIS_CUALITATIVO","ANALISIS_TRIANGULACION","ANALISIS_MATRIZ_PRIORIZACION","ANALISIS_ARBOL_PROBLEMAS","ANALISIS_MAPA_CALOR","ANALISIS_FODA"]
+        })
+      ]
+    }),
+    section("LINEAS_FORMACION_COORDINACION", "Líneas de Formación por Coordinación Académica", "data_ai", {
+      contract: {
+        purpose: "Traducir los hallazgos en líneas de formación diferenciadas por coordinación académica o carrera.",
+        sourcePolicy: "datos_filtrados_por_coordinacion",
+        evidenceRequired: true,
+        visualPolicy: "optional",
+        dataNeeds: [],
+        promptInstructions: ["Crear apartados únicamente para coordinaciones o carreras presentes en los datos."]
+      },
+      layout: { dynamicSubsections: "career", aiRecommendation: true }
+    }),
+    section("COBERTURA_INSTITUCIONAL", "Cobertura Institucional", "data_ai", {
+      allowedVisuals: ["bar", "cards"],
+      contract: {
+        purpose: "Explicar el alcance y representatividad del levantamiento por las dimensiones disponibles.",
+        sourcePolicy: "datos_estructurados",
+        evidenceRequired: true,
+        visualPolicy: "recommended",
+        dataNeeds: [],
+        promptInstructions: ["Identificar limitaciones de cobertura cuando existan."]
+      }
+    }),
+    section("PRIORIZACION_INSTITUCIONAL", "Propuesta de Priorización Institucional", "derived_ai", {
+      derivedFrom: ["ANALISIS_SINTESIS","COBERTURA_INSTITUCIONAL","LINEAS_FORMACION_COORDINACION"],
+      children: [
+        section("PRIORIZACION_CRITICAS", "Necesidades críticas", "derived_ai", { derivedFrom: ["ANALISIS_MATRIZ_PRIORIZACION","ANALISIS_SINTESIS"] }),
+        section("PRIORIZACION_CORTO_PLAZO", "Corto plazo", "derived_ai", { derivedFrom: ["PRIORIZACION_CRITICAS"] }),
+        section("PRIORIZACION_MEDIANO_PLAZO", "Mediano plazo", "derived_ai", { derivedFrom: ["PRIORIZACION_CRITICAS"] }),
+        section("PRIORIZACION_LARGO_PLAZO", "Largo plazo", "derived_ai", { derivedFrom: ["PRIORIZACION_CRITICAS"] }),
+        section("PRIORIZACION_INDICADORES", "Indicadores de seguimiento", "derived_ai", { derivedFrom: ["PRIORIZACION_CORTO_PLAZO","PRIORIZACION_MEDIANO_PLAZO","PRIORIZACION_LARGO_PLAZO"] })
+      ]
+    }),
+    { use: "RESUMEN_EJECUTIVO", overrides: {
+      title: "Resumen Ejecutivo",
+      derivedFrom: ["ANALISIS_SINTESIS","PRIORIZACION_INSTITUCIONAL","COBERTURA_INSTITUCIONAL"],
+      maxWords: 600
+    }},
+    { use: "CONCLUSIONES", overrides: {
+      title: "Conclusiones",
+      derivedFrom: ["ANALISIS_SINTESIS","PRIORIZACION_INSTITUCIONAL"]
+    }},
+    { use: "RECOMENDACIONES", overrides: {
+      title: "Recomendaciones",
+      derivedFrom: ["CONCLUSIONES","PRIORIZACION_INSTITUCIONAL"]
+    }},
+    { use: "REFERENCIAS", overrides: { title: "Bibliografía", required: false }},
+    { use: "ANEXOS", overrides: { title: "Anexos", required: false }}
+  ]);
+
   // Fuente de estructura: 1 blueprint por engineId. No existe fallback a un
   // perfil genérico. Dos motores pueden empezar con la misma secuencia hoy,
   // pero la secuencia pertenece a cada motor y podrá evolucionar por separado.
@@ -185,7 +371,7 @@
     "cap.plan": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES_PLANIFICACION","ANEXOS"]),
     "cap.informe-cumplimiento": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
 
-    "form.deteccion": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","CARACTERIZACION","RESULTADOS",{"use":"ANALISIS_RESULTADOS","overrides":{"contract":{"purpose":"Interpretar cualitativa y cuantitativamente los hallazgos para explicar causas, brechas y prioridades.","sourcePolicy":"resultados_y_fuentes_institucionales","evidenceRequired":true,"visualPolicy":"recommended","dataNeeds":[],"promptInstructions":["Seleccionar solo las herramientas de análisis que aporten al caso.","Puede utilizar Ishikawa, FODA, CAME, árbol de problemas, matriz de impacto u otras herramientas habilitadas cuando correspondan."]}}},"NECESIDADES_PRIORIZADAS","CONCLUSIONES","RECOMENDACIONES","ANEXOS"]),
+    "form.deteccion": FORM_DETECTION_BLUEPRINT,
     "form.plan": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES_PLANIFICACION","ANEXOS"]),
     "form.informe": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
 
@@ -399,7 +585,7 @@
     scopeKeys: ["period"], dependencies: ["cap.plan", "cap.informe-final", "cap.impacto"]
   });
 
-  E("ugpa-necesidades-formacion", "form.deteccion", "Detección de Necesidades de Formación", "formacion", "detection", "period", { scopeKeys: ["period"] });
+  E("ugpa-necesidades-formacion", "form.deteccion", "Detección de Necesidades de Formación", "formacion", "detection", "period", { scopeKeys: ["period"], version: "4.1.0", outlineStatus: "confirmed", outlineVersion: 2, workflowMode: "sectional" });
   E("ugpa-plan-formacion", "form.plan", "Plan Anual de Formación Docente", "formacion", "planning", "period", {
     scopeKeys: ["period"], dependencies: ["form.deteccion"]
   });
