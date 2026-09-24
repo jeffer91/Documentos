@@ -43,7 +43,11 @@ function Insert-Tables {
     }
 
     $table = $Document.Tables.Add($cursor, [Math]::Max(1, $rows.Count + 1), $headers.Count)
-    try { $table.AutoFitBehavior(2) } catch {}
+    try {
+      $table.AutoFitBehavior(2)
+      $table.Rows.Item(1).HeadingFormat = -1
+      $table.Rows.AllowBreakAcrossPages = 0
+    } catch {}
 
     for ($c = 0; $c -lt $headers.Count; $c++) {
       $table.Cell(1, $c + 1).Range.Text = [string]$headers[$c]
@@ -82,6 +86,11 @@ function Insert-Images {
       $shape.Width = 430
       $shape.Height = $shape.Height * $ratio
     }
+    if ($shape.Height -gt 520) {
+      $ratio = 520 / $shape.Height
+      $shape.Height = 520
+      $shape.Width = $shape.Width * $ratio
+    }
 
     $cursor = $Document.Range($shape.Range.End, $shape.Range.End)
     if ($image.caption) {
@@ -106,6 +115,7 @@ function Apply-ObjectKeepRules {
         $paragraph.Format.KeepTogether = -1
       } catch {}
 
+      $titleParagraph = $null
       for ($j = $i + 1; $j -le [Math]::Min($count, $i + 3); $j++) {
         $next = $Document.Paragraphs.Item($j)
         $nextText = ([string]$next.Range.Text).Trim()
@@ -113,7 +123,11 @@ function Apply-ObjectKeepRules {
           try {
             $next.Format.KeepWithNext = -1
             $next.Format.KeepTogether = -1
+            $next.Format.FirstLineIndent = 0
+            $next.Format.LineSpacingRule = 0
+            $next.Range.Font.Italic = -1
           } catch {}
+          $titleParagraph = $next
           break
         }
       }
@@ -172,11 +186,96 @@ function Apply-ApaBody {
         $text = ([string]$p.Range.Text).Trim()
         $p.Format.LineSpacingRule = 2
         $p.Format.FirstLineIndent = 36
-        if ($text -match '^(Tabla|Figura)\s+\d+\s*$') {
+        if ($text -match '^(Tabla|Figura)\s+\d+\s*
+      }
+    } catch {}
+  }
+
+  foreach ($table in @($Document.Tables)) {
+    try {
+      $table.Range.Font.Name = "Arial"
+      $columnCount = $table.Columns.Count
+      if ($columnCount -ge 9) {
+        $table.Range.Font.Size = 8
+      }
+      elseif ($columnCount -ge 7) {
+        $table.Range.Font.Size = 9
+      }
+      else {
+        $table.Range.Font.Size = 10
+      }
+      $table.Range.ParagraphFormat.LineSpacingRule = 0
+      $table.Range.ParagraphFormat.FirstLineIndent = 0
+      $table.Rows.Item(1).HeadingFormat = -1
+      $table.Rows.AllowBreakAcrossPages = 0
+    } catch {}
+  }
+
+  Apply-ObjectKeepRules -Document $Document
+}
+
+$job = Get-Content -LiteralPath $JobPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+try {
+  $word = New-Object -ComObject Word.Application
+  $word.Visible = $false
+  $word.DisplayAlerts = 0
+  $document = $word.Documents.Open([string]$job.inputDocx, $false, $false)
+
+  foreach ($block in @($job.blocks)) {
+    $marker = [string]$block.marker
+    $guard = 0
+
+    while ($guard -lt 20) {
+      $guard++
+      $range = Find-MarkerRange -Document $document -Marker $marker
+      if ($null -eq $range) { break }
+
+      if ($block.kind -eq "tables") {
+        Insert-Tables -Document $document -Range $range -Tables $block.tables
+      }
+      elseif ($block.kind -eq "images") {
+        Insert-Images -Document $document -Range $range -Images $block.images
+      }
+      else {
+        $range.Text = ""
+      }
+    }
+  }
+
+  Apply-ApaBody -Document $document
+
+  $document.SaveAs2([string]$job.outputDocx, 16)
+  $document.ExportAsFixedFormat([string]$job.outputPdf, 17)
+}
+finally {
+  if ($document -ne $null) {
+    try { $document.Close($false) } catch {}
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($document) | Out-Null
+  }
+  if ($word -ne $null) {
+    try { $word.Quit() } catch {}
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+  }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+}
+) {
           $p.Format.FirstLineIndent = 0
           $p.Format.LineSpacingRule = 0
           $p.Format.KeepWithNext = -1
           $p.Format.KeepTogether = -1
+        }
+        elseif ($text -match '^(?i)Nota\.\s*') {
+          $p.Format.FirstLineIndent = 0
+          $p.Format.LineSpacingRule = 0
+          $p.Format.KeepTogether = -1
+        }
+        elseif (-not $text) {
+          $p.Format.PageBreakBefore = 0
+          $p.Format.KeepWithNext = 0
+          $p.Format.KeepTogether = 0
+          $p.Format.FirstLineIndent = 0
         }
       }
     } catch {}
