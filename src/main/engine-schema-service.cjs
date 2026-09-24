@@ -32,6 +32,7 @@ function sectionDefinition(section) {
     derivedFrom: Array.isArray(section.derivedFrom) ? section.derivedFrom.slice() : [],
     maxWords: section.maxWords || null,
     compact: Boolean(section.compact),
+    data: section.data || {},
     layout: section.layout || {}
   };
 }
