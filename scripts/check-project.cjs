@@ -275,6 +275,62 @@ function architectureV3Check() {
   };
 }
 
+function independentEngineCheck() {
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+  const report = registry.registryIndependenceReport();
+  const engines = registry.allEngines();
+  const regular = registry.getEngine("tit.regular.informe-final");
+  const pvc = registry.getEngine("tit.pvc.informe-final");
+  const regularFreshBefore = registry.getEngine("tit.regular.informe-final");
+
+  const originalRegularTitle = regularFreshBefore.sections[0].title;
+  const originalPvcTitle = pvc.sections[0].title;
+  regular.sections[0].title = "MUTACIÓN DE PRUEBA";
+  regular.dependencies.push("motor.fake");
+  regular.scopeKeys.push("fake");
+  if (regular.sections[0].data) regular.sections[0].data.__test = true;
+
+  const regularFreshAfter = registry.getEngine("tit.regular.informe-final");
+  const pvcFreshAfter = registry.getEngine("tit.pvc.informe-final");
+
+  const blueprint = registry.blueprintForEngine("tit.regular.informe-final");
+  const pvcBlueprint = registry.blueprintForEngine("tit.pvc.informe-final");
+  if (blueprint) blueprint.push("MUTACION_BLUEPRINT");
+  const blueprintFresh = registry.blueprintForEngine("tit.regular.informe-final");
+
+  return {
+    report,
+    allOwned:
+      engines.length === 33 &&
+      engines.every((item) =>
+        item.definitionOwner === item.engineId &&
+        item.definitionSource === "engine_blueprint" &&
+        item.independentDefinition === true &&
+        (item.sections || []).every((section) => section.definitionOwner === item.engineId)
+      ),
+    runtimeIsolation:
+      regularFreshAfter.sections[0].title === originalRegularTitle &&
+      !regularFreshAfter.dependencies.includes("motor.fake") &&
+      !regularFreshAfter.scopeKeys.includes("fake") &&
+      !(regularFreshAfter.sections[0].data && regularFreshAfter.sections[0].data.__test),
+    crossEngineIsolation:
+      pvcFreshAfter.sections[0].title === originalPvcTitle &&
+      pvcFreshAfter.sections[0].title !== "MUTACIÓN DE PRUEBA" &&
+      regularFreshAfter.sections !== pvcFreshAfter.sections &&
+      regularFreshAfter.sections[0] !== pvcFreshAfter.sections[0],
+    blueprintIsolation:
+      Array.isArray(blueprintFresh) &&
+      !blueprintFresh.includes("MUTACION_BLUEPRINT") &&
+      Array.isArray(pvcBlueprint) &&
+      blueprintFresh !== pvcBlueprint,
+    noGenericFallback:
+      report.missingBlueprints.length === 0 &&
+      report.orphanBlueprints.length === 0 &&
+      report.blueprintCount === report.engineCount &&
+      report.uniqueDefinitionOwners === report.engineCount
+  };
+}
+
 function engineLifecycleCheck() {
   const schema = require(path.join(ROOT, "src/main/engine-schema-service.cjs"));
   const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
@@ -677,6 +733,22 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar arquitectura v3: ${error.message}`);
+  }
+
+  try {
+    const independentEngines = independentEngineCheck();
+    if (
+      !independentEngines.report.independent ||
+      !independentEngines.allOwned ||
+      !independentEngines.runtimeIsolation ||
+      !independentEngines.crossEngineIsolation ||
+      !independentEngines.blueprintIsolation ||
+      !independentEngines.noGenericFallback
+    ) {
+      errors.push("La independencia real de los 33 motores no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la independencia de motores: ${error.message}`);
   }
 
   try {
