@@ -317,6 +317,64 @@ function engineLifecycleCheck() {
   };
 }
 
+function dataEngineCheck() {
+  const ingestion = require(path.join(ROOT, "src/main/data-ingestion-service.cjs"));
+  const source = fs.readFileSync(path.join(ROOT, "src/main/data-ingestion-service.cjs"), "utf8");
+  const aiSource = fs.readFileSync(path.join(ROOT, "src/main/ai-orchestrator.cjs"), "utf8");
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
+  const hubSource = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  const schemaSource = fs.readFileSync(path.join(ROOT, "src/main/engine-schema-service.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+
+  return {
+    normalizesText:
+      ingestion.normalizeText("ENFERMERÍA") === "enfermeria" &&
+      ingestion.normalizeText("  Núcleo   1 ") === "nucleo 1",
+    fullAggregation:
+      source.includes("function filteredRows") &&
+      source.includes("calculationComplete: true") &&
+      !source.includes("Object.assign({}, query || {}, { limit: 5000 })"),
+    canonicalMapping:
+      source.includes("function applyMapping") &&
+      source.includes("function validateMapping") &&
+      source.includes("CANONICAL_FIELD_ALIASES"),
+    queryValidation:
+      source.includes("function validateQueryFields") &&
+      source.includes("no existen o no están mapeados"),
+    duplicateGuard:
+      source.includes("duplicate_ignored") &&
+      source.includes("duplicateIgnored: true"),
+    traceability:
+      source.includes("__sourceSha256") &&
+      source.includes("__mappingHash") &&
+      source.includes("querySignature") &&
+      source.includes("sourceTrace"),
+    privacy:
+      source.includes("privacyMinGroup") &&
+      source.includes("allowRawRowsForAi") &&
+      source.includes("absoluteCountsExposed"),
+    aiContract:
+      aiSource.includes("no recalcules promedios, porcentajes, conteos ni filtros") &&
+      aiSource.includes("calculationComplete: true") &&
+      aiSource.includes('scopePolicy: "inclusive"'),
+    versionedQueries:
+      hubSource.includes("data: sectionItem.data || {}") &&
+      schemaSource.includes("data: section.data || {}") &&
+      schemaSource.includes("data: layout.data || {}"),
+    ipc:
+      mainSource.includes("data-imports:suggest-mapping") &&
+      mainSource.includes("data-ai-slice"),
+    bridge:
+      preload.includes("suggestDataMapping") &&
+      preload.includes("getAiDataSlice"),
+    ui:
+      renderer.includes("Mapeo canónico") &&
+      renderer.includes('data-arch-action="suggest-mapping"') &&
+      renderer.includes('data-arch-action="edit-mapping"')
+  };
+}
+
 function editorialV4Check() {
   const editorial = require(path.join(ROOT, "src/main/editorial-structure-service.cjs"));
   const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
@@ -556,6 +614,28 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el ciclo de vida de motores: ${error.message}`);
+  }
+
+  try {
+    const dataEngine = dataEngineCheck();
+    if (
+      !dataEngine.normalizesText ||
+      !dataEngine.fullAggregation ||
+      !dataEngine.canonicalMapping ||
+      !dataEngine.queryValidation ||
+      !dataEngine.duplicateGuard ||
+      !dataEngine.traceability ||
+      !dataEngine.privacy ||
+      !dataEngine.aiContract ||
+      !dataEngine.versionedQueries ||
+      !dataEngine.ipc ||
+      !dataEngine.bridge ||
+      !dataEngine.ui
+    ) {
+      errors.push("El motor de datos del Bloque 3 no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el motor de datos del Bloque 3: ${error.message}`);
   }
 
   try {
