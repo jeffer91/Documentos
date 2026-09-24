@@ -12,7 +12,7 @@ const BLOCK_TYPES = new Set([
   "reference_list"
 ]);
 
-const ANALYTICAL_BLOCK_TYPES = new Set(["table", "figure", "visual"]);
+const ANALYTICAL_BLOCK_TYPES = new Set(["table", "figure", "image", "visual"]);
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -25,8 +25,13 @@ function stableKey(prefix) {
 function normalizeSectionNode(node, parentKey, level, path, siblingNumber) {
   const section = Object.assign({}, node || {});
   const normalizedLevel = Math.max(1, Number(level || section.level || 1));
-  const key = String(section.key || stableKey("section")).trim();
+  const key = String(section.key || "").trim();
+  if (!key) {
+    throw new Error("Cada sección del motor necesita una key estable. No se permiten claves aleatorias.");
+  }
   const currentPath = path.concat([siblingNumber]);
+  const pageBreakBefore = normalizedLevel === 1;
+  const keepWithNext = true;
   const base = Object.assign({}, section, {
     key,
     title: String(section.title || key).trim(),
@@ -35,19 +40,21 @@ function normalizeSectionNode(node, parentKey, level, path, siblingNumber) {
     level: normalizedLevel,
     sortPath: currentPath.map((part) => String(part).padStart(4, "0")).join("."),
     numbering: currentPath.join("."),
-    pageBreakBefore: section.pageBreakBefore == null ? normalizedLevel === 1 : Boolean(section.pageBreakBefore),
-    keepWithNext: section.keepWithNext == null ? true : Boolean(section.keepWithNext),
+    // Regla institucional fija: solo las secciones principales empiezan página.
+    pageBreakBefore,
+    // Todo título debe permanecer unido al contenido que le sigue.
+    keepWithNext,
     required: section.required !== false,
     allowManualEdit: section.allowManualEdit !== false,
     lockAfterApproval: section.lockAfterApproval !== false,
     regenerateOnDependencyChange: section.regenerateOnDependencyChange !== false,
     allowedVisuals: Array.isArray(section.allowedVisuals) ? section.allowedVisuals.slice() : [],
     derivedFrom: Array.isArray(section.derivedFrom) ? section.derivedFrom.slice() : [],
-    layout: Object.assign({
+    layout: Object.assign({}, section.layout || {}, {
       apa7: true,
-      pageBreakBefore: normalizedLevel === 1,
-      keepWithNext: true
-    }, section.layout || {}),
+      pageBreakBefore,
+      keepWithNext
+    }),
     children: undefined
   });
   return base;
@@ -55,9 +62,14 @@ function normalizeSectionNode(node, parentKey, level, path, siblingNumber) {
 
 function flattenSections(sections) {
   const result = [];
+  const keys = new Set();
   const walk = (items, parentKey, level, path) => {
     (items || []).forEach((item, index) => {
       const node = normalizeSectionNode(item, parentKey, level, path, index + 1);
+      if (keys.has(node.key)) {
+        throw new Error(`La key de sección "${node.key}" está duplicada. Cada punto y subpunto necesita una key única y estable.`);
+      }
+      keys.add(node.key);
       result.push(node);
       if (Array.isArray(item && item.children) && item.children.length) {
         walk(item.children, node.key, level + 1, path.concat([index + 1]));
@@ -124,7 +136,7 @@ function meaningfulText(block) {
 function contextBefore(blocks, index) {
   for (let i = index - 1; i >= 0; i -= 1) {
     if (ANALYTICAL_BLOCK_TYPES.has(blocks[i].type)) break;
-    if (meaningfulText(blocks[i]) && ["context", "body", "introduction"].includes(blocks[i].role)) return true;
+    if (meaningfulText(blocks[i]) && ["context", "body", "introduction", "summary"].includes(blocks[i].role)) return true;
   }
   return false;
 }
@@ -132,7 +144,7 @@ function contextBefore(blocks, index) {
 function analysisAfter(blocks, index) {
   for (let i = index + 1; i < blocks.length; i += 1) {
     if (ANALYTICAL_BLOCK_TYPES.has(blocks[i].type)) break;
-    if (meaningfulText(blocks[i]) && ["analysis", "interpretation", "body"].includes(blocks[i].role)) return true;
+    if (meaningfulText(blocks[i]) && ["analysis", "interpretation", "summary"].includes(blocks[i].role)) return true;
   }
   return false;
 }
@@ -199,26 +211,94 @@ function validateSectionBlocks(section, inputBlocks) {
 
 function validateHierarchy(sections) {
   const errors = [];
-  const keys = new Set((sections || []).map((section) => section.key));
+  const warnings = [];
+  const rows = Array.isArray(sections) ? sections : [];
+  const byKey = new Map();
   const numbers = new Set();
-  (sections || []).forEach((section) => {
-    if (section.parentKey && !keys.has(section.parentKey)) errors.push(`La sección ${section.key} apunta a un padre inexistente: ${section.parentKey}.`);
-    if (section.numbering) {
-      if (numbers.has(section.numbering)) errors.push(`Numeración duplicada: ${section.numbering}.`);
-      numbers.add(section.numbering);
+  const sortPaths = new Set();
+
+  rows.forEach((section, index) => {
+    const key = String(section && section.key || "").trim();
+    if (!key) {
+      errors.push(`La sección en posición ${index + 1} no tiene key estable.`);
+      return;
     }
-    if (Number(section.level || 1) === 1 && !section.pageBreakBefore) {
-      errors.push(`La sección principal ${section.title} debe iniciar en página nueva.`);
+    if (byKey.has(key)) errors.push(`Key de sección duplicada: ${key}.`);
+    else byKey.set(key, section);
+  });
+
+  rows.forEach((section, index) => {
+    const level = Math.max(1, Number(section.level || 1));
+    const numbering = String(section.numbering || "").trim();
+    const sortPath = String(section.sortPath || "").trim();
+    const parentKey = String(section.parentKey || "").trim();
+
+    if (!String(section.title || "").trim()) errors.push(`La sección ${section.key} no tiene título.`);
+
+    if (numbering) {
+      if (!/^\d+(?:\.\d+)*$/.test(numbering)) errors.push(`Numeración inválida en ${section.key}: ${numbering}.`);
+      if (numbers.has(numbering)) errors.push(`Numeración duplicada: ${numbering}.`);
+      numbers.add(numbering);
+      if (numbering.split(".").length !== level) {
+        errors.push(`La numeración ${numbering} no coincide con el nivel ${level} de ${section.key}.`);
+      }
+    } else {
+      errors.push(`La sección ${section.key} no tiene numeración jerárquica.`);
+    }
+
+    if (sortPath) {
+      if (sortPaths.has(sortPath)) errors.push(`Ruta de orden duplicada: ${sortPath}.`);
+      sortPaths.add(sortPath);
+    } else {
+      errors.push(`La sección ${section.key} no tiene ruta de orden.`);
+    }
+
+    if (!section.keepWithNext) {
+      errors.push(`El título ${section.title || section.key} puede quedar huérfano: keepWithNext debe estar activo.`);
+    }
+
+    if (level === 1) {
+      if (parentKey) errors.push(`La sección principal ${section.key} no puede tener padre.`);
+      if (!section.pageBreakBefore) errors.push(`La sección principal ${section.title} debe iniciar en página nueva.`);
+    } else {
+      if (!parentKey) {
+        errors.push(`La sección ${section.key} de nivel ${level} necesita una sección padre.`);
+      } else {
+        const parent = byKey.get(parentKey);
+        if (!parent) {
+          errors.push(`La sección ${section.key} apunta a un padre inexistente: ${parentKey}.`);
+        } else {
+          const parentLevel = Math.max(1, Number(parent.level || 1));
+          if (parentLevel !== level - 1) {
+            errors.push(`La sección ${section.key} debe depender de un nivel ${level - 1}, no de nivel ${parentLevel}.`);
+          }
+          const parentIndex = rows.indexOf(parent);
+          if (parentIndex >= index) errors.push(`La sección padre ${parentKey} debe aparecer antes que ${section.key}.`);
+          if (numbering && parent.numbering && !numbering.startsWith(`${parent.numbering}.`)) {
+            errors.push(`La numeración ${numbering} de ${section.key} no deriva de su padre ${parent.numbering}.`);
+          }
+        }
+      }
+      if (section.pageBreakBefore) {
+        errors.push(`El subnivel ${numbering || section.key} no debe iniciar una página nueva automáticamente.`);
+      }
+    }
+
+    if (level > 6) {
+      warnings.push(`La sección ${numbering || section.key} usa nivel ${level}; se conservará la numeración y se aplicará el estilo visual del nivel profundo.`);
     }
   });
-  return errors;
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 function validateDocumentInstance(instance) {
   const errors = [];
   const warnings = [];
   const sections = Array.isArray(instance && instance.sections) ? instance.sections : [];
-  errors.push(...validateHierarchy(sections));
+  const hierarchy = validateHierarchy(sections);
+  errors.push(...hierarchy.errors);
+  warnings.push(...hierarchy.warnings);
 
   sections.forEach((section) => {
     const blocks = normalizeBlocks(section.blocks || []);
@@ -255,5 +335,6 @@ module.exports = {
   normalizeBlocks,
   plainTextFromBlocks,
   validateSectionBlocks,
+  validateHierarchy,
   validateDocumentInstance
 };
