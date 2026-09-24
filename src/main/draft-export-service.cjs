@@ -47,10 +47,11 @@ function convertWithLibreOffice(htmlPath, outputDir, formats) {
   });
 }
 
-function buildHtml(instance, options, assetDir, citationRows) {
+function buildHtml(instance, options, assetDir, citationRows, referenceRows) {
   return apa7.buildDocumentHtml(instance, Object.assign({}, options || {}, {
     assetDir,
-    citations: citationRows || []
+    citations: citationRows || [],
+    references: referenceRows || citationRows || []
   }));
 }
 
@@ -74,8 +75,27 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
   const assetDir = `${base}-assets`;
   fs.mkdirSync(assetDir, { recursive: true });
 
-  const citationRows = citations.listCitations(userDataPath, instance.dossierId);
-  const rendered = buildHtml(instance, options || {}, assetDir, citationRows);
+  let citationSet = null;
+  let citationSnapshotMode = "live";
+  const frozenCitationSnapshot = final && instance.frozenSnapshot && instance.frozenSnapshot.citationSnapshot;
+  if (frozenCitationSnapshot && Array.isArray(frozenCitationSnapshot.citations)) {
+    citationSnapshotMode = "frozen";
+    const selectedKeys = citations.citationTokensFromInstance(instance, options && options.sectionKeys);
+    const selected = frozenCitationSnapshot.citations.filter((item) => selectedKeys.includes(item.citationKey));
+    citationSet = citations.prepareCitationSet(selected);
+  } else {
+    citationSet = citations.resolveInstanceCitations(userDataPath, instance, {
+      sectionKeys: options && options.sectionKeys
+    });
+    if (final) citationSnapshotMode = "live_legacy_fallback";
+  }
+
+  if (final && citationSet.ok === false) {
+    const pending = [].concat(citationSet.missing || [], citationSet.incomplete || []);
+    throw new Error(`Hay citas APA incompletas o no registradas: ${pending.slice(0, 8).join(", ")}.`);
+  }
+
+  const rendered = buildHtml(instance, options || {}, assetDir, citationSet.citations || [], citationSet.references || []);
   if (final && rendered.missingCitations.length) {
     throw new Error(
       `Hay citas APA incompletas o no registradas: ${rendered.missingCitations.slice(0, 8).join(", ")}.`
@@ -114,6 +134,9 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
       sectionKeys: options && options.sectionKeys || [],
       outputs: outputs.map((item) => item.type),
       missingCitations: rendered.missingCitations,
+      citationSnapshotMode,
+      usedCitationKeys: (citationSet.citations || []).map((item) => item.citationKey),
+      referenceCount: (citationSet.references || []).length,
       editorialWarnings: validation.warnings
     }
   });
@@ -124,7 +147,10 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
     apaProfile: apa7.PROFILE,
     outputs,
     editorialValidation: validation,
-    missingCitations: rendered.missingCitations
+    missingCitations: rendered.missingCitations,
+    citationSnapshotMode,
+    usedCitationKeys: (citationSet.citations || []).map((item) => item.citationKey),
+    referenceCount: (citationSet.references || []).length
   };
 }
 
