@@ -57,7 +57,7 @@
   const VISUAL_TOOLSETS = Object.freeze({
     methodology: ["process_flow", "problem_tree", "objective_tree", "stakeholders"],
     results: ["bar", "line", "cards", "gap_analysis"],
-    analysis: ["ishikawa", "foda", "came", "impact_matrix", "problem_tree", "objective_tree", "stakeholders", "gap_analysis", "process_flow", "pestel", "bar", "line", "cards"],
+    analysis: ["ishikawa", "foda", "came", "impact_matrix", "problem_tree", "objective_tree", "stakeholders", "gap_analysis", "heatmap", "process_flow", "pestel", "bar", "line", "cards"],
     summary: ["bar", "line", "cards", "impact_matrix", "gap_analysis"],
     none: []
   });
@@ -340,7 +340,7 @@
       title: "Recomendaciones",
       derivedFrom: ["CONCLUSIONES","PRIORIZACION_INSTITUCIONAL"]
     }},
-    { use: "REFERENCIAS", overrides: { title: "Bibliografía", required: false }},
+    { use: "REFERENCIAS", overrides: { title: "Bibliografía", required: true }},
     { use: "ANEXOS", overrides: { title: "Anexos", required: false }}
   ]);
 
