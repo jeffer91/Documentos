@@ -673,6 +673,10 @@ async function run() {
       }
     });
     assert.strictEqual(mappedData.mappingValidation.ok, true);
+    assert.throws(
+      () => dataIngestion.setMapping(temp, importedData.id, { fields: { career: "Columna inexistente" } }),
+      /no encontró/
+    );
 
     const pagedData = dataIngestion.queryData(temp, dossierV4.id, {
       scopeType: "period_population",
@@ -689,6 +693,12 @@ async function run() {
     assert.strictEqual(pagedData.returnedRows, 5000);
     assert.strictEqual(pagedData.truncated, true);
     assert.strictEqual(pagedData.sourceTrace.length, 1);
+    assert.throws(
+      () => dataIngestion.queryData(temp, dossierV4.id, {
+        where: [{ field: "campo_inexistente", op: "eq", value: "x" }]
+      }),
+      /no existen o no están mapeados/
+    );
 
     const fullSummary = dataIngestion.summarize(temp, dossierV4.id, {
       scopeType: "period_population",
@@ -713,6 +723,7 @@ async function run() {
     assert.strictEqual(fullSummary.sourceTrace[0].sheets[0].firstRow, 2);
     assert.strictEqual(fullSummary.sourceTrace[0].sheets[0].lastRow, 6002);
     assert.strictEqual(fullSummary.querySignature.length, 64);
+    assert.strictEqual(fullSummary.sourceTrace[0].mappingHash.length, 64);
 
     const aggregateSlice = dataIngestion.aiSlice(temp, dossierV4.id, {
       where: [{ field: "career", op: "eq", value: "Enfermería" }],
@@ -750,6 +761,60 @@ async function run() {
     });
     assert.strictEqual(rawDenied.sampleRows.length, 0);
     assert.ok(rawDenied.warnings.some((item) => item.includes("modo de privacidad")));
+
+    // Los filtros de datos forman parte del esquema versionado de cada motor.
+    const queryContractInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
+      type: "period_population",
+      key: "data-query-contract"
+    });
+    const baseQueryEngine = documentEngineRegistry.getEngine("tit.regular.informe-final");
+    const dataQueryEngine = Object.assign({}, baseQueryEngine, {
+      version: "4.0.0-data-query-smoke",
+      sections: (baseQueryEngine.sections || []).map((section) => section.key === "RESULTADOS"
+        ? Object.assign({}, section, {
+            data: {
+              query: {
+                where: [
+                  { field: "career", op: "eq", value: "Enfermería" },
+                  { field: "component", op: "eq", value: "Teórico" }
+                ],
+                dimensions: ["core"],
+                measures: ["grade"]
+              }
+            }
+          })
+        : section)
+    });
+    const queryContractMigration = processHub.synchronizeEngineInstance(temp, queryContractInstance.id, dataQueryEngine);
+    assert.strictEqual(queryContractMigration.migrated, true);
+    assert.ok(queryContractMigration.plan.updated.includes("RESULTADOS"));
+    let queryContractReloaded = processHub.getDocumentInstance(temp, queryContractInstance.id);
+    let queryResultsSection = queryContractReloaded.sections.find((section) => section.key === "RESULTADOS");
+    assert.ok(queryResultsSection.data.query);
+    assert.strictEqual(queryResultsSection.data.query.where[0].field, "career");
+
+    const changedDataQueryEngine = Object.assign({}, dataQueryEngine, {
+      sections: (dataQueryEngine.sections || []).map((section) => section.key === "RESULTADOS"
+        ? Object.assign({}, section, {
+            data: {
+              query: {
+                where: [
+                  { field: "career", op: "eq", value: "Enfermería" },
+                  { field: "core", op: "eq", value: "Núcleo 1" }
+                ],
+                dimensions: ["campus"],
+                measures: ["grade"]
+              }
+            }
+          })
+        : section)
+    });
+    const queryContractMigrationTwo = processHub.synchronizeEngineInstance(temp, queryContractInstance.id, changedDataQueryEngine);
+    assert.strictEqual(queryContractMigrationTwo.migrated, true);
+    assert.ok(queryContractMigrationTwo.plan.updated.includes("RESULTADOS"));
+    queryContractReloaded = processHub.getDocumentInstance(temp, queryContractInstance.id);
+    queryResultsSection = queryContractReloaded.sections.find((section) => section.key === "RESULTADOS");
+    assert.strictEqual(queryResultsSection.data.query.where[1].field, "core");
 
     const duplicateData = dataIngestion.importDataFile(temp, dossierV4.id, largeDataPath, { type: "dossier", key: "" });
     assert.strictEqual(duplicateData.id, importedData.id);
