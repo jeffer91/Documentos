@@ -259,7 +259,8 @@ function registerIpc() {
         instance,
         editorialValidation: instance ? editorial.validateDocumentInstance(instance) : null,
         citationValidation: instance ? citationService.validateInstanceCitations(userData(), instance) : null,
-        dataReadiness: instance ? aiOrchestrator.instanceDataReadiness(userData(), instanceId) : null
+        dataReadiness: instance ? aiOrchestrator.instanceDataReadiness(userData(), instanceId) : null,
+        generationRun: instance ? aiOrchestrator.latestGenerationRun(userData(), instanceId) : null
       };
     },
     "instances",
@@ -346,14 +347,29 @@ function registerIpc() {
   });
   ipcMain.handle("ai-engine:generate-document", async (_event, instanceId, options) => {
     try {
-      return { ok: true, instance: await aiOrchestrator.generateDocument(userData(), instanceId, options || {}) };
+      const instance = await aiOrchestrator.generateDocument(userData(), instanceId, options || {});
+      return { ok: true, instance, generationRun: instance.generationRun || null };
     } catch (error) {
       return failure("ai-engine", "generate-document", error);
     }
   });
+  ipcMain.handle("ai-engine:resume-document", async (_event, instanceId, options) => {
+    try {
+      const instance = await aiOrchestrator.resumeDocument(userData(), instanceId, options || {});
+      return { ok: true, instance, generationRun: instance.generationRun || null };
+    } catch (error) {
+      return failure("ai-engine", "resume-document", error);
+    }
+  });
+  ipcMain.handle("ai-engine:generation-runs", (_event, instanceId, limit) => safeResponse(
+    () => ({ ok: true, runs: aiOrchestrator.listGenerationRuns(userData(), instanceId, limit || 20) }),
+    "ai-engine",
+    "generation-runs"
+  ));
   ipcMain.handle("ai-engine:regenerate-stale", async (_event, instanceId, options) => {
     try {
-      return { ok: true, instance: await aiOrchestrator.regenerateStale(userData(), instanceId, options || {}) };
+      const instance = await aiOrchestrator.regenerateStale(userData(), instanceId, options || {});
+      return { ok: true, instance, generationRun: instance.generationRun || null };
     } catch (error) {
       return failure("ai-engine", "regenerate-stale", error);
     }
