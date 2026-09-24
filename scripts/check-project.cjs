@@ -41,6 +41,7 @@ const REQUIRED_FILES = [
   "src/main/data-ingestion-service.cjs",
   "src/main/ai-provider-service.cjs",
   "src/main/ai-orchestrator.cjs",
+  "src/main/ai-generation-run-service.cjs",
   "src/main/draft-export-service.cjs",
   "src/main/knowledge-source-service.cjs",
   "src/main/editorial-structure-service.cjs",
@@ -697,6 +698,79 @@ function draftFinalAlertCheck() {
   };
 }
 
+function aiGenerationResilienceCheck() {
+  const orchestrator = require(path.join(ROOT, "src/main/ai-orchestrator.cjs"));
+  const aiSource = fs.readFileSync(path.join(ROOT, "src/main/ai-orchestrator.cjs"), "utf8");
+  const runSource = fs.readFileSync(path.join(ROOT, "src/main/ai-generation-run-service.cjs"), "utf8");
+  const providerSource = fs.readFileSync(path.join(ROOT, "src/main/ai-provider-service.cjs"), "utf8");
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+
+  const humanReason = orchestrator.sectionPreservationReason({
+    status: "edited",
+    locked: false,
+    provenance: { source: "human" }
+  }, {});
+  const lockedReason = orchestrator.sectionPreservationReason({
+    status: "approved",
+    locked: true,
+    provenance: {}
+  }, { force: true, overrideHuman: true });
+  const retry429 = orchestrator.retryableProviderError(Object.assign(new Error("rate"), { statusCode: 429 }));
+  const retry503 = orchestrator.retryableProviderError(Object.assign(new Error("down"), { statusCode: 503 }));
+  const noRetry401 = orchestrator.retryableProviderError(Object.assign(new Error("auth"), { statusCode: 401 }));
+
+  return {
+    runSchema:
+      runSource.includes("ai_generation_runs_v6") &&
+      runSource.includes('status TEXT NOT NULL DEFAULT \'running\'') &&
+      runSource.includes("nextSectionKey") &&
+      runSource.includes("resumable"),
+    humanProtection:
+      humanReason === "human_edited" &&
+      lockedReason === "approved_or_locked" &&
+      aiSource.includes("Confirma explícitamente si deseas reemplazarla con IA"),
+    retryPolicy:
+      retry429 === true &&
+      retry503 === true &&
+      noRetry401 === false &&
+      aiSource.includes("callProviderWithRetries") &&
+      providerSource.includes("error.statusCode") &&
+      providerSource.includes('timeoutError.code = "ETIMEDOUT"'),
+    fallback:
+      aiSource.includes("for (const candidate of set.writers") &&
+      aiSource.includes("writerPayloadUsable") &&
+      aiSource.includes("respuesta no contiene contenido ni bloques utilizables"),
+    reviewerBlocks:
+      aiSource.includes('reviewerPrompt(engine, section, { content, blocks, alerts }, context)') &&
+      aiSource.includes("review_format"),
+    reviewStatus:
+      aiSource.includes('const sectionStatus = editorialValidation.ok && !reviewerRejected ? "reviewed" : "needs_review"'),
+    documentMemory:
+      aiSource.includes("function documentMemory") &&
+      aiSource.includes("priorSections") &&
+      aiSource.includes("documentMemory: memory"),
+    partialResume:
+      aiSource.includes("continueOnError") &&
+      aiSource.includes('"partial"') &&
+      aiSource.includes("resumeDocument") &&
+      aiSource.includes("dependencyProblems"),
+    ipc:
+      mainSource.includes("ai-engine:resume-document") &&
+      mainSource.includes("ai-engine:generation-runs") &&
+      mainSource.includes("generationRun: instance ? aiOrchestrator.latestGenerationRun"),
+    bridge:
+      preload.includes("resumeEngineDocument") &&
+      preload.includes("listGenerationRuns"),
+    ui:
+      renderer.includes("Reanudar pendientes") &&
+      renderer.includes("Generación parcial") &&
+      renderer.includes("Esta sección tiene cambios manuales") &&
+      renderer.includes("needs_review")
+  };
+}
+
 function exportVisualQualityCheck() {
   const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
   const quality = require(path.join(ROOT, "src/main/export-quality-service.cjs"));
@@ -1204,6 +1278,27 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el flujo borrador/final del Bloque 4: ${error.message}`);
+  }
+
+  try {
+    const aiGeneration = aiGenerationResilienceCheck();
+    if (
+      !aiGeneration.runSchema ||
+      !aiGeneration.humanProtection ||
+      !aiGeneration.retryPolicy ||
+      !aiGeneration.fallback ||
+      !aiGeneration.reviewerBlocks ||
+      !aiGeneration.reviewStatus ||
+      !aiGeneration.documentMemory ||
+      !aiGeneration.partialResume ||
+      !aiGeneration.ipc ||
+      !aiGeneration.bridge ||
+      !aiGeneration.ui
+    ) {
+      errors.push("La resiliencia de generación IA del Bloque 6 no superó la validación interna: " + JSON.stringify(aiGeneration));
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la generación IA del Bloque 6: ${error.message}`);
   }
 
   try {
