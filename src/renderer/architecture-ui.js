@@ -293,7 +293,8 @@
 
   function engineCard(engine) {
     const instance = instanceForEngine(engine.engineId);
-    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : ""].filter(Boolean).join(" · ");
+    const outlineLabel = engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base";
+    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : "", outlineLabel].filter(Boolean).join(" · ");
     if (instance) {
       const lifecycleLabel = instance.engineState === "migration_pending"
         ? "Migración pendiente"
