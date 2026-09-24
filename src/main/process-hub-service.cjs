@@ -257,6 +257,7 @@ function ensureSchema(db) {
   ensureColumn(db, "document_instances_v3", "engine_schema_hash", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "document_instances_v3", "migration_revision", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "document_instances_v3", "last_migrated_at", "TEXT");
+  ensureColumn(db, "document_instances_v3", "migration_pending", "INTEGER NOT NULL DEFAULT 0");
 }
 
 function dbFor(userDataPath) {
@@ -660,7 +661,7 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
     const migrationReviewKeys = Array.from(new Set(
       plan.structuralChange
         ? [].concat(plan.added, plan.reactivated, plan.updated)
-        : (versionChanged || definitionChanged)
+        : definitionChanged
           ? plan.target.map((sectionItem) => sectionItem.key)
           : []
     ));
@@ -677,7 +678,8 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
     db.prepare(`
       UPDATE document_instances_v3
       SET document_id = ?, label = ?, engine_version = ?, engine_schema_hash = ?, migration_revision = ?, last_migrated_at = ?,
-          stale = ?, stale_reason = ?, updated_at = ?
+          migration_pending = CASE WHEN ? THEN 1 ELSE migration_pending END,
+          updated_at = ?
       WHERE id = ?
     `).run(
       engine.documentId || instanceRow.document_id,
@@ -686,10 +688,7 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
       nextHash,
       nextRevision,
       ts,
-      structuralImpact ? 1 : Number(instanceRow.stale || 0),
-      structuralImpact
-        ? `El motor documental se actualizó de ${previousVersion || "sin versión"} a ${nextVersion || "sin versión"}.`
-        : String(instanceRow.stale_reason || ""),
+      structuralImpact ? 1 : 0,
       ts,
       instanceId
     );
@@ -879,9 +878,14 @@ function getDocumentInstance(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
   if (!row) return null;
-  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const frozenSnapshot = json(row.frozen_snapshot_json, null);
+  const liveSections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const sections = row.final_frozen_at && frozenSnapshot && Array.isArray(frozenSnapshot.sections)
+    ? frozenSnapshot.sections
+    : liveSections;
   const archivedSectionCount = db.prepare("SELECT COUNT(*) AS total FROM document_sections_v3 WHERE instance_id = ? AND active = 0").get(instanceId).total;
   const engine = registry.getEngine(row.engine_id);
+  const migrationPending = Boolean(row.migration_pending) || (!row.final_frozen_at && liveSections.some((sectionItem) => sectionItem.status === "migration_pending"));
   return {
     id: row.id,
     dossierId: row.dossier_id,
@@ -893,12 +897,13 @@ function getDocumentInstance(userDataPath, instanceId) {
     currentEngineSchemaHash: engine ? engineSchema.engineDefinitionHash(engine) : "",
     migrationRevision: Number(row.migration_revision || 0),
     lastMigratedAt: row.last_migrated_at || null,
+    migrationPending,
     archivedSectionCount: Number(archivedSectionCount || 0),
     engineState: row.final_frozen_at
       ? ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
         ? "frozen_historical"
         : "frozen_current")
-      : ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
+      : (migrationPending || (engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
         ? "migration_pending"
         : "current"),
     engine,
@@ -906,10 +911,13 @@ function getDocumentInstance(userDataPath, instanceId) {
     scopeKey: row.scope_key,
     label: row.label,
     status: row.status,
-    stale: Boolean(row.stale),
-    staleReason: row.stale_reason || "",
+    stale: Boolean(row.stale) || migrationPending,
+    staleReason: [
+      row.stale_reason || "",
+      migrationPending ? "La migración del motor tiene secciones pendientes de revisión." : ""
+    ].filter(Boolean).join(" · "),
     finalFrozenAt: row.final_frozen_at,
-    frozenSnapshot: json(row.frozen_snapshot_json, null),
+    frozenSnapshot,
     projectId: row.project_id || "",
     sections,
     createdAt: row.created_at,
@@ -941,24 +949,12 @@ function refreshInstanceAfterContentChange(db, instanceId, ts) {
     WHERE instance_id = ? AND active = 1 AND status = 'migration_pending'
   `).get(instanceId).total || 0);
 
-  if (pending > 0) {
-    db.prepare(`
-      UPDATE document_instances_v3
-      SET status = 'draft', stale = 1,
-          stale_reason = CASE
-            WHEN stale_reason = '' THEN 'La migración del motor todavía tiene secciones pendientes de revisión.'
-            ELSE stale_reason
-          END,
-          updated_at = ?
-      WHERE id = ?
-    `).run(ts, instanceId);
-  } else {
-    db.prepare(`
-      UPDATE document_instances_v3
-      SET status = 'draft', stale = 0, stale_reason = '', updated_at = ?
-      WHERE id = ?
-    `).run(ts, instanceId);
-  }
+  db.prepare(`
+    UPDATE document_instances_v3
+    SET status = 'draft', migration_pending = ?, updated_at = ?
+    WHERE id = ?
+  `).run(pending > 0 ? 1 : 0, ts, instanceId);
+
   return pending;
 }
 
@@ -1110,7 +1106,7 @@ function freezeFinal(userDataPath, instanceId) {
   const ts = snapshot.frozenAt;
   db.prepare(`
     UPDATE document_instances_v3
-    SET status = 'final', final_frozen_at = ?, frozen_snapshot_json = ?, stale = 0, stale_reason = '', updated_at = ?
+    SET status = 'final', final_frozen_at = ?, frozen_snapshot_json = ?, migration_pending = 0, stale = 0, stale_reason = '', updated_at = ?
     WHERE id = ?
   `).run(ts, JSON.stringify(snapshot), ts, instanceId);
   audit(db, { dossierId: instance.dossierId, instanceId, entityType: "document_instance", entityId: instanceId, action: "freeze_final", detail: { engineVersion: instance.engineVersion } });
@@ -1127,7 +1123,10 @@ function createWorkingCopy(userDataPath, instanceId) {
   const targetKeys = new Set(copy.sections.map((sectionItem) => sectionItem.key));
   const copiedKeys = [];
   const skippedHistoricalKeys = [];
-  source.sections.forEach((sectionItem) => {
+  const sourceSections = source.finalFrozenAt && source.frozenSnapshot && Array.isArray(source.frozenSnapshot.sections)
+    ? source.frozenSnapshot.sections
+    : source.sections;
+  sourceSections.forEach((sectionItem) => {
     if (!targetKeys.has(sectionItem.key)) {
       skippedHistoricalKeys.push(sectionItem.key);
       return;

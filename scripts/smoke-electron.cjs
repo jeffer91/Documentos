@@ -586,7 +586,8 @@ async function run() {
     `).run(legacySectionId, instanceV4.id, tsLegacy, tsLegacy);
     db.prepare(`
       UPDATE document_instances_v3
-      SET engine_version = '3.9.0-test', engine_schema_hash = 'legacy-hash'
+      SET engine_version = '3.9.0-test', engine_schema_hash = 'legacy-hash',
+          stale = 1, stale_reason = 'Cambió el dato maestro: prueba smoke'
       WHERE id = ?
     `).run(instanceV4.id);
 
@@ -602,7 +603,8 @@ async function run() {
     assert.strictEqual(migratedRow.engine_version, "4.1.0-test");
     assert.ok(migratedRow.engine_schema_hash && migratedRow.engine_schema_hash !== "legacy-hash");
     assert.strictEqual(Number(migratedRow.migration_revision), 1);
-    assert.strictEqual(Number(migratedRow.stale), 1);
+    assert.strictEqual(Number(migratedRow.migration_pending), 1);
+    assert.strictEqual(Number(migratedRow.stale), 1, "El stale previo de datos debe conservarse.");
 
     let migratedInstance = processHub.getDocumentInstance(temp, instanceV4.id);
     assert.ok(migratedInstance.sections.some((item) => item.key === "NUEVA_SMOKE"));
@@ -618,7 +620,11 @@ async function run() {
       status: "edited"
     });
     assert.strictEqual(migratedInstance.sections.some((item) => item.status === "migration_pending"), false);
-    assert.strictEqual(migratedInstance.stale, false);
+    assert.strictEqual(migratedInstance.migrationPending, false);
+    assert.strictEqual(migratedInstance.stale, true, "Resolver la migración no debe borrar un stale ajeno al motor.");
+    assert.ok(migratedInstance.staleReason.includes("Cambió el dato maestro"));
+
+    db.prepare("UPDATE document_instances_v3 SET stale = 0, stale_reason = '' WHERE id = ?").run(instanceV4.id);
 
     const archivedAfterOne = processHub.listArchivedSections(temp, instanceV4.id);
     assert.ok(archivedAfterOne.some((item) => item.key === "LEGACY_SMOKE" && item.content.includes("Contenido histórico")));
@@ -652,10 +658,36 @@ async function run() {
     assert.strictEqual(migratedInstance.stale, true);
     assert.strictEqual(processHub.listEngineMigrations(temp, instanceV4.id).length, 2);
 
+    // Un cambio solo de versión no obliga a revisar contenido si el esquema y reglas no cambiaron.
+    const versionOnlyInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
+      type: "period_population",
+      key: "regular-version-only"
+    });
+    const versionOnlyEngine = Object.assign({}, currentEngine, { version: "4.0.1-smoke" });
+    const versionOnlyMigration = processHub.synchronizeEngineInstance(temp, versionOnlyInstance.id, versionOnlyEngine);
+    assert.strictEqual(versionOnlyMigration.migrated, true);
+    const versionOnlyReloaded = processHub.getDocumentInstance(temp, versionOnlyInstance.id);
+    assert.strictEqual(versionOnlyReloaded.engineVersion, "4.0.1-smoke");
+    assert.strictEqual(versionOnlyReloaded.migrationPending, false);
+    assert.strictEqual(versionOnlyReloaded.sections.some((item) => item.status === "migration_pending"), false);
+
     // Una final congelada jamás se migra aunque el motor cambie después.
     const frozenAtSmoke = new Date().toISOString();
-    db.prepare("UPDATE document_instances_v3 SET final_frozen_at = ?, status = 'final' WHERE id = ?")
-      .run(frozenAtSmoke, instanceV4.id);
+    const snapshotBeforeFreeze = processHub.getDocumentInstance(temp, instanceV4.id);
+    const frozenSnapshotSmoke = {
+      engineId: snapshotBeforeFreeze.engineId,
+      engineVersion: snapshotBeforeFreeze.engineVersion,
+      engineSchemaHash: snapshotBeforeFreeze.engineSchemaHash,
+      migrationRevision: snapshotBeforeFreeze.migrationRevision,
+      scopeType: snapshotBeforeFreeze.scopeType,
+      scopeKey: snapshotBeforeFreeze.scopeKey,
+      sections: snapshotBeforeFreeze.sections,
+      frozenAt: frozenAtSmoke
+    };
+    db.prepare("UPDATE document_instances_v3 SET final_frozen_at = ?, frozen_snapshot_json = ?, status = 'final' WHERE id = ?")
+      .run(frozenAtSmoke, JSON.stringify(frozenSnapshotSmoke), instanceV4.id);
+    db.prepare("UPDATE document_sections_v3 SET content = 'MUTACIÓN LIVE QUE NO DEBE VERSE' WHERE instance_id = ? AND section_key = 'INTRODUCCION'")
+      .run(instanceV4.id);
     const futureEngine = Object.assign({}, reintroducedEngine, {
       version: "5.0.0-test",
       sections: (reintroducedEngine.sections || []).filter((item) => item.key !== "NUEVA_SMOKE")
@@ -667,6 +699,10 @@ async function run() {
     assert.strictEqual(migratedRow.engine_version, "4.2.0-test");
     assert.strictEqual(Number(migratedRow.migration_revision), 2);
     assert.strictEqual(processHub.listEngineMigrations(temp, instanceV4.id).length, 2);
+    const frozenVisible = processHub.getDocumentInstance(temp, instanceV4.id);
+    const frozenIntro = frozenVisible.sections.find((item) => item.key === "INTRODUCCION");
+    assert.ok(frozenIntro);
+    assert.notStrictEqual(frozenIntro.content, "MUTACIÓN LIVE QUE NO DEBE VERSE");
 
     const instanceBlocksV4 = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
       type: "period_population",
