@@ -1457,6 +1457,136 @@ async function run() {
     assert.ok(!finalApaHtml.includes("[[CITE:APA:USED]]"));
     assert.ok(finalApaHtml.includes("Nexum Tec, 2026"));
 
+    // Nuevo Bloque 4: las alertas quedan en trazabilidad, pero no bloquean ni ensucian la final.
+    let alertFlowInstance = processHub.ensureDocumentInstance(
+      temp,
+      dossierV4.id,
+      "tit.regular.comunicado-complexivo",
+      { type: "period", key: "alert-final-smoke" }
+    );
+    for (const sectionItem of alertFlowInstance.sections) {
+      alertFlowInstance = processHub.updateSection(temp, alertFlowInstance.id, sectionItem.key, {
+        content: `Contenido sustantivo validado para ${sectionItem.title}. Este texto debe permanecer igual en borrador y final.`,
+        status: "edited",
+        alerts: sectionItem.key === "ANTECEDENTE"
+          ? [{
+              type: "inferred",
+              severity: "warning",
+              message: "Dato inferido pendiente de confirmación humana.",
+              blocking: true
+            }]
+          : []
+      });
+    }
+
+    const alertBlockResult = processHub.setSectionBlocks(temp, alertFlowInstance.id, "INFORMACION", [{
+      key: "info-alert-block",
+      type: "prose",
+      role: "body",
+      text: "Información comunicada con contenido sustantivo que debe permanecer visible en la versión final.",
+      alerts: [{
+        type: "simulated",
+        severity: "error",
+        message: "Dato simulado utilizado únicamente para revisión del borrador.",
+        blocking: true
+      }]
+    }]);
+    assert.strictEqual(alertBlockResult.validation.ok, true);
+    alertFlowInstance = processHub.getDocumentInstance(temp, alertFlowInstance.id);
+    assert.strictEqual(alertFlowInstance.alertTrace.summary.total, 2);
+    assert.strictEqual(alertFlowInstance.alertTrace.summary.sectionAlerts, 1);
+    assert.strictEqual(alertFlowInstance.alertTrace.summary.blockAlerts, 1);
+    assert.strictEqual(alertFlowInstance.alertTrace.summary.legacyBlockingFlags, 2);
+
+    const draftAlertExport = draftExport.exportInstance(
+      temp,
+      alertFlowInstance.id,
+      { final: false, includeAlerts: true, formats: ["html"] },
+      path.join(__dirname, "..")
+    );
+    const draftAlertHtml = fs.readFileSync(
+      draftAlertExport.outputs.find((item) => item.type === "html").path,
+      "utf8"
+    );
+    assert.ok(draftAlertHtml.includes("Alertas del borrador"));
+    assert.ok(draftAlertHtml.includes("Dato inferido pendiente de confirmación humana."));
+    assert.ok(draftAlertHtml.includes("Dato simulado utilizado únicamente para revisión del borrador."));
+    assert.ok(draftAlertHtml.includes("info-alert-block"));
+
+    const frozenWithAlerts = processHub.freezeFinal(temp, alertFlowInstance.id);
+    assert.ok(frozenWithAlerts.finalFrozenAt);
+    assert.strictEqual(frozenWithAlerts.status, "final");
+    assert.ok(frozenWithAlerts.frozenSnapshot.alertTrace);
+    assert.strictEqual(frozenWithAlerts.frozenSnapshot.alertTrace.policy, "trace_only");
+    assert.strictEqual(frozenWithAlerts.frozenSnapshot.alertTrace.frozenWithUnresolvedAlerts, true);
+    assert.strictEqual(frozenWithAlerts.frozenSnapshot.alertTrace.summary.total, 2);
+    assert.strictEqual(frozenWithAlerts.frozenSnapshot.alertTrace.summary.legacyBlockingFlags, 2);
+    assert.strictEqual(frozenWithAlerts.alertTrace.summary.total, 2);
+
+    const freezeAuditRow = db.prepare(`
+      SELECT detail_json FROM audit_events_v3
+      WHERE instance_id = ? AND action = 'freeze_final'
+      ORDER BY created_at DESC LIMIT 1
+    `).get(frozenWithAlerts.id);
+    assert.ok(freezeAuditRow);
+    const freezeAudit = JSON.parse(freezeAuditRow.detail_json || "{}");
+    assert.strictEqual(freezeAudit.alertsDidNotBlockFinal, true);
+    assert.strictEqual(freezeAudit.alertSummary.total, 2);
+
+    const finalAlertExport = draftExport.exportInstance(
+      temp,
+      frozenWithAlerts.id,
+      { final: true, includeAlerts: false, formats: ["html"] },
+      path.join(__dirname, "..")
+    );
+    const finalAlertHtml = fs.readFileSync(
+      finalAlertExport.outputs.find((item) => item.type === "html").path,
+      "utf8"
+    );
+    assert.ok(finalAlertHtml.includes("VERSIÓN FINAL"));
+    assert.ok(finalAlertHtml.includes("Contenido sustantivo validado para Antecedente"));
+    assert.ok(finalAlertHtml.includes("Información comunicada con contenido sustantivo"));
+    assert.ok(!finalAlertHtml.includes("Alertas del borrador"));
+    assert.ok(!finalAlertHtml.includes("Dato inferido pendiente de confirmación humana."));
+    assert.ok(!finalAlertHtml.includes("Dato simulado utilizado únicamente para revisión del borrador."));
+    assert.ok(!finalAlertHtml.includes("info-alert-block"));
+
+    // Mutar la fila viva después del congelado no altera la trazabilidad final.
+    db.prepare(`
+      UPDATE document_sections_v3
+      SET alerts_json = '[{"type":"mutated","severity":"error","message":"ALERTA LIVE MUTADA","blocking":true}]'
+      WHERE instance_id = ? AND section_key = 'ANTECEDENTE'
+    `).run(frozenWithAlerts.id);
+    const frozenAfterAlertMutation = processHub.getDocumentInstance(temp, frozenWithAlerts.id);
+    assert.strictEqual(frozenAfterAlertMutation.alertTrace.summary.total, 2);
+    assert.ok(!frozenAfterAlertMutation.alertTrace.items.some((item) => item.message === "ALERTA LIVE MUTADA"));
+
+    const alertWorkingCopy = processHub.createWorkingCopy(temp, frozenWithAlerts.id);
+    assert.strictEqual(alertWorkingCopy.finalFrozenAt, null);
+    assert.strictEqual(alertWorkingCopy.status, "draft");
+    assert.strictEqual(alertWorkingCopy.alertTrace.summary.total, 2);
+    assert.ok(alertWorkingCopy.sections.some((item) =>
+      (item.alerts || []).some((alert) => alert.message === "Dato inferido pendiente de confirmación humana.")
+    ));
+    assert.ok(alertWorkingCopy.sections.some((item) =>
+      (item.blocks || []).some((itemBlock) =>
+        (itemBlock.alerts || []).some((alert) => alert.message === "Dato simulado utilizado únicamente para revisión del borrador.")
+      )
+    ));
+
+    const workingCopyDraftExport = draftExport.exportInstance(
+      temp,
+      alertWorkingCopy.id,
+      { final: false, includeAlerts: true, formats: ["html"] },
+      path.join(__dirname, "..")
+    );
+    const workingCopyDraftHtml = fs.readFileSync(
+      workingCopyDraftExport.outputs.find((item) => item.type === "html").path,
+      "utf8"
+    );
+    assert.ok(workingCopyDraftHtml.includes("Dato inferido pendiente de confirmación humana."));
+    assert.ok(workingCopyDraftHtml.includes("Dato simulado utilizado únicamente para revisión del borrador."));
+
     errorService.record(temp, {
       module: "smoke",
       action: "test",

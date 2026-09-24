@@ -4,6 +4,7 @@ const registry = require("./document-engine-registry.cjs");
 const editorial = require("./editorial-structure-service.cjs");
 const citations = require("./citation-service.cjs");
 const engineSchema = require("./engine-schema-service.cjs");
+const alertPolicy = require("./alert-policy-service.cjs");
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -921,6 +922,9 @@ function getDocumentInstance(userDataPath, instanceId) {
     ].filter(Boolean).join(" · "),
     finalFrozenAt: row.final_frozen_at,
     frozenSnapshot,
+    alertTrace: row.final_frozen_at && frozenSnapshot && frozenSnapshot.alertTrace
+      ? frozenSnapshot.alertTrace
+      : alertPolicy.trace({ sections }),
     projectId: row.project_id || "",
     sections,
     createdAt: row.created_at,
@@ -1093,8 +1097,9 @@ function freezeFinal(userDataPath, instanceId) {
     const details = citationResolution.missing.concat(citationResolution.incomplete).slice(0, 6).join(", ");
     throw new Error(`Completa las citas APA antes de aprobar la versión final: ${details}`);
   }
-  const pendingAlerts = instance.sections.flatMap((sectionItem) => sectionItem.alerts || []).filter((alert) => alert && alert.blocking !== false);
-  if (pendingAlerts.length) throw new Error("El borrador todavía tiene alertas pendientes.");
+  // Las alertas son trazabilidad de revisión y nunca bloquean la final.
+  // Los bloqueos reales se validan arriba: migración, estructura editorial y citas APA.
+  const alertTrace = alertPolicy.trace(instance);
   const snapshot = {
     engineId: instance.engineId,
     engineVersion: instance.engineVersion,
@@ -1109,6 +1114,10 @@ function freezeFinal(userDataPath, instanceId) {
       citations: citationResolution.citations,
       references: citationResolution.references
     },
+    alertTrace: Object.assign({}, alertTrace, {
+      policy: "trace_only",
+      frozenWithUnresolvedAlerts: alertTrace.summary.total > 0
+    }),
     frozenAt: now()
   };
   const ts = snapshot.frozenAt;
@@ -1126,7 +1135,9 @@ function freezeFinal(userDataPath, instanceId) {
     detail: {
       engineVersion: instance.engineVersion,
       citationKeys: citationResolution.keys,
-      referenceCount: citationResolution.references.length
+      referenceCount: citationResolution.references.length,
+      alertSummary: alertTrace.summary,
+      alertsDidNotBlockFinal: true
     }
   });
   markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Se aprobó una nueva versión final de ${instance.label}`);
@@ -1165,7 +1176,22 @@ function createWorkingCopy(userDataPath, instanceId) {
     });
     copiedKeys.push(sectionItem.key);
   });
-  audit(db, { dossierId: source.dossierId, instanceId: copy.id, entityType: "document_instance", entityId: copy.id, action: "working_copy", detail: { sourceInstanceId: instanceId, sourceEngineVersion: source.engineVersion, targetEngineVersion: copy.engineVersion, copiedKeys, skippedHistoricalKeys } });
+  const copiedAlertTrace = alertPolicy.trace(getDocumentInstance(userDataPath, copy.id));
+  audit(db, {
+    dossierId: source.dossierId,
+    instanceId: copy.id,
+    entityType: "document_instance",
+    entityId: copy.id,
+    action: "working_copy",
+    detail: {
+      sourceInstanceId: instanceId,
+      sourceEngineVersion: source.engineVersion,
+      targetEngineVersion: copy.engineVersion,
+      copiedKeys,
+      skippedHistoricalKeys,
+      copiedAlertCount: copiedAlertTrace.summary.total
+    }
+  });
   return getDocumentInstance(userDataPath, copy.id);
 }
 

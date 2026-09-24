@@ -1215,3 +1215,134 @@ Los bindings iniciales cubren, entre otros:
 - planes individuales.
 
 Estos bindings usan campos canónicos. Cuando se reciban los Excel institucionales reales, el trabajo restante es confirmar el mapeo y, si corresponde, afinar reglas específicas sin rediseñar la arquitectura.
+
+
+## Bloque 4 nuevo · Borrador, final y alertas
+
+Las alertas del motor documental son **trazabilidad de revisión**. No son un mecanismo de bloqueo de la versión final.
+
+### Política
+
+El flujo es:
+
+```text
+BORRADOR
+  → contenido
+  → alertas visibles
+  → revisión humana / IA
+
+FINAL
+  → mismo contenido sustantivo congelado
+  → alertas ocultas del documento
+  → trazabilidad interna conservada
+```
+
+Una alerta puede indicar, por ejemplo:
+
+- información inferida;
+- dato simulado;
+- fuente pendiente;
+- observación de revisor;
+- advertencia de privacidad;
+- problema detectado durante la generación.
+
+Aunque un registro histórico tenga `blocking: true`, esa bandera se conserva únicamente como dato de trazabilidad. **No impide congelar la final.**
+
+### Qué sí puede impedir una final
+
+La aprobación final puede detenerse por condiciones estructurales reales:
+
+- migración de motor pendiente;
+- estructura editorial inválida;
+- sección obligatoria vacía;
+- tabla/figura estructuralmente inválida;
+- citas APA usadas pero incompletas o inexistentes.
+
+Esto es independiente de las alertas de revisión.
+
+### Trazabilidad congelada
+
+Al congelar una final se guarda un `alertTrace` dentro del snapshot:
+
+```text
+alertTrace
+  ├── summary
+  │   ├── total
+  │   ├── bySeverity
+  │   ├── byType
+  │   ├── sectionAlerts
+  │   ├── blockAlerts
+  │   └── legacyBlockingFlags
+  └── items
+      ├── sectionKey
+      ├── blockKey
+      ├── type
+      ├── severity
+      ├── message
+      └── blocking histórico
+```
+
+La política registrada es:
+
+```text
+finalizationPolicy = trace_only
+```
+
+### Alertas de bloque
+
+El borrador ya no muestra únicamente alertas a nivel de sección.
+
+También incluye alertas pertenecientes a:
+
+- tablas;
+- imágenes;
+- figuras;
+- visuales;
+- párrafos estructurados;
+- otros bloques documentales.
+
+La ubicación del bloque queda registrada en la alerta.
+
+### Final visible
+
+El HTML/DOCX/PDF final no renderiza:
+
+- paneles de alertas;
+- mensajes de advertencia internos;
+- marcas visuales de revisión.
+
+La información sigue disponible en el snapshot y en auditoría.
+
+### Inmutabilidad
+
+Una vez congelada la final:
+
+- modificar alertas vivas en la base no cambia la final;
+- cambiar el motor no cambia la final;
+- cambiar datos maestros no cambia la final;
+- cambiar referencias vivas no cambia la final.
+
+La final usa su propio snapshot.
+
+### Nueva versión de trabajo
+
+Al crear una copia de trabajo desde una final:
+
+- se copia el contenido congelado;
+- se recuperan las alertas congeladas;
+- las secciones quedan desbloqueadas;
+- las alertas vuelven a ser visibles en el borrador;
+- la copia puede corregirse y generar una nueva final.
+
+Así la trazabilidad no desaparece al continuar el proceso.
+
+### Auditoría de exportación
+
+Cada exportación registra por separado:
+
+```text
+alertSummary
+alertsVisible
+```
+
+Por tanto, se puede demostrar que una final tenía alertas internas congeladas aunque ninguna aparezca en el archivo entregado.
