@@ -1,5 +1,81 @@
 const { openDatabase } = require("./database-service.cjs");
 
+const SOURCE_TYPES = Object.freeze([
+  { id: "institutional", label: "Documento institucional" },
+  { id: "journal_article", label: "Artículo científico" },
+  { id: "book", label: "Libro" },
+  { id: "book_chapter", label: "Capítulo de libro" },
+  { id: "thesis", label: "Tesis / trabajo académico" },
+  { id: "webpage", label: "Página web" },
+  { id: "report", label: "Informe" },
+  { id: "law", label: "Ley / norma legal" },
+  { id: "regulation", label: "Reglamento" },
+  { id: "resolution", label: "Resolución" },
+  { id: "policy", label: "Política institucional" },
+  { id: "manual", label: "Manual / guía" },
+  { id: "standard", label: "Norma técnica" },
+  { id: "conference_paper", label: "Ponencia / congreso" },
+  { id: "dataset", label: "Conjunto de datos" }
+]);
+
+const SOURCE_TYPE_ALIASES = Object.freeze({
+  article: "journal_article",
+  journal: "journal_article",
+  articulo: "journal_article",
+  book: "book",
+  libro: "book",
+  chapter: "book_chapter",
+  capitulo: "book_chapter",
+  thesis: "thesis",
+  dissertation: "thesis",
+  tesis: "thesis",
+  webpage: "webpage",
+  website: "webpage",
+  web: "webpage",
+  report: "report",
+  informe: "report",
+  institutional_document: "institutional",
+  document: "institutional",
+  legal: "law",
+  legislation: "law",
+  ley: "law",
+  reglamento: "regulation",
+  resolucion: "resolution",
+  politica: "policy",
+  guide: "manual",
+  guia: "manual",
+  norma: "standard",
+  conference: "conference_paper",
+  ponencia: "conference_paper",
+  datos: "dataset"
+});
+
+function clean(value) {
+  return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+}
+
+function normalizedText(value) {
+  return clean(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function normalizeSourceType(value) {
+  const raw = normalizedText(value).replace(/[\s-]+/g, "_");
+  if (SOURCE_TYPE_ALIASES[raw]) return SOURCE_TYPE_ALIASES[raw];
+  return SOURCE_TYPES.some((item) => item.id === raw) ? raw : "institutional";
+}
+
+function sourceTypeOptions() {
+  return SOURCE_TYPES.map((item) => Object.assign({}, item));
+}
+
+function normalizeUrl(value) {
+  return clean(value);
+}
+
+
 function now() { return new Date().toISOString(); }
 function id(prefix) { return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,9)}`; }
 
