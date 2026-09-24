@@ -3,6 +3,7 @@ const { openDatabase, queueSync } = require("./database-service.cjs");
 const registry = require("./document-engine-registry.cjs");
 const editorial = require("./editorial-structure-service.cjs");
 const citations = require("./citation-service.cjs");
+const engineSchema = require("./engine-schema-service.cjs");
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -189,6 +190,25 @@ function ensureSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_document_blocks_v4_order
       ON document_blocks_v4(section_id, block_order);
 
+    CREATE TABLE IF NOT EXISTS engine_migrations_v4 (
+      id TEXT PRIMARY KEY,
+      instance_id TEXT NOT NULL,
+      migration_revision INTEGER NOT NULL,
+      from_version TEXT NOT NULL DEFAULT '',
+      to_version TEXT NOT NULL DEFAULT '',
+      from_schema_hash TEXT NOT NULL DEFAULT '',
+      to_schema_hash TEXT NOT NULL DEFAULT '',
+      actions_json TEXT NOT NULL DEFAULT '{}',
+      before_schema_json TEXT NOT NULL DEFAULT '[]',
+      after_schema_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(instance_id) REFERENCES document_instances_v3(id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_migrations_v4_revision
+      ON engine_migrations_v4(instance_id, migration_revision);
+    CREATE INDEX IF NOT EXISTS idx_engine_migrations_v4_instance
+      ON engine_migrations_v4(instance_id, created_at);
+
     CREATE TABLE IF NOT EXISTS ai_jobs_v3 (
       id TEXT PRIMARY KEY,
       instance_id TEXT NOT NULL,
@@ -229,6 +249,14 @@ function ensureSchema(db) {
   ensureColumn(db, "document_sections_v3", "page_break_before", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "document_sections_v3", "keep_with_next", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "document_sections_v3", "layout_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, "document_sections_v3", "active", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "document_sections_v3", "archived_at", "TEXT");
+  ensureColumn(db, "document_sections_v3", "archived_reason", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_sections_v3", "definition_hash", "TEXT NOT NULL DEFAULT ''");
+
+  ensureColumn(db, "document_instances_v3", "engine_schema_hash", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "document_instances_v3", "migration_revision", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "document_instances_v3", "last_migrated_at", "TEXT");
 }
 
 function dbFor(userDataPath) {
@@ -504,43 +532,241 @@ function listMasterData(userDataPath, dossierId) {
     }));
 }
 
-function ensureSections(db, instanceId, engine) {
-  const ts = now();
-  const sections = editorial.flattenSections(engine.sections || []);
-  const upsert = db.prepare(`
+function sectionLayout(sectionItem) {
+  return {
+    required: sectionItem.required !== false,
+    allowedVisuals: sectionItem.allowedVisuals || [],
+    derivedFrom: sectionItem.derivedFrom || [],
+    maxWords: sectionItem.maxWords || null,
+    compact: Boolean(sectionItem.compact),
+    layout: sectionItem.layout || {}
+  };
+}
+
+function insertSectionDefinition(db, instanceId, sectionItem, ts) {
+  db.prepare(`
     INSERT INTO document_sections_v3
       (id, instance_id, section_key, section_order, title, section_type, status, content, data_json, provenance_json, alerts_json, locked,
-       parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next, layout_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(instance_id, section_key) DO UPDATE SET
-      section_order = excluded.section_order,
-      title = excluded.title,
-      section_type = excluded.section_type,
-      parent_key = excluded.parent_key,
-      section_level = excluded.section_level,
-      sort_path = excluded.sort_path,
-      numbering = excluded.numbering,
-      page_break_before = excluded.page_break_before,
-      keep_with_next = excluded.keep_with_next,
-      layout_json = excluded.layout_json,
-      updated_at = excluded.updated_at
-  `);
-  sections.forEach((sectionItem, index) => {
-    const layout = {
-      required: sectionItem.required !== false,
-      allowedVisuals: sectionItem.allowedVisuals || [],
-      derivedFrom: sectionItem.derivedFrom || [],
-      maxWords: sectionItem.maxWords || null,
-      compact: Boolean(sectionItem.compact),
-      layout: sectionItem.layout || {}
-    };
-    upsert.run(
-      id("section"), instanceId, sectionItem.key, index + 1, sectionItem.title, sectionItem.type,
-      sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
-      sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0, sectionItem.keepWithNext === false ? 0 : 1,
-      JSON.stringify(layout), ts, ts
-    );
+       parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next, layout_json,
+       active, archived_at, archived_reason, definition_hash, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', '', '{}', '{}', '[]', 0, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '', ?, ?, ?)
+  `).run(
+    id("section"), instanceId, sectionItem.key, sectionItem.order || 0, sectionItem.title, sectionItem.type,
+    sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
+    sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0, sectionItem.keepWithNext === false ? 0 : 1,
+    JSON.stringify(sectionLayout(sectionItem)), sectionItem.definitionHash || engineSchema.sectionDefinitionHash(sectionItem),
+    ts, ts
+  );
+}
+
+function initializeSections(db, instanceId, engine) {
+  const ts = now();
+  engineSchema.normalizedEngineSections(engine).forEach((sectionItem) => {
+    insertSectionDefinition(db, instanceId, sectionItem, ts);
   });
+}
+
+function migrationSnapshot(rows) {
+  return (rows || []).map((row) => ({
+    key: row.section_key,
+    title: row.title,
+    type: row.section_type,
+    order: row.section_order,
+    parentKey: row.parent_key || "",
+    level: Number(row.section_level || 1),
+    numbering: row.numbering || "",
+    active: Number(row.active == null ? 1 : row.active) !== 0,
+    definitionHash: row.definition_hash || ""
+  }));
+}
+
+function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
+  const db = dbFor(userDataPath);
+  const instanceRow = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
+  if (!instanceRow) throw new Error("Documento no válido.");
+  if (instanceRow.final_frozen_at) {
+    return {
+      migrated: false,
+      frozen: true,
+      instance: getDocumentInstance(userDataPath, instanceId)
+    };
+  }
+
+  const engine = engineOverride || registry.getEngine(instanceRow.engine_id);
+  if (!engine) throw new Error("Motor documental no válido.");
+
+  const currentRows = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? ORDER BY section_order, id").all(instanceId);
+  const plan = engineSchema.planMigration(currentRows, engine);
+  const nextHash = engineSchema.engineDefinitionHash(engine);
+  const previousHash = String(instanceRow.engine_schema_hash || "");
+  const previousVersion = String(instanceRow.engine_version || "");
+  const nextVersion = String(engine.version || previousVersion || "");
+  const versionChanged = previousVersion !== nextVersion;
+  const definitionChanged = Boolean(previousHash && previousHash !== nextHash);
+  const needsMigration =
+    plan.structuralChange ||
+    versionChanged ||
+    !previousHash ||
+    previousHash !== nextHash;
+
+  if (!needsMigration) {
+    return {
+      migrated: false,
+      frozen: false,
+      plan,
+      instance: getDocumentInstance(userDataPath, instanceId)
+    };
+  }
+
+  const ts = now();
+  const nextRevision = Number(instanceRow.migration_revision || 0) + 1;
+  const beforeSnapshot = migrationSnapshot(currentRows);
+  const migrate = db.transaction(() => {
+    const currentByKey = new Map(currentRows.map((row) => [row.section_key, row]));
+
+    plan.target.forEach((sectionItem) => {
+      const current = currentByKey.get(sectionItem.key);
+      if (!current) {
+        insertSectionDefinition(db, instanceId, sectionItem, ts);
+        return;
+      }
+      db.prepare(`
+        UPDATE document_sections_v3
+        SET section_order = ?, title = ?, section_type = ?,
+            parent_key = ?, section_level = ?, sort_path = ?, numbering = ?,
+            page_break_before = ?, keep_with_next = ?, layout_json = ?,
+            active = 1, archived_at = NULL, archived_reason = '',
+            definition_hash = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        sectionItem.order || 0, sectionItem.title, sectionItem.type,
+        sectionItem.parentKey || "", Number(sectionItem.level || 1), sectionItem.sortPath || "",
+        sectionItem.numbering || "", sectionItem.pageBreakBefore ? 1 : 0,
+        sectionItem.keepWithNext === false ? 0 : 1,
+        JSON.stringify(sectionLayout(sectionItem)),
+        sectionItem.definitionHash || engineSchema.sectionDefinitionHash(sectionItem),
+        ts, current.id
+      );
+    });
+
+    plan.archived.forEach((key) => {
+      db.prepare(`
+        UPDATE document_sections_v3
+        SET active = 0, archived_at = ?, archived_reason = ?, updated_at = ?
+        WHERE instance_id = ? AND section_key = ? AND active = 1
+      `).run(ts, `La sección ya no existe en el motor ${nextVersion}.`, ts, instanceId, key);
+    });
+
+    const migrationReviewKeys = Array.from(new Set(
+      plan.structuralChange
+        ? [].concat(plan.added, plan.reactivated, plan.updated)
+        : (versionChanged || definitionChanged)
+          ? plan.target.map((sectionItem) => sectionItem.key)
+          : []
+    ));
+    if (migrationReviewKeys.length) {
+      const placeholders = migrationReviewKeys.map(() => "?").join(",");
+      db.prepare(`
+        UPDATE document_sections_v3
+        SET status = 'migration_pending', locked = 0, updated_at = ?
+        WHERE instance_id = ? AND active = 1 AND section_key IN (${placeholders})
+      `).run(ts, instanceId, ...migrationReviewKeys);
+    }
+
+    const structuralImpact = migrationReviewKeys.length > 0;
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET document_id = ?, label = ?, engine_version = ?, engine_schema_hash = ?, migration_revision = ?, last_migrated_at = ?,
+          stale = ?, stale_reason = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      engine.documentId || instanceRow.document_id,
+      engine.label || instanceRow.label,
+      nextVersion,
+      nextHash,
+      nextRevision,
+      ts,
+      structuralImpact ? 1 : Number(instanceRow.stale || 0),
+      structuralImpact
+        ? `El motor documental se actualizó de ${previousVersion || "sin versión"} a ${nextVersion || "sin versión"}.`
+        : String(instanceRow.stale_reason || ""),
+      ts,
+      instanceId
+    );
+
+    const afterRows = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? ORDER BY section_order, id").all(instanceId);
+    const actions = {
+      added: plan.added,
+      reactivated: plan.reactivated,
+      updated: plan.updated,
+      archived: plan.archived,
+      reviewRequired: migrationReviewKeys,
+      versionChanged,
+      definitionChanged,
+      baselineEstablished: !previousHash
+    };
+    db.prepare(`
+      INSERT INTO engine_migrations_v4
+        (id, instance_id, migration_revision, from_version, to_version, from_schema_hash, to_schema_hash,
+         actions_json, before_schema_json, after_schema_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id("migration"), instanceId, nextRevision, previousVersion, nextVersion, previousHash, nextHash,
+      JSON.stringify(actions), JSON.stringify(beforeSnapshot), JSON.stringify(migrationSnapshot(afterRows)), ts
+    );
+
+    audit(db, {
+      dossierId: instanceRow.dossier_id,
+      instanceId,
+      entityType: "engine_schema",
+      entityId: instanceRow.engine_id,
+      action: "migrate",
+      detail: {
+        migrationRevision: nextRevision,
+        fromVersion: previousVersion,
+        toVersion: nextVersion,
+        fromSchemaHash: previousHash,
+        toSchemaHash: nextHash,
+        actions
+      }
+    });
+  });
+
+  migrate();
+  return {
+    migrated: true,
+    frozen: false,
+    plan,
+    migrationRevision: nextRevision,
+    instance: getDocumentInstance(userDataPath, instanceId)
+  };
+}
+
+function ensureCurrentDocumentInstance(userDataPath, instanceId) {
+  const db = dbFor(userDataPath);
+  const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
+  if (!row) throw new Error("Documento no válido.");
+  if (!row.final_frozen_at) synchronizeEngineInstance(userDataPath, instanceId);
+  return getDocumentInstance(userDataPath, instanceId);
+}
+
+function listEngineMigrations(userDataPath, instanceId) {
+  return dbFor(userDataPath)
+    .prepare("SELECT * FROM engine_migrations_v4 WHERE instance_id = ? ORDER BY migration_revision DESC")
+    .all(instanceId)
+    .map((row) => ({
+      id: row.id,
+      instanceId: row.instance_id,
+      revision: row.migration_revision,
+      fromVersion: row.from_version,
+      toVersion: row.to_version,
+      fromSchemaHash: row.from_schema_hash,
+      toSchemaHash: row.to_schema_hash,
+      actions: json(row.actions_json, {}),
+      beforeSchema: json(row.before_schema_json, []),
+      afterSchema: json(row.after_schema_json, []),
+      createdAt: row.created_at
+    }));
 }
 
 function ensureDocumentInstance(userDataPath, dossierId, engineId, scope) {
@@ -555,20 +781,34 @@ function ensureDocumentInstance(userDataPath, dossierId, engineId, scope) {
     SELECT * FROM document_instances_v3
     WHERE dossier_id = ? AND engine_id = ? AND scope_type = ? AND scope_key = ?
   `).get(dossierId, engineId, scopeType, scopeKey);
+
   if (!row) {
     const ts = now();
     const instanceId = id("doc");
+    const schemaHash = engineSchema.engineDefinitionHash(engine);
     db.prepare(`
       INSERT INTO document_instances_v3
-        (id, dossier_id, document_id, engine_id, engine_version, scope_type, scope_key, label, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
-    `).run(instanceId, dossierId, engine.documentId, engine.engineId, engine.version, scopeType, scopeKey, engine.label, ts, ts);
-    ensureSections(db, instanceId, engine);
-    audit(db, { dossierId, instanceId, entityType: "document_instance", entityId: instanceId, action: "create", detail: { engineId, scopeType, scopeKey } });
+        (id, dossier_id, document_id, engine_id, engine_version, engine_schema_hash,
+         migration_revision, scope_type, scope_key, label, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'draft', ?, ?)
+    `).run(
+      instanceId, dossierId, engine.documentId, engine.engineId, engine.version, schemaHash,
+      scopeType, scopeKey, engine.label, ts, ts
+    );
+    initializeSections(db, instanceId, engine);
+    audit(db, {
+      dossierId,
+      instanceId,
+      entityType: "document_instance",
+      entityId: instanceId,
+      action: "create",
+      detail: { engineId, engineVersion: engine.version, engineSchemaHash: schemaHash, scopeType, scopeKey }
+    });
     row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
-  } else {
-    ensureSections(db, row.id, engine);
+  } else if (!row.final_frozen_at) {
+    synchronizeEngineInstance(userDataPath, row.id, engine);
   }
+
   return getDocumentInstance(userDataPath, row.id);
 }
 
@@ -626,6 +866,10 @@ function rowToSection(row, db) {
     alerts: json(row.alerts_json, []),
     blocks: db ? listBlocksForSection(db, row.id) : [],
     locked: Boolean(row.locked),
+    active: Number(row.active == null ? 1 : row.active) !== 0,
+    archivedAt: row.archived_at || null,
+    archivedReason: row.archived_reason || "",
+    definitionHash: row.definition_hash || "",
     generatedAt: row.generated_at,
     updatedAt: row.updated_at
   };
@@ -635,7 +879,8 @@ function getDocumentInstance(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const row = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceId);
   if (!row) return null;
-  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const sections = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND active = 1 ORDER BY sort_path, section_order, id").all(instanceId).map((sectionRow) => rowToSection(sectionRow, db));
+  const archivedSectionCount = db.prepare("SELECT COUNT(*) AS total FROM document_sections_v3 WHERE instance_id = ? AND active = 0").get(instanceId).total;
   const engine = registry.getEngine(row.engine_id);
   return {
     id: row.id,
@@ -643,6 +888,19 @@ function getDocumentInstance(userDataPath, instanceId) {
     documentId: row.document_id,
     engineId: row.engine_id,
     engineVersion: row.engine_version,
+    currentEngineVersion: engine ? engine.version : row.engine_version,
+    engineSchemaHash: row.engine_schema_hash || "",
+    currentEngineSchemaHash: engine ? engineSchema.engineDefinitionHash(engine) : "",
+    migrationRevision: Number(row.migration_revision || 0),
+    lastMigratedAt: row.last_migrated_at || null,
+    archivedSectionCount: Number(archivedSectionCount || 0),
+    engineState: row.final_frozen_at
+      ? ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
+        ? "frozen_historical"
+        : "frozen_current")
+      : ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
+        ? "migration_pending"
+        : "current"),
     engine,
     scopeType: row.scope_type,
     scopeKey: row.scope_key,
@@ -663,6 +921,45 @@ function listDocumentInstances(userDataPath, dossierId) {
   const db = dbFor(userDataPath);
   return db.prepare("SELECT id FROM document_instances_v3 WHERE dossier_id = ? ORDER BY created_at DESC").all(dossierId)
     .map((row) => getDocumentInstance(userDataPath, row.id));
+}
+
+function listArchivedSections(userDataPath, instanceId) {
+  const db = dbFor(userDataPath);
+  const exists = db.prepare("SELECT id FROM document_instances_v3 WHERE id = ?").get(instanceId);
+  if (!exists) throw new Error("Documento no válido.");
+  return db.prepare(`
+    SELECT * FROM document_sections_v3
+    WHERE instance_id = ? AND active = 0
+    ORDER BY archived_at DESC, section_order, id
+  `).all(instanceId).map((row) => rowToSection(row, db));
+}
+
+function refreshInstanceAfterContentChange(db, instanceId, ts) {
+  const pending = Number(db.prepare(`
+    SELECT COUNT(*) AS total
+    FROM document_sections_v3
+    WHERE instance_id = ? AND active = 1 AND status = 'migration_pending'
+  `).get(instanceId).total || 0);
+
+  if (pending > 0) {
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET status = 'draft', stale = 1,
+          stale_reason = CASE
+            WHEN stale_reason = '' THEN 'La migración del motor todavía tiene secciones pendientes de revisión.'
+            ELSE stale_reason
+          END,
+          updated_at = ?
+      WHERE id = ?
+    `).run(ts, instanceId);
+  } else {
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET status = 'draft', stale = 0, stale_reason = '', updated_at = ?
+      WHERE id = ?
+    `).run(ts, instanceId);
+  }
+  return pending;
 }
 
 function replaceSectionBlocks(db, sectionId, blocks) {
@@ -709,7 +1006,7 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada.");
-  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ?").get(instanceId, sectionKey);
+  const sectionRow = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1").get(instanceId, sectionKey);
   if (!sectionRow) throw new Error("Sección no válida.");
   const normalized = editorial.normalizeBlocks(blocks || []);
   const validation = editorial.validateSectionBlocks(rowToSection(sectionRow, db), normalized);
@@ -727,7 +1024,7 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
     ts,
     sectionRow.id
   );
-  db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
+  refreshInstanceAfterContentChange(db, instanceId, ts);
   audit(db, {
     dossierId: instance.dossierId,
     instanceId,
@@ -745,7 +1042,7 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada. Crea una nueva versión de trabajo.");
-  const current = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ?").get(instanceId, sectionKey);
+  const current = db.prepare("SELECT * FROM document_sections_v3 WHERE instance_id = ? AND section_key = ? AND active = 1").get(instanceId, sectionKey);
   if (!current) throw new Error("Sección no válida.");
   if (current.locked && patch && patch.force !== true) throw new Error("La sección está aprobada y bloqueada.");
   const ts = now();
@@ -771,7 +1068,7 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
     status === "generated" || status === "reviewed" || status === "approved" ? ts : current.generated_at,
     ts, instanceId, sectionKey
   );
-  db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
+  refreshInstanceAfterContentChange(db, instanceId, ts);
   audit(db, { dossierId: instance.dossierId, instanceId, entityType: "section", entityId: sectionKey, action: "update", detail: { status, locked, alertCount: (alerts || []).length } });
   markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Cambió ${instance.label}: ${sectionKey}`);
   return getDocumentInstance(userDataPath, instanceId);
@@ -781,6 +1078,13 @@ function freezeFinal(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
+  if (instance.engineState === "migration_pending") {
+    throw new Error("El motor documental cambió. Migra el borrador antes de aprobar la versión final.");
+  }
+  const migrationReview = instance.sections.filter((sectionItem) => sectionItem.status === "migration_pending");
+  if (migrationReview.length) {
+    throw new Error(`La migración del motor tiene ${migrationReview.length} sección(es) pendientes de revisión.`);
+  }
   const editorialValidation = editorial.validateDocumentInstance(instance);
   if (!editorialValidation.ok) {
     throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
@@ -795,6 +1099,8 @@ function freezeFinal(userDataPath, instanceId) {
   const snapshot = {
     engineId: instance.engineId,
     engineVersion: instance.engineVersion,
+    engineSchemaHash: instance.engineSchemaHash,
+    migrationRevision: instance.migrationRevision,
     scopeType: instance.scopeType,
     scopeKey: instance.scopeKey,
     masterData: listMasterData(userDataPath, instance.dossierId),
@@ -818,19 +1124,30 @@ function createWorkingCopy(userDataPath, instanceId) {
   if (!source) throw new Error("Documento no válido.");
   const scopeKey = source.scopeKey ? `${source.scopeKey}::rev-${Date.now()}` : `rev-${Date.now()}`;
   const copy = ensureDocumentInstance(userDataPath, source.dossierId, source.engineId, { type: source.scopeType, key: scopeKey });
+  const targetKeys = new Set(copy.sections.map((sectionItem) => sectionItem.key));
+  const copiedKeys = [];
+  const skippedHistoricalKeys = [];
   source.sections.forEach((sectionItem) => {
+    if (!targetKeys.has(sectionItem.key)) {
+      skippedHistoricalKeys.push(sectionItem.key);
+      return;
+    }
     updateSection(userDataPath, copy.id, sectionItem.key, {
       content: sectionItem.content,
       status: sectionItem.status === "approved" ? "edited" : sectionItem.status,
       data: sectionItem.data,
-      provenance: sectionItem.provenance,
+      provenance: Object.assign({}, sectionItem.provenance || {}, {
+        copiedFromInstanceId: source.id,
+        copiedFromEngineVersion: source.engineVersion
+      }),
       alerts: sectionItem.alerts,
       blocks: sectionItem.blocks || [],
       locked: false,
       force: true
     });
+    copiedKeys.push(sectionItem.key);
   });
-  audit(db, { dossierId: source.dossierId, instanceId: copy.id, entityType: "document_instance", entityId: copy.id, action: "working_copy", detail: { sourceInstanceId: instanceId } });
+  audit(db, { dossierId: source.dossierId, instanceId: copy.id, entityType: "document_instance", entityId: copy.id, action: "working_copy", detail: { sourceInstanceId: instanceId, sourceEngineVersion: source.engineVersion, targetEngineVersion: copy.engineVersion, copiedKeys, skippedHistoricalKeys } });
   return getDocumentInstance(userDataPath, copy.id);
 }
 
@@ -915,6 +1232,10 @@ module.exports = {
   ensureDocumentInstance,
   getDocumentInstance,
   listDocumentInstances,
+  listArchivedSections,
+  ensureCurrentDocumentInstance,
+  synchronizeEngineInstance,
+  listEngineMigrations,
   updateSection,
   setSectionBlocks,
   freezeFinal,

@@ -15,6 +15,7 @@ const processHub = require("../src/main/process-hub-service.cjs");
 const editorial = require("../src/main/editorial-structure-service.cjs");
 const visualRenderer = require("../src/main/visual-renderer-service.cjs");
 const citationService = require("../src/main/citation-service.cjs");
+const documentEngineRegistry = require("../src/main/document-engine-registry.cjs");
 const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
 const PizZip = require("pizzip");
 const catalog = require("../src/renderer/catalog.js");
@@ -565,15 +566,120 @@ async function run() {
     assert.ok(instanceV4.sections.some((item) => item.key === "RESUMEN_EJECUTIVO"));
     assert.ok(instanceV4.sections.every((item) => Number(item.level || 0) >= 1));
     assert.ok(instanceV4.sections.filter((item) => item.level === 1).every((item) => item.pageBreakBefore === true));
+    assert.ok(instanceV4.engineSchemaHash, "Las instancias nuevas deben guardar el hash del motor.");
+    assert.strictEqual(instanceV4.migrationRevision, 0);
+    assert.strictEqual(instanceV4.engineState, "current");
 
-    const blockResult = processHub.setSectionBlocks(temp, instanceV4.id, "RESULTADOS", [
+    // Bloque 1: migraciones de motores sin secciones fantasma ni pérdida histórica.
+    const currentEngine = documentEngineRegistry.getEngine("tit.regular.informe-final");
+    const legacySectionId = "section-legacy-smoke";
+    const tsLegacy = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO document_sections_v3
+        (id, instance_id, section_key, section_order, title, section_type, status, content,
+         data_json, provenance_json, alerts_json, locked, generated_at, updated_at, created_at,
+         parent_key, section_level, sort_path, numbering, page_break_before, keep_with_next,
+         layout_json, active, archived_at, archived_reason, definition_hash)
+      VALUES (?, ?, 'LEGACY_SMOKE', 999, 'Sección histórica', 'ai', 'edited', 'Contenido histórico que debe conservarse.',
+              '{}', '{}', '[]', 0, NULL, ?, ?, '', 1, '9999', '99', 1, 1,
+              '{}', 1, NULL, '', 'legacy-definition')
+    `).run(legacySectionId, instanceV4.id, tsLegacy, tsLegacy);
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET engine_version = '3.9.0-test', engine_schema_hash = 'legacy-hash'
+      WHERE id = ?
+    `).run(instanceV4.id);
+
+    const migratedEngine = Object.assign({}, currentEngine, {
+      version: "4.1.0-test",
+      sections: (currentEngine.sections || [])
+        .filter((item) => item.key !== "REFERENCIAS")
+        .concat([{ key: "NUEVA_SMOKE", title: "Nueva sección smoke", type: "ai", required: false, children: [] }])
+    });
+    const migrationOne = processHub.synchronizeEngineInstance(temp, instanceV4.id, migratedEngine);
+    assert.strictEqual(migrationOne.migrated, true);
+    let migratedRow = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceV4.id);
+    assert.strictEqual(migratedRow.engine_version, "4.1.0-test");
+    assert.ok(migratedRow.engine_schema_hash && migratedRow.engine_schema_hash !== "legacy-hash");
+    assert.strictEqual(Number(migratedRow.migration_revision), 1);
+    assert.strictEqual(Number(migratedRow.stale), 1);
+
+    let migratedInstance = processHub.getDocumentInstance(temp, instanceV4.id);
+    assert.ok(migratedInstance.sections.some((item) => item.key === "NUEVA_SMOKE"));
+    assert.ok(!migratedInstance.sections.some((item) => item.key === "LEGACY_SMOKE"));
+    assert.ok(!migratedInstance.sections.some((item) => item.key === "REFERENCIAS"));
+    const migrationPendingOne = migratedInstance.sections.filter((item) => item.status === "migration_pending");
+    assert.ok(migrationPendingOne.some((item) => item.key === "NUEVA_SMOKE"));
+    assert.strictEqual(migratedInstance.stale, true);
+
+    // Revisar una sección no debe perder otras pendientes; al resolver la última, se limpia el stale de migración.
+    migratedInstance = processHub.updateSection(temp, instanceV4.id, "NUEVA_SMOKE", {
+      content: "Contenido revisado de la nueva sección.",
+      status: "edited"
+    });
+    assert.strictEqual(migratedInstance.sections.some((item) => item.status === "migration_pending"), false);
+    assert.strictEqual(migratedInstance.stale, false);
+
+    const archivedAfterOne = processHub.listArchivedSections(temp, instanceV4.id);
+    assert.ok(archivedAfterOne.some((item) => item.key === "LEGACY_SMOKE" && item.content.includes("Contenido histórico")));
+    assert.ok(archivedAfterOne.some((item) => item.key === "REFERENCIAS"));
+
+    const historyOne = processHub.listEngineMigrations(temp, instanceV4.id);
+    assert.strictEqual(historyOne.length, 1);
+    assert.strictEqual(historyOne[0].fromVersion, "3.9.0-test");
+    assert.strictEqual(historyOne[0].toVersion, "4.1.0-test");
+    assert.ok(historyOne[0].actions.added.includes("NUEVA_SMOKE"));
+    assert.ok(historyOne[0].actions.archived.includes("LEGACY_SMOKE"));
+    assert.ok(historyOne[0].actions.archived.includes("REFERENCIAS"));
+
+    const reintroducedEngine = Object.assign({}, migratedEngine, {
+      version: "4.2.0-test",
+      sections: (migratedEngine.sections || []).concat([
+        { key: "LEGACY_SMOKE", title: "Sección histórica reactivada", type: "ai", required: false, children: [] }
+      ])
+    });
+    const migrationTwo = processHub.synchronizeEngineInstance(temp, instanceV4.id, reintroducedEngine);
+    assert.strictEqual(migrationTwo.migrated, true);
+    const reactivatedRow = db.prepare(`
+      SELECT * FROM document_sections_v3
+      WHERE instance_id = ? AND section_key = 'LEGACY_SMOKE'
+    `).get(instanceV4.id);
+    assert.strictEqual(Number(reactivatedRow.active), 1);
+    assert.strictEqual(reactivatedRow.content, "Contenido histórico que debe conservarse.");
+    assert.strictEqual(reactivatedRow.archived_at, null);
+    migratedInstance = processHub.getDocumentInstance(temp, instanceV4.id);
+    assert.ok(migratedInstance.sections.some((item) => item.key === "LEGACY_SMOKE" && item.status === "migration_pending"));
+    assert.strictEqual(migratedInstance.stale, true);
+    assert.strictEqual(processHub.listEngineMigrations(temp, instanceV4.id).length, 2);
+
+    // Una final congelada jamás se migra aunque el motor cambie después.
+    const frozenAtSmoke = new Date().toISOString();
+    db.prepare("UPDATE document_instances_v3 SET final_frozen_at = ?, status = 'final' WHERE id = ?")
+      .run(frozenAtSmoke, instanceV4.id);
+    const futureEngine = Object.assign({}, reintroducedEngine, {
+      version: "5.0.0-test",
+      sections: (reintroducedEngine.sections || []).filter((item) => item.key !== "NUEVA_SMOKE")
+    });
+    const frozenMigration = processHub.synchronizeEngineInstance(temp, instanceV4.id, futureEngine);
+    assert.strictEqual(frozenMigration.migrated, false);
+    assert.strictEqual(frozenMigration.frozen, true);
+    migratedRow = db.prepare("SELECT * FROM document_instances_v3 WHERE id = ?").get(instanceV4.id);
+    assert.strictEqual(migratedRow.engine_version, "4.2.0-test");
+    assert.strictEqual(Number(migratedRow.migration_revision), 2);
+    assert.strictEqual(processHub.listEngineMigrations(temp, instanceV4.id).length, 2);
+
+    const instanceBlocksV4 = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
+      type: "period_population",
+      key: "regular-blocks"
+    });
+    const blockResult = processHub.setSectionBlocks(temp, instanceBlocksV4.id, "RESULTADOS", [
       { type: "prose", role: "context", text: "La tabla siguiente presenta el resultado consolidado del período analizado." },
       { type: "table", title: "Resultado consolidado", data: { headers: ["Indicador", "Porcentaje"], rows: [["Cumplimiento", "85%"]] } },
       { type: "prose", role: "analysis", text: "El porcentaje evidencia un nivel de cumplimiento alto respecto del criterio observado." }
     ]);
     assert.strictEqual(blockResult.validation.ok, true);
-    instanceV4 = processHub.getDocumentInstance(temp, instanceV4.id);
-    const resultsSection = instanceV4.sections.find((item) => item.key === "RESULTADOS");
+    const instanceBlocksReloaded = processHub.getDocumentInstance(temp, instanceBlocksV4.id);
+    const resultsSection = instanceBlocksReloaded.sections.find((item) => item.key === "RESULTADOS");
     assert.strictEqual(resultsSection.blocks.length, 3);
     assert.strictEqual(resultsSection.blocks[1].type, "table");
 

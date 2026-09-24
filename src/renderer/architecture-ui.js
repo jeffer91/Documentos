@@ -270,11 +270,22 @@
     const instance = instanceForEngine(engine.engineId);
     const badges = [engine.cardinality, engine.population !== "all" ? engine.population : ""].filter(Boolean).join(" · ");
     if (instance) {
+      const lifecycleLabel = instance.engineState === "migration_pending"
+        ? "Migración pendiente"
+        : instance.engineState === "frozen_historical"
+          ? "Final histórica"
+          : instance.stale
+            ? "Desactualizado"
+            : instance.status;
+      const lifecycleClass = instance.status === "final" ? "good" : (instance.stale || instance.engineState === "migration_pending") ? "warn" : "";
       return `
-        <article class="arch-engine-card ${instance.stale ? "stale" : ""}">
+        <article class="arch-engine-card ${instance.stale || instance.engineState === "migration_pending" ? "stale" : ""}">
           <div class="arch-card-head">
-            <div><b>${escapeHtml(engine.label)}</b><small>${escapeHtml(badges)}</small></div>
-            <span class="status ${instance.status === "final" ? "good" : instance.stale ? "warn" : ""}">${instance.stale ? "Desactualizado" : escapeHtml(instance.status)}</span>
+            <div>
+              <b>${escapeHtml(engine.label)}</b>
+              <small>${escapeHtml(badges)} · motor guardado v${escapeHtml(instance.engineVersion || "")}</small>
+            </div>
+            <span class="status ${lifecycleClass}">${escapeHtml(lifecycleLabel)}</span>
           </div>
           <button class="secondary" data-arch-action="open-instance" data-id="${escapeHtml(instance.id)}">Abrir motor</button>
         </article>
@@ -451,12 +462,14 @@
       ${editorialErrors.length ? `<div class="notice-warn"><b>Control editorial pendiente</b><span>${escapeHtml(editorialErrors.slice(0,3).join(" · "))}</span></div>` : ""}
       ${!editorialErrors.length && editorialWarnings.length ? `<div class="notice-soft"><b>Observaciones editoriales</b><span>${escapeHtml(editorialWarnings.slice(0,3).join(" · "))}</span></div>` : ""}
       ${citationIssues.length ? `<div class="notice-warn"><b>Citas APA pendientes</b><span>${escapeHtml(citationIssues.slice(0,6).join(", "))}</span></div>` : ""}
+      ${state.instance.engineState === "frozen_historical" ? `<div class="notice-soft"><b>Versión final histórica</b><span>Esta versión permanece congelada con el motor v${escapeHtml(state.instance.engineVersion)}. El motor vigente es v${escapeHtml(state.instance.currentEngineVersion)} y no modificará esta final.</span></div>` : ""}
+      ${state.instance.archivedSectionCount ? `<div class="notice-soft"><b>Historial estructural preservado</b><span>${Number(state.instance.archivedSectionCount)} sección(es) retirada(s) del motor permanecen archivadas y fuera del documento activo.</span></div>` : ""}
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Regenera las secciones no bloqueadas.</span></div>` : ""}
       <div class="arch-dossier-head">
         <div>
           <span class="process-code">${escapeHtml(state.instance.engineId)} · v${escapeHtml(state.instance.engineVersion)}</span>
           <h2>${escapeHtml(state.instance.label)}</h2>
-          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""}</p>
+          <p>${escapeHtml(state.instance.scopeType)}${state.instance.scopeKey ? " · " + escapeHtml(state.instance.scopeKey) : ""} · migraciones: ${Number(state.instance.migrationRevision || 0)}${state.instance.lastMigratedAt ? " · última: " + escapeHtml(String(state.instance.lastMigratedAt).slice(0, 10)) : ""}</p>
         </div>
         <span class="status ${state.instance.status === "final" ? "good" : alerts ? "warn" : ""}">${state.instance.status === "final" ? "Final congelada" : alerts + " alerta(s)"}</span>
       </div>

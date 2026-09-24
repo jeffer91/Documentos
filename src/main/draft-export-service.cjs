@@ -55,7 +55,7 @@ function buildHtml(instance, options, assetDir, citationRows) {
 }
 
 function exportInstance(userDataPath, instanceId, options, appRoot) {
-  const instance = hub.getDocumentInstance(userDataPath, instanceId);
+  const instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   const final = options && options.final === true;
   if (final && !instance.finalFrozenAt) throw new Error("Primero aprueba y congela la versión final.");
