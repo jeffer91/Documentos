@@ -5,6 +5,7 @@ const hub = require("./process-hub-service.cjs");
 const apa7 = require("./apa7-service.cjs");
 const citations = require("./citation-service.cjs");
 const editorial = require("./editorial-structure-service.cjs");
+const alertPolicy = require("./alert-policy-service.cjs");
 const { workspaceRoot } = require("./database-service.cjs");
 
 function commandExists(command) {
@@ -62,6 +63,10 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
   if (final && !instance.finalFrozenAt) throw new Error("Primero aprueba y congela la versión final.");
 
   const validation = editorial.validateDocumentInstance(instance);
+  const alertTrace = instance.alertTrace && instance.alertTrace.summary
+    ? instance.alertTrace
+    : alertPolicy.trace(instance);
+  const alertsVisible = !final && (!options || options.includeAlerts !== false);
   if (final && !validation.ok) {
     throw new Error(`No se puede exportar la versión final: ${validation.errors.slice(0, 4).join(" | ")}`);
   }
@@ -137,7 +142,9 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
       citationSnapshotMode,
       usedCitationKeys: (citationSet.citations || []).map((item) => item.citationKey),
       referenceCount: (citationSet.references || []).length,
-      editorialWarnings: validation.warnings
+      editorialWarnings: validation.warnings,
+      alertSummary: alertTrace.summary,
+      alertsVisible
     }
   });
 
@@ -150,7 +157,9 @@ function exportInstance(userDataPath, instanceId, options, appRoot) {
     missingCitations: rendered.missingCitations,
     citationSnapshotMode,
     usedCitationKeys: (citationSet.citations || []).map((item) => item.citationKey),
-    referenceCount: (citationSet.references || []).length
+    referenceCount: (citationSet.references || []).length,
+    alertSummary: alertTrace.summary,
+    alertsVisible
   };
 }
 
