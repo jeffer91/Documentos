@@ -660,10 +660,12 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
     const structuralImpact = plan.structuralChange || versionChanged || definitionChanged;
     db.prepare(`
       UPDATE document_instances_v3
-      SET engine_version = ?, engine_schema_hash = ?, migration_revision = ?, last_migrated_at = ?,
+      SET document_id = ?, label = ?, engine_version = ?, engine_schema_hash = ?, migration_revision = ?, last_migrated_at = ?,
           stale = ?, stale_reason = ?, updated_at = ?
       WHERE id = ?
     `).run(
+      engine.documentId || instanceRow.document_id,
+      engine.label || instanceRow.label,
       nextVersion,
       nextHash,
       nextRevision,
@@ -839,6 +841,10 @@ function rowToSection(row, db) {
     alerts: json(row.alerts_json, []),
     blocks: db ? listBlocksForSection(db, row.id) : [],
     locked: Boolean(row.locked),
+    active: Number(row.active == null ? 1 : row.active) !== 0,
+    archivedAt: row.archived_at || null,
+    archivedReason: row.archived_reason || "",
+    definitionHash: row.definition_hash || "",
     generatedAt: row.generated_at,
     updatedAt: row.updated_at
   };
@@ -864,7 +870,7 @@ function getDocumentInstance(userDataPath, instanceId) {
     lastMigratedAt: row.last_migrated_at || null,
     archivedSectionCount: Number(archivedSectionCount || 0),
     engineState: row.final_frozen_at
-      ? ((engine && (row.engine_version !== engine.version || (row.engine_schema_hash && row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine))))
+      ? ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
         ? "frozen_historical"
         : "frozen_current")
       : ((engine && (row.engine_version !== engine.version || !row.engine_schema_hash || row.engine_schema_hash !== engineSchema.engineDefinitionHash(engine)))
@@ -890,6 +896,17 @@ function listDocumentInstances(userDataPath, dossierId) {
   const db = dbFor(userDataPath);
   return db.prepare("SELECT id FROM document_instances_v3 WHERE dossier_id = ? ORDER BY created_at DESC").all(dossierId)
     .map((row) => getDocumentInstance(userDataPath, row.id));
+}
+
+function listArchivedSections(userDataPath, instanceId) {
+  const db = dbFor(userDataPath);
+  const exists = db.prepare("SELECT id FROM document_instances_v3 WHERE id = ?").get(instanceId);
+  if (!exists) throw new Error("Documento no válido.");
+  return db.prepare(`
+    SELECT * FROM document_sections_v3
+    WHERE instance_id = ? AND active = 0
+    ORDER BY archived_at DESC, section_order, id
+  `).all(instanceId).map((row) => rowToSection(row, db));
 }
 
 function replaceSectionBlocks(db, sectionId, blocks) {
@@ -1008,6 +1025,9 @@ function freezeFinal(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const instance = getDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
+  if (instance.engineState === "migration_pending") {
+    throw new Error("El motor documental cambió. Migra el borrador antes de aprobar la versión final.");
+  }
   const editorialValidation = editorial.validateDocumentInstance(instance);
   if (!editorialValidation.ok) {
     throw new Error(`El documento no supera el control editorial: ${editorialValidation.errors.slice(0, 4).join(" | ")}`);
@@ -1155,6 +1175,7 @@ module.exports = {
   ensureDocumentInstance,
   getDocumentInstance,
   listDocumentInstances,
+  listArchivedSections,
   synchronizeEngineInstance,
   listEngineMigrations,
   updateSection,
