@@ -219,6 +219,166 @@
     `;
   }
 
+  function processKeyForEngine(engine) {
+    if (!engine) return "";
+    if (engine.family === "titulacion") {
+      if (engine.population === "pvc") return "titulacion_pvc";
+      return "titulacion_regular";
+    }
+    return engine.family || "";
+  }
+
+  function dossierMatchesEngine(dossier, engine) {
+    if (!dossier || !engine) return false;
+    if (engine.family === dossier.processKey) return true;
+    if (engine.family === "titulacion") {
+      return dossier.processKey === "titulacion_regular" || dossier.processKey === "titulacion_pvc";
+    }
+    if (dossier.processKey === "titulacion_regular") {
+      return engine.family === "titulacion_regular" || (engine.family === "titulacion" && engine.population !== "pvc");
+    }
+    if (dossier.processKey === "titulacion_pvc") {
+      return engine.family === "titulacion_pvc" || (engine.family === "titulacion" && engine.population !== "regular");
+    }
+    return false;
+  }
+
+  async function ensureEngineInDossier(engine, dossierId) {
+    await loadDossier(dossierId);
+    let scopeKey = "";
+    const cardinality = engine.cardinality || "period";
+    if (cardinality === "period_population") {
+      scopeKey = state.dossier.population || engine.population || "all";
+    } else if (cardinality !== "period") {
+      scopeKey = window.prompt(`Identificador para ${cardinality}:`, "") || "";
+      if (!scopeKey) return;
+    }
+    const response = await api.ensureDocumentInstance(state.dossier.id, engine.engineId, {
+      type: cardinality,
+      key: scopeKey
+    });
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo abrir el documento.");
+    state.instanceStage = "document";
+    state.currentSectionKey = "";
+    state.sectionRecommendations = {};
+    await renderInstance(response.instance.id);
+  }
+
+  async function openDocument(documentId) {
+    state.currentView = "launcher";
+    state.launchDocumentId = documentId || "";
+    state.instance = null;
+    state.dossier = null;
+    state.sectionRecommendations = {};
+    await loadHome();
+    const engines = (state.engines || []).filter((engine) => engine.documentId === documentId);
+    if (!engines.length) {
+      setHeader("Documento", "Inicio / Documento", true);
+      view().innerHTML = '<div class="empty"><b>Motor no disponible</b>Este documento todavía no tiene un motor documental activo.</div>';
+      return;
+    }
+
+    const directMatches = [];
+    engines.forEach((engine) => {
+      (state.dashboard && state.dashboard.dossiers || []).filter((dossier) => dossierMatchesEngine(dossier, engine))
+        .forEach((dossier) => directMatches.push({ engine, dossier }));
+    });
+    if (engines.length === 1 && directMatches.length === 1) {
+      return ensureEngineInDossier(engines[0], directMatches[0].dossier.id);
+    }
+
+    setHeader(engines[0].label, "Inicio / Seleccionar período", true);
+    const periods = state.dashboard && state.dashboard.periods || [];
+    const dossiers = state.dashboard && state.dashboard.dossiers || [];
+    view().innerHTML = `
+      <div class="document-launcher">
+        <div class="section-head">
+          <div>
+            <h2>¿En qué período vas a trabajar?</h2>
+            <p>El motor documental reemplaza la plantilla Word. Selecciona un expediente existente o crea el del período.</p>
+          </div>
+        </div>
+        ${engines.map((engine) => {
+          const matching = dossiers.filter((dossier) => dossierMatchesEngine(dossier, engine));
+          return `
+            <section class="panel compact launch-engine-group">
+              <div class="panel-title">
+                <div><h3>${escapeHtml(engine.label)}</h3><small>${escapeHtml(engine.engineId)} · ${engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base"}</small></div>
+              </div>
+              ${matching.length ? `
+                <div class="launch-existing-list">
+                  ${matching.map((dossier) => `
+                    <button class="launch-row" type="button" data-arch-action="launch-existing" data-engine-id="${escapeHtml(engine.engineId)}" data-dossier-id="${escapeHtml(dossier.id)}">
+                      <span><b>${escapeHtml(dossier.periodLabel)}</b><small>${escapeHtml(dossier.label)}</small></span><em>Abrir →</em>
+                    </button>
+                  `).join("")}
+                </div>
+              ` : '<div class="notice-soft"><b>Sin expediente todavía</b><span>Puedes crearlo directamente desde uno de los períodos disponibles.</span></div>'}
+              ${periods.length ? `
+                <div class="launch-period-grid">
+                  ${periods.filter((period) => !matching.some((dossier) => dossier.periodId === period.id)).map((period) => `
+                    <button class="ghost" type="button" data-arch-action="launch-period" data-engine-id="${escapeHtml(engine.engineId)}" data-period-id="${escapeHtml(period.id)}">
+                      + ${escapeHtml(period.label)}
+                    </button>
+                  `).join("")}
+                </div>
+              ` : '<button class="primary" type="button" data-arch-action="new-period">+ Crear primer período</button>'}
+            </section>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  async function renderDocuments() {
+    state.currentView = "documents";
+    state.instance = null;
+    state.dossier = null;
+    await loadHome();
+    setHeader("Documentos", "Documentos", false);
+    const instances = state.dashboard && state.dashboard.instances || [];
+    view().innerHTML = `
+      <div class="section-head">
+        <div><h2>Documentos institucionales</h2><p>Borradores y versiones finales creados por los motores documentales.</p></div>
+      </div>
+      ${instances.length ? `<div class="document-instance-list">${instances.map((item) => `
+        <button class="doc-row" type="button" data-arch-action="open-instance" data-id="${escapeHtml(item.id)}">
+          <span class="doc-icon">${item.status === "final" ? "✓" : "▤"}</span>
+          <span class="doc-main">
+            <h3>${escapeHtml(item.label)}</h3>
+            <p>${escapeHtml(item.periodLabel || "")} · ${escapeHtml(item.dossierLabel || "")}</p>
+          </span>
+          <span class="status ${item.status === "final" ? "good" : ""}">${item.status === "final" ? "Final" : "Borrador"}</span>
+        </button>
+      `).join("")}</div>` : '<div class="empty"><b>Sin documentos</b>Crea un documento desde Inicio o desde Procesos.</div>'}
+    `;
+  }
+
+  async function launchPeriod(engineId, periodId) {
+    const engine = (state.engines || []).find((item) => item.engineId === engineId);
+    const period = state.dashboard && (state.dashboard.periods || []).find((item) => item.id === periodId);
+    if (!engine || !period) return;
+    const processKey = processKeyForEngine(engine);
+    const population = engine.population && engine.population !== "all" ? engine.population : "all";
+    const existing = (state.dashboard.dossiers || []).find((dossier) =>
+      dossier.periodId === periodId &&
+      dossierMatchesEngine(dossier, engine) &&
+      (population === "all" || dossier.population === population || dossier.population === "all")
+    );
+    let dossier = existing;
+    if (!dossier) {
+      const response = await api.createDossier({
+        periodId,
+        processKey,
+        population,
+        label: `${engine.family === "formacion" ? "Formación docente" : engine.family === "capacitacion" ? "Capacitación docente" : engine.label} · ${period.label}`
+      });
+      if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el expediente.");
+      dossier = response.dossier;
+    }
+    await ensureEngineInDossier(engine, dossier.id);
+  }
+
   function engineMatchesDossier(engine) {
     if (!state.dossier) return false;
     if (engine.family === state.dossier.processKey) return true;
@@ -1338,6 +1498,12 @@
         return toast("Recomendación de subsecciones actualizada.");
       }
       if (action === "open-current-dossier") return renderDossier(state.dossier.id);
+      if (action === "launch-existing") {
+        const engine = (state.engines || []).find((item) => item.engineId === button.dataset.engineId);
+        if (!engine) return;
+        return ensureEngineInDossier(engine, button.dataset.dossierId);
+      }
+      if (action === "launch-period") return launchPeriod(button.dataset.engineId, button.dataset.periodId);
       if (action === "new-period") return newPeriod();
       if (action === "create-dossier") return createDossier(button);
       if (action === "open-dossier") { state.instance = null; return renderDossier(button.dataset.id); }
@@ -1402,7 +1568,7 @@
       await renderDossier(state.dossier.id);
       return true;
     }
-    if (state.currentView === "dossier") {
+    if (state.currentView === "dossier" || state.currentView === "launcher" || state.currentView === "documents") {
       await renderHome();
       return true;
     }
@@ -1411,6 +1577,8 @@
 
   window.DocumentArchitectureUI = {
     renderHome,
+    renderDocuments,
+    openDocument,
     renderDossier,
     renderInstance,
     refreshCurrent,
