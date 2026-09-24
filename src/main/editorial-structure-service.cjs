@@ -223,7 +223,7 @@ function validateDocumentInstance(instance) {
   sections.forEach((section) => {
     const blocks = normalizeBlocks(section.blocks || []);
     const hasContent = String(section.content || "").trim() || blocks.length;
-    if (section.required !== false && !hasContent && section.status !== "pending") {
+    if (section.required !== false && !hasContent) {
       errors.push(`La sección obligatoria "${section.title}" está vacía.`);
     }
     const result = validateSectionBlocks(section, blocks);
