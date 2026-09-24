@@ -68,7 +68,8 @@
     allowManualEdit: true,
     lockAfterApproval: true,
     regenerateOnDependencyChange: true,
-    pageBreakBefore: true,
+    // null = la jerarquía decide: solo nivel 1 inicia página nueva.
+    pageBreakBefore: null,
     keepWithNext: true,
     allowedVisuals: [],
     children: []
