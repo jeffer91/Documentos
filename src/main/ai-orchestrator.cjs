@@ -801,6 +801,104 @@ async function regenerateStale(userDataPath, instanceId, options) {
   }), "stale");
 }
 
+async function recommendOptionalSections(userDataPath, instanceId, options) {
+  const instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
+  if (!instance) throw new Error("Documento no válido.");
+  const engine = registry.getEngine(instance.engineId);
+  if (!engine) throw new Error("Motor no disponible.");
+
+  const candidates = [].concat(instance.sections || [], instance.omittedSections || [])
+    .filter((section) => section && section.required === false && section.layout && section.layout.aiRecommendation);
+  if (!candidates.length) {
+    return { instanceId, engineId: instance.engineId, recommendations: [] };
+  }
+
+  const set = providerSets(userDataPath);
+  const advisor = set.writer || (set.reviewers || [])[0];
+  if (!advisor) throw new Error("Configura al menos una IA para recomendar subsecciones.");
+
+  const candidateContext = candidates.map((section) => {
+    const readiness = dataReadinessForSection(userDataPath, instance, section);
+    return {
+      key: section.key,
+      numbering: section.numbering,
+      title: section.title,
+      included: section.included !== false,
+      purpose: section.contract && section.contract.purpose || "",
+      availableFields: readiness.availableFields || [],
+      dataStatus: readiness.status || "not_configured",
+      dataReady: Boolean(readiness.ready),
+      warnings: readiness.warnings || []
+    };
+  });
+
+  const db = hub.dbFor(userDataPath);
+  const prompt = [
+    "Decide qué subsecciones opcionales conviene incluir en este documento institucional.",
+    "No inventes datos. Recomienda incluir una subsección solo cuando aporte valor real según los campos disponibles, el propósito y el tipo de documento.",
+    "Si no hay evidencia suficiente para una subsección, recomienda omitirla.",
+    "Devuelve SOLO JSON válido con la forma:",
+    '{"recommendations":[{"key":"...","include":true,"confidence":0.0,"reason":"..."}]}',
+    JSON.stringify({
+      document: { engineId: engine.engineId, label: engine.label },
+      instance: { scopeType: instance.scopeType, scopeKey: instance.scopeKey },
+      candidates: candidateContext,
+      masterData: compactMasterData(hub.listMasterData(userDataPath, instance.dossierId))
+    })
+  ].join("\n\n");
+
+  const result = await callProviderWithRetries(
+    userDataPath,
+    db,
+    advisor,
+    "advisor",
+    instanceId,
+    null,
+    {
+      system: "Eres un asesor de estructura documental. Devuelve únicamente JSON válido.",
+      prompt,
+      maxTokens: options && options.maxTokens || 1800,
+      timeoutMs: options && options.timeoutMs || advisor.config && advisor.config.timeoutMs || 120000,
+      temperature: 0.1,
+      engineId: engine.engineId
+    },
+    options
+  );
+  const parsed = parseJsonObject(result.text);
+  const raw = Array.isArray(parsed && parsed.recommendations) ? parsed.recommendations : [];
+  const allowed = new Map(candidateContext.map((item) => [item.key, item]));
+  const recommendations = raw
+    .filter((item) => item && allowed.has(String(item.key || "")))
+    .map((item) => ({
+      key: String(item.key),
+      include: item.include !== false,
+      confidence: Math.max(0, Math.min(1, Number(item.confidence == null ? 0.5 : item.confidence))),
+      reason: String(item.reason || "").slice(0, 500)
+    }));
+
+  candidateContext.forEach((candidate) => {
+    if (!recommendations.some((item) => item.key === candidate.key)) {
+      recommendations.push({
+        key: candidate.key,
+        include: candidate.dataReady,
+        confidence: candidate.dataReady ? 0.55 : 0.35,
+        reason: candidate.dataReady
+          ? "La subsección dispone de datos compatibles."
+          : "No hay datos suficientes para recomendarla con seguridad."
+      });
+    }
+  });
+
+  return {
+    instanceId,
+    engineId: instance.engineId,
+    providerId: advisor.id,
+    provider: advisor.name,
+    createdAt: now(),
+    recommendations
+  };
+}
+
 function latestGenerationRun(userDataPath, instanceId) {
   return generationRuns.latest(hub.dbFor(userDataPath), instanceId);
 }
@@ -812,6 +910,7 @@ function listGenerationRuns(userDataPath, instanceId, limit) {
 module.exports = {
   dataReadinessForSection,
   instanceDataReadiness,
+  recommendOptionalSections,
   generateSection,
   generateDocument,
   resumeDocument,
