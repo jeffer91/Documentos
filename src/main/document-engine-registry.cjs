@@ -1,6 +1,7 @@
 (function () {
   "use strict";
 
+  const outline = require("./document-outline-service.cjs");
   const VERSION = "4.0.0";
 
   const SELECTED_DOCUMENT_IDS = [
@@ -72,6 +73,7 @@
     pageBreakBefore: null,
     keepWithNext: true,
     allowedVisuals: [],
+    contract: {},
     children: []
   }, options || {});
 
@@ -113,7 +115,9 @@
     ANEXOS: COMMON.annexes,
 
     CARACTERIZACION: section("CARACTERIZACION", "Caracterización del contexto", "data_ai"),
-    NECESIDADES_PRIORIZADAS: section("NECESIDADES_PRIORIZADAS", "Necesidades priorizadas", "derived_ai"),
+    NECESIDADES_PRIORIZADAS: section("NECESIDADES_PRIORIZADAS", "Necesidades priorizadas", "derived_ai", {
+      derivedFrom: ["RESULTADOS", "ANALISIS_RESULTADOS"]
+    }),
     OBJETIVOS: section("OBJETIVOS", "Objetivos", "semi_stable_ai"),
     OBJETIVO: section("OBJETIVO", "Objetivo", "stable_ai"),
     ALCANCE: section("ALCANCE", "Alcance", "semi_stable_ai"),
@@ -121,6 +125,9 @@
     CRONOGRAMA: section("CRONOGRAMA", "Cronograma", "data_table"),
     SEGUIMIENTO: section("SEGUIMIENTO", "Seguimiento y control", "semi_stable_ai"),
     CONSIDERACIONES: section("CONSIDERACIONES", "Consideraciones", "semi_stable_ai"),
+    CONCLUSIONES_PLANIFICACION: section("CONCLUSIONES", "Conclusiones", "derived_ai", {
+      derivedFrom: ["PLANIFICACION", "CRONOGRAMA", "SEGUIMIENTO"]
+    }),
 
     ANTECEDENTES: section("ANTECEDENTES", "Antecedentes", "stable_ai"),
     CRITERIOS: section("CRITERIOS", "Criterios de designación", "semi_stable_ai"),
@@ -134,6 +141,12 @@
 
     ANALISIS_CURRICULAR: section("ANALISIS_CURRICULAR", "Análisis curricular", "data_ai"),
     ACUERDOS: section("ACUERDOS", "Acuerdos y acciones", "data_ai"),
+    CONCLUSIONES_CURRICULAR: section("CONCLUSIONES", "Conclusiones", "derived_ai", {
+      derivedFrom: ["ANALISIS_CURRICULAR", "ACUERDOS"]
+    }),
+    RECOMENDACIONES_CURRICULAR: section("RECOMENDACIONES", "Recomendaciones", "derived_ai", {
+      derivedFrom: ["ANALISIS_CURRICULAR", "ACUERDOS", "CONCLUSIONES"]
+    }),
 
     ANTECEDENTE: section("ANTECEDENTE", "Antecedente", "stable_ai"),
     INFORMACION: section("INFORMACION", "Información comunicada", "data_ai"),
