@@ -315,6 +315,14 @@ function listCitations(userDataPath, dossierId) {
     .map(rowToCitation);
 }
 
+function deactivateCitationBySource(userDataPath, dossierId, sourceId) {
+  const db = dbFor(userDataPath);
+  const result = db.prepare(
+    "UPDATE citations_v4 SET active = 0, updated_at = ? WHERE dossier_id = ? AND source_id = ? AND active = 1"
+  ).run(now(), dossierId, sourceId);
+  return { sourceId, deactivated: Number(result.changes || 0) };
+}
+
 
 function referenceAuthors(citation) {
   const authors = splitAuthors(citation.author, citation.metadata);
@@ -665,6 +673,7 @@ module.exports = {
   getCitation,
   getCitationBySource,
   listCitations,
+  deactivateCitationBySource,
   formatInText,
   formatReference,
   formatReferenceHtml,
