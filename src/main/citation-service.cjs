@@ -315,38 +315,247 @@ function listCitations(userDataPath, dossierId) {
     .map(rowToCitation);
 }
 
-function surname(author) {
-  const raw = String(author || "").trim();
-  if (!raw) return "";
-  if (raw.includes(",")) return raw.split(",")[0].trim();
-  const parts = raw.split(/\s+/);
-  return parts[parts.length - 1];
+
+function referenceAuthors(citation) {
+  const authors = splitAuthors(citation.author, citation.metadata);
+  if (citation.corporateAuthor) return citation.corporateAuthor;
+  if (!authors.length) return "";
+  if (authors.length === 1) return authors[0];
+  if (authors.length <= 20) return authors.slice(0, -1).join(", ") + ", & " + authors[authors.length - 1];
+  return authors.slice(0, 19).join(", ") + ", … " + authors[authors.length - 1];
 }
 
-function displayAuthor(citation) {
-  return citation.corporateAuthor || surname(citation.author) || "Autor no identificado";
+function shortTitle(citation) {
+  return clean(citation && citation.metadata && citation.metadata.shortTitle) ||
+    clean(citation && citation.title).split(/[:.]/)[0].slice(0, 80) ||
+    "Fuente";
+}
+
+function inTextAuthor(citation) {
+  if (citation.corporateAuthor) return citation.corporateAuthor;
+  const authors = splitAuthors(citation.author, citation.metadata);
+  if (authors.length === 1) return surname(authors[0]);
+  if (authors.length === 2) return surname(authors[0]) + " & " + surname(authors[1]);
+  if (authors.length >= 3) return surname(authors[0]) + " et al.";
+  return shortTitle(citation);
+}
+
+function citationYear(citation) {
+  return clean(citation && (citation.displayYear || citation.year)) || "s. f.";
+}
+
+function sameParty(a, b) {
+  return Boolean(normalizedText(a) && normalizedText(a) === normalizedText(b));
+}
+
+function authorSortKey(citation) {
+  return normalizedText(citation.corporateAuthor || referenceAuthors(citation) || shortTitle(citation));
+}
+
+function referenceIdentity(citation) {
+  const doi = normalizeDoi(citation.doi).toLowerCase();
+  if (doi) return "doi:" + doi;
+  const url = normalizeUrl(citation.url).replace(/\/$/, "").toLowerCase();
+  if (url) return "url:" + url;
+  if (citation.sourceId) return "source:" + citation.sourceId;
+  return [
+    normalizeSourceType(citation.sourceType),
+    authorSortKey(citation),
+    normalizedText(citation.year),
+    normalizedText(citation.title)
+  ].join("|");
+}
+
+function prepareCitationSet(citations) {
+  const raw = (citations || []).filter(Boolean).map((item) => Object.assign({}, item, {
+    sourceType: normalizeSourceType(item.sourceType),
+    metadata: Object.assign({}, item.metadata || {})
+  }));
+  const uniqueMap = new Map();
+  raw.forEach((citation) => {
+    const identity = referenceIdentity(citation);
+    if (!uniqueMap.has(identity)) uniqueMap.set(identity, citation);
+  });
+  const unique = Array.from(uniqueMap.values());
+  const groups = new Map();
+  unique.forEach((citation) => {
+    const key = authorSortKey(citation) + "|" + normalizedText(citation.year || "s. f.");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(citation);
+  });
+  const suffixByIdentity = new Map();
+  groups.forEach((items) => {
+    if (items.length < 2) return;
+    items.sort((a, b) => normalizedText(a.title).localeCompare(normalizedText(b.title), "es"));
+    items.forEach((item, index) => suffixByIdentity.set(referenceIdentity(item), String.fromCharCode(97 + index)));
+  });
+  const applySuffix = (citation) => {
+    const suffix = suffixByIdentity.get(referenceIdentity(citation)) || "";
+    const base = clean(citation.year) || "s. f.";
+    return Object.assign({}, citation, { displayYear: suffix ? base + suffix : base });
+  };
+  const tokenCitations = raw.map(applySuffix);
+  const references = unique.map(applySuffix).sort((a, b) =>
+    authorSortKey(a).localeCompare(authorSortKey(b), "es") ||
+    normalizedText(a.displayYear).localeCompare(normalizedText(b.displayYear), "es") ||
+    normalizedText(a.title).localeCompare(normalizedText(b.title), "es")
+  );
+  return { citations: tokenCitations, references };
 }
 
 function formatInText(citation) {
-  if (!citation) return "(fuente pendiente)";
-  return `(${displayAuthor(citation)}, ${citation.year || "s. f."})`;
+  if (!citation) return "(cita pendiente)";
+  return "(" + inTextAuthor(citation) + ", " + citationYear(citation) + ")";
 }
 
 function normalizeDoi(value) {
-  const doi = String(value || "").trim();
+  const doi = clean(value);
   if (!doi) return "";
-  if (/^https?:\/\/doi\.org\//i.test(doi)) return doi;
-  return `https://doi.org/${doi.replace(/^doi:\s*/i, "")}`;
+  if (/^https?:\/\/doi\.org\//i.test(doi)) return doi.replace(/^http:\/\//i, "https://");
+  return "https://doi.org/" + doi.replace(/^doi:\s*/i, "");
+}
+
+function dateForReference(citation, detailed) {
+  const metadata = citation.metadata || {};
+  const raw = clean(metadata.date || metadata.publicationDate);
+  if (!detailed || !raw) return citationYear(citation);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return raw;
+  const months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  return match[1] + ", " + Number(match[3]) + " de " + months[Number(match[2]) - 1];
+}
+
+function locator(citation) {
+  return normalizeDoi(citation.doi) || normalizeUrl(citation.url) || "";
+}
+
+function addPart(parts, text, italic) {
+  const value = String(text == null ? "" : text);
+  if (value) parts.push({ text: value, italic: Boolean(italic) });
+}
+
+function formatReferenceSegments(citation) {
+  if (!citation) return [];
+  const c = Object.assign({}, citation, {
+    sourceType: normalizeSourceType(citation.sourceType),
+    metadata: citation.metadata || {}
+  });
+  const m = c.metadata;
+  const type = c.sourceType;
+  const parts = [];
+  const authors = referenceAuthors(c);
+  const detailedDate = ["webpage", "resolution", "regulation", "conference_paper"].includes(type);
+  const date = dateForReference(c, detailedDate);
+  const publisher = clean(c.publisher || m.publisher);
+  const loc = locator(c);
+
+  if (type === "law") {
+    addPart(parts, c.title, true);
+    const identifiers = [m.legalNumber || m.identifier, m.officialPublication, m.jurisdiction].map(clean).filter(Boolean);
+    if (identifiers.length) addPart(parts, ", " + identifiers.join(", "));
+    addPart(parts, " (" + date + ").");
+    if (loc) addPart(parts, " " + loc);
+    return parts;
+  }
+
+  if (authors) addPart(parts, authors + ". ");
+  else addPart(parts, "Autor no identificado. ");
+  addPart(parts, "(" + date + "). ");
+
+  if (type === "journal_article") {
+    addPart(parts, c.title + ". ");
+    addPart(parts, m.journalTitle, true);
+    if (m.volume) addPart(parts, ", " + m.volume, true);
+    if (m.issue) addPart(parts, "(" + m.issue + ")");
+    if (m.pages) addPart(parts, ", " + m.pages);
+    addPart(parts, ".");
+  } else if (type === "book") {
+    addPart(parts, c.title, true);
+    if (m.edition) addPart(parts, " (" + m.edition + ")");
+    addPart(parts, ".");
+    if (publisher && !sameParty(publisher, authors)) addPart(parts, " " + publisher + ".");
+  } else if (type === "book_chapter") {
+    addPart(parts, c.title + ". ");
+    if (m.editors) addPart(parts, "En " + m.editors + " (Eds.), ");
+    addPart(parts, m.bookTitle || "Libro", true);
+    if (m.pages) addPart(parts, " (pp. " + m.pages + ")");
+    addPart(parts, ".");
+    if (publisher) addPart(parts, " " + publisher + ".");
+  } else if (type === "thesis") {
+    addPart(parts, c.title, true);
+    const thesisType = clean(m.thesisType || "Tesis");
+    const institution = clean(m.institution);
+    addPart(parts, " [" + thesisType + (institution ? ", " + institution : "") + "].");
+    if (m.repository) addPart(parts, " " + m.repository + ".");
+  } else if (type === "webpage") {
+    addPart(parts, c.title, true);
+    addPart(parts, ".");
+    const site = clean(m.siteName);
+    if (site && !sameParty(site, authors)) addPart(parts, " " + site + ".");
+  } else if (type === "report") {
+    addPart(parts, c.title, true);
+    if (m.reportNumber) addPart(parts, " (Informe No. " + m.reportNumber + ")");
+    addPart(parts, ".");
+    if (publisher && !sameParty(publisher, authors)) addPart(parts, " " + publisher + ".");
+  } else if (["institutional", "policy", "manual"].includes(type)) {
+    addPart(parts, c.title, true);
+    const descriptor = clean(m.documentCode || m.identifier || m.version);
+    if (descriptor) addPart(parts, " (" + descriptor + ")");
+    addPart(parts, ".");
+    if (publisher && !sameParty(publisher, authors)) addPart(parts, " " + publisher + ".");
+  } else if (["regulation", "resolution"].includes(type)) {
+    addPart(parts, c.title, true);
+    const identifier = clean(m.identifier || m.resolutionNumber || m.regulationNumber);
+    if (identifier) addPart(parts, " (" + identifier + ")");
+    addPart(parts, ".");
+    if (m.officialPublication) addPart(parts, " " + m.officialPublication + ".");
+  } else if (type === "standard") {
+    addPart(parts, c.title, true);
+    const number = clean(m.standardNumber || m.identifier);
+    if (number) addPart(parts, " (" + number + ")");
+    addPart(parts, ".");
+    if (publisher && !sameParty(publisher, authors)) addPart(parts, " " + publisher + ".");
+  } else if (type === "conference_paper") {
+    addPart(parts, c.title + ". [Ponencia]. " + clean(m.conferenceName));
+    if (m.location) addPart(parts, ", " + m.location);
+    addPart(parts, ".");
+  } else if (type === "dataset") {
+    addPart(parts, c.title, true);
+    addPart(parts, " [Conjunto de datos].");
+    const repository = clean(m.repository || publisher);
+    if (repository && !sameParty(repository, authors)) addPart(parts, " " + repository + ".");
+  } else {
+    addPart(parts, c.title, true);
+    addPart(parts, ".");
+    if (publisher && !sameParty(publisher, authors)) addPart(parts, " " + publisher + ".");
+  }
+
+  if (loc) addPart(parts, " " + loc);
+  return parts;
 }
 
 function formatReference(citation) {
-  if (!citation) return "";
-  const author = citation.corporateAuthor || citation.author || "Autor no identificado";
-  const year = citation.year || "s. f.";
-  const title = citation.title || "Título pendiente";
-  const publisher = citation.publisher ? ` ${citation.publisher}.` : "";
-  const locator = normalizeDoi(citation.doi) || citation.url || "";
-  return `${author}. (${year}). ${title}.${publisher}${locator ? ` ${locator}` : ""}`.replace(/\s+/g, " ").trim();
+  return formatReferenceSegments(citation)
+    .map((item) => item.text)
+    .join("")
+    .replace(/\s+([,.;:)])/g, "$1")
+    .trim();
+}
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatReferenceHtml(citation) {
+  return formatReferenceSegments(citation)
+    .map((item) => item.italic ? "<em>" + escapeHtml(item.text) + "</em>" : escapeHtml(item.text))
+    .join("")
+    .replace(/\s+([,.;:)])/g, "$1")
+    .trim();
 }
 
 function replaceCitationTokens(text, citations) {
