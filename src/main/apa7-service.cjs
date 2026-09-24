@@ -135,20 +135,15 @@ function listHtml(block) {
   return `<ul class="apa-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
 }
 
-function referencesHtml(citations) {
-  const rows = (citations || []).filter((item) => item.active !== false)
-    .sort((a, b) => {
-      const aa = String(a.corporateAuthor || a.author || "").toLowerCase();
-      const bb = String(b.corporateAuthor || b.author || "").toLowerCase();
-      return aa.localeCompare(bb) || String(a.year || "").localeCompare(String(b.year || ""));
-    });
-  if (!rows.length) return '<p class="apa-paragraph">No se registraron referencias para este documento.</p>';
+function referencesHtml(references) {
+  const rows = (references || []).filter((item) => item.active !== false);
+  if (!rows.length) return '<p class="apa-paragraph">No se utilizaron referencias en este documento.</p>';
   return rows.map((citation) =>
-    `<p class="apa-reference">${esc(citationService.formatReference(citation))}</p>`
+    `<p class="apa-reference" data-citation-key="${esc(citation.citationKey || "")}">${citationService.formatReferenceHtml(citation)}</p>`
   ).join("\n");
 }
 
-function renderBlock(block, maps, assetDir, citations) {
+function renderBlock(block, maps, assetDir, citations, references) {
   if (block.type === "prose" || block.type === "quote" || block.type === "callout") {
     return paragraphs(block.text, citations);
   }
@@ -157,22 +152,22 @@ function renderBlock(block, maps, assetDir, citations) {
   if (["figure", "image", "visual"].includes(block.type)) {
     return imageHtml(block, maps.figures.get(block.key) || 1, assetDir, citations);
   }
-  if (block.type === "reference_list") return { html: referencesHtml(citations), missing: [] };
+  if (block.type === "reference_list") return { html: referencesHtml(references), missing: [] };
   return paragraphs(block.text || "", citations);
 }
 
-function sectionHtml(section, maps, assetDir, citations, includeAlerts) {
+function sectionHtml(section, maps, assetDir, citations, references, includeAlerts) {
   const blocks = editorial.normalizeBlocks(section.blocks || []);
   const missing = [];
   let body = "";
   if (blocks.length) {
     blocks.forEach((block) => {
-      const rendered = renderBlock(block, maps, assetDir, citations);
+      const rendered = renderBlock(block, maps, assetDir, citations, references);
       body += rendered.html;
       missing.push(...(rendered.missing || []));
     });
   } else if (section.key === "REFERENCIAS" || section.type === "references") {
-    body = referencesHtml(citations);
+    body = referencesHtml(references);
   } else {
     const rendered = paragraphs(section.content || "", citations);
     body = rendered.html;
@@ -228,6 +223,7 @@ function buildDocumentHtml(instance, options) {
   const opts = options || {};
   const includeAlerts = opts.includeAlerts !== false && !opts.final;
   const citations = Array.isArray(opts.citations) ? opts.citations : [];
+  const references = Array.isArray(opts.references) ? opts.references : citations;
   const assetDir = opts.assetDir;
   if (!assetDir) throw new Error("Falta el directorio de recursos APA.");
   fs.mkdirSync(assetDir, { recursive: true });
@@ -237,7 +233,7 @@ function buildDocumentHtml(instance, options) {
   const maps = blockNumberMaps(instance);
   const missingCitations = [];
   const content = sections.map((section) => {
-    const rendered = sectionHtml(section, maps, assetDir, citations, includeAlerts);
+    const rendered = sectionHtml(section, maps, assetDir, citations, references, includeAlerts);
     missingCitations.push(...rendered.missing);
     return rendered.html;
   }).join("\n");
