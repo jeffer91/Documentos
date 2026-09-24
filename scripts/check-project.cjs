@@ -32,6 +32,7 @@ const REQUIRED_FILES = [
   "src/main/settings-service.cjs",
   "src/main/document-engine-registry.cjs",
   "src/main/document-outline-service.cjs",
+  "src/main/document-data-binding-service.cjs",
   "src/main/process-hub-service.cjs",
   "src/main/engine-schema-service.cjs",
   "src/main/data-ingestion-service.cjs",
@@ -536,6 +537,108 @@ function dataEngineCheck() {
   };
 }
 
+function documentDataBindingCheck() {
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+  const bindings = require(path.join(ROOT, "src/main/document-data-binding-service.cjs"));
+  const ingestion = require(path.join(ROOT, "src/main/data-ingestion-service.cjs"));
+  const aiSource = fs.readFileSync(path.join(ROOT, "src/main/ai-orchestrator.cjs"), "utf8");
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+
+  const report = registry.dataPlanReport();
+  const engines = registry.allEngines();
+  const plagiarismEngine = registry.getEngine("tit.regular.plagio-trabajo");
+  const plagiarismSection = plagiarismEngine.sections.find((item) => item.key === "RESULTADO_ANTIPLAGIO");
+  const plagiarismBinding = plagiarismSection && plagiarismSection.data && plagiarismSection.data.binding;
+
+  const splitAvailability = {
+    hasImports: true,
+    availableFields: ["student_id", "plagiarism_percent"],
+    imports: [
+      { importId: "a", sheets: [{ name: "Estudiantes", canonicalFields: ["student_id"] }] },
+      { importId: "b", sheets: [{ name: "Similitud", canonicalFields: ["plagiarism_percent"] }] }
+    ]
+  };
+  const splitResult = bindings.resolveBinding(
+    plagiarismBinding,
+    { scopeType: "student", scopeKey: "0101" },
+    splitAvailability
+  );
+
+  const compatibleAvailability = {
+    hasImports: true,
+    availableFields: ["student_id", "student_name", "career", "plagiarism_percent", "grade"],
+    imports: [
+      { importId: "notas", sheets: [{ name: "Notas", canonicalFields: ["student_id", "career", "grade"] }] },
+      { importId: "plagio", sheets: [{ name: "Antiplagio", canonicalFields: ["student_id", "student_name", "plagiarism_percent"] }] }
+    ]
+  };
+  const compatibleResult = bindings.resolveBinding(
+    plagiarismBinding,
+    { scopeType: "student", scopeKey: "0101" },
+    compatibleAvailability
+  );
+
+  const resultsBinding = bindings.bindingFor("tit.regular.informe-final", "RESULTADOS");
+  const resultsResult = bindings.resolveBinding(
+    resultsBinding,
+    { scopeType: "period_population", scopeKey: "regular" },
+    compatibleAvailability
+  );
+
+  return {
+    allPlans:
+      report.valid &&
+      report.engineCount === 33 &&
+      report.plannedEngineCount === 33 &&
+      report.enginesWithoutPlan.length === 0 &&
+      report.invalidPlans.length === 0,
+    engineMetadata:
+      engines.every((item) => item.dataPlanStatus === "configured" && Number(item.dataPlanVersion) === 1),
+    versionedBindings:
+      plagiarismBinding &&
+      plagiarismBinding.id === "tit.regular.plagio-trabajo:RESULTADO_ANTIPLAGIO" &&
+      plagiarismBinding.requirement === "required",
+    rejectsSplitMandatoryFields:
+      splitResult.ready === false &&
+      splitResult.status === "missing_fields" &&
+      splitResult.warnings.some((item) => item.includes("misma hoja")),
+    isolatesCompatibleSources:
+      compatibleResult.ready === true &&
+      compatibleResult.query &&
+      JSON.stringify(compatibleResult.query.importIds) === JSON.stringify(["plagio"]) &&
+      JSON.stringify(compatibleResult.query.sheet) === JSON.stringify(["Antiplagio"]) &&
+      compatibleResult.query.where.some((item) => item.field === "plagiarism_percent" && item.op === "exists") &&
+      compatibleResult.query.where.some((item) => item.field === "student_id" && item.value === "0101"),
+    prunesOptionalFields:
+      resultsResult.ready === true &&
+      resultsResult.query &&
+      resultsResult.query.dimensions.includes("career") &&
+      !resultsResult.query.dimensions.includes("campus") &&
+      resultsResult.query.measures.includes("grade"),
+    canonicalVocabulary:
+      ingestion.CANONICAL_FIELD_ALIASES.plagiarism_percent &&
+      ingestion.CANONICAL_FIELD_ALIASES.requirement_status &&
+      ingestion.CANONICAL_FIELD_ALIASES.activity_name &&
+      ingestion.CANONICAL_FIELD_ALIASES.formation_level &&
+      ingestion.CANONICAL_FIELD_ALIASES.subject,
+    localizedNumbers:
+      ingestion.numericValue("12,5%") === 12.5 &&
+      ingestion.numericValue("1.234,50") === 1234.5,
+    aiRuntime:
+      aiSource.includes("function dataReadinessForSection") &&
+      aiSource.includes("instanceDataReadiness") &&
+      aiSource.includes('requirement === "required"') &&
+      aiSource.includes("requiere datos antes de generar"),
+    backendReadiness:
+      mainSource.includes("dataReadiness: instance ? aiOrchestrator.instanceDataReadiness"),
+    uiReadiness:
+      renderer.includes("Datos listos") &&
+      renderer.includes("Mapeo pendiente") &&
+      renderer.includes("Campos faltantes")
+  };
+}
+
 function apaCitationCheck() {
   const citations = require(path.join(ROOT, "src/main/citation-service.cjs"));
   const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
@@ -911,6 +1014,27 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el motor de datos del Bloque 3: ${error.message}`);
+  }
+
+  try {
+    const documentBindings = documentDataBindingCheck();
+    if (
+      !documentBindings.allPlans ||
+      !documentBindings.engineMetadata ||
+      !documentBindings.versionedBindings ||
+      !documentBindings.rejectsSplitMandatoryFields ||
+      !documentBindings.isolatesCompatibleSources ||
+      !documentBindings.prunesOptionalFields ||
+      !documentBindings.canonicalVocabulary ||
+      !documentBindings.localizedNumbers ||
+      !documentBindings.aiRuntime ||
+      !documentBindings.backendReadiness ||
+      !documentBindings.uiReadiness
+    ) {
+      errors.push("Los bindings de datos por documento del Bloque 3 no superaron la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudieron validar los bindings de datos por documento: ${error.message}`);
   }
 
   try {

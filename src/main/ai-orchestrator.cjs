@@ -1,5 +1,6 @@
 const hub = require("./process-hub-service.cjs");
 const ingestion = require("./data-ingestion-service.cjs");
+const dataBindings = require("./document-data-binding-service.cjs");
 const providers = require("./ai-provider-service.cjs");
 const registry = require("./document-engine-registry.cjs");
 const knowledge = require("./knowledge-source-service.cjs");
@@ -75,6 +76,62 @@ function compactMasterData(masterData) {
   }));
 }
 
+function dataReadinessForSection(userDataPath, instance, section) {
+  const scopeOptions = {
+    scopeType: instance.scopeType,
+    scopeKey: instance.scopeKey,
+    scopePolicy: "inclusive"
+  };
+  const availability = ingestion.inspectDataAvailability(userDataPath, instance.dossierId, scopeOptions);
+  const configuredQuery = section && section.data && section.data.query;
+  if (configuredQuery) {
+    return {
+      bindingId: "custom-query:" + section.key,
+      requirement: "configured",
+      mode: instance.scopeType === "student" ? "individual" : "aggregate",
+      status: availability.hasImports ? "ready" : "no_imports",
+      ready: availability.hasImports,
+      query: Object.assign({
+        scopeType: instance.scopeType,
+        scopeKey: instance.scopeKey,
+        scopePolicy: "inclusive",
+        privacyMode: instance.scopeType === "student" ? "student_specific" : "aggregate"
+      }, configuredQuery),
+      availableFields: availability.availableFields,
+      warnings: availability.hasImports ? [] : ["No hay Excel/CSV disponible para la consulta configurada."],
+      availability
+    };
+  }
+
+  const bindingConfig = section && section.data && section.data.binding
+    ? section.data.binding
+    : dataBindings.bindingFor(instance.engineId, section.key);
+  if (!bindingConfig) {
+    return {
+      bindingId: "",
+      requirement: "none",
+      mode: "none",
+      status: "not_configured",
+      ready: false,
+      query: null,
+      availableFields: availability.availableFields,
+      warnings: [],
+      availability
+    };
+  }
+
+  const resolved = dataBindings.resolveBinding(bindingConfig, instance, availability);
+  resolved.availability = availability;
+  if (resolved.query) {
+    resolved.query = Object.assign({
+      scopeType: instance.scopeType,
+      scopeKey: instance.scopeKey,
+      scopePolicy: "inclusive"
+    }, resolved.query);
+  }
+  return resolved;
+}
+
 function sectionDataContext(userDataPath, instance, section) {
   const masterData = hub.listMasterData(userDataPath, instance.dossierId);
   const imports = ingestion.listImports(userDataPath, instance.dossierId).map((item) => ({
@@ -91,24 +148,55 @@ function sectionDataContext(userDataPath, instance, section) {
       headers: (sheet.columns || []).map((column) => column.name)
     }))
   }));
+
+  const dataReadiness = dataReadinessForSection(userDataPath, instance, section);
   let filteredData = null;
-  const configuredQuery = section && section.data && section.data.query;
-  if (configuredQuery) {
-    const query = Object.assign({
-      scopeType: instance.scopeType,
-      scopeKey: instance.scopeKey,
-      scopePolicy: "inclusive",
-      privacyMode: instance.scopeType === "student" ? "student_specific" : "aggregate"
-    }, configuredQuery);
-    filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, query);
+  if (dataReadiness.ready && dataReadiness.query) {
+    filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, dataReadiness.query);
   }
+
   const sourceQuery = `${section && section.title || ""} ${section && section.key || ""} ${instance.label || ""}`;
   const institutionalSources = knowledge.searchKnowledge(userDataPath, instance.dossierId, sourceQuery, 5);
   return {
     masterData: compactMasterData(masterData),
     imports,
     filteredData,
+    dataReadiness: {
+      bindingId: dataReadiness.bindingId || "",
+      requirement: dataReadiness.requirement || "none",
+      mode: dataReadiness.mode || "none",
+      status: dataReadiness.status || "not_configured",
+      ready: Boolean(dataReadiness.ready),
+      availableFields: dataReadiness.availableFields || [],
+      missingAll: dataReadiness.missingAll || [],
+      missingAny: dataReadiness.missingAny || [],
+      warnings: dataReadiness.warnings || []
+    },
     institutionalSources
+  };
+}
+
+function instanceDataReadiness(userDataPath, instanceId) {
+  const instance = hub.getDocumentInstance(userDataPath, instanceId);
+  if (!instance) throw new Error("Documento no válido.");
+  return {
+    instanceId,
+    engineId: instance.engineId,
+    sections: (instance.sections || []).map((section) => {
+      const readiness = dataReadinessForSection(userDataPath, instance, section);
+      return {
+        sectionKey: section.key,
+        title: section.title,
+        bindingId: readiness.bindingId || "",
+        requirement: readiness.requirement || "none",
+        status: readiness.status || "not_configured",
+        ready: Boolean(readiness.ready),
+        availableFields: readiness.availableFields || [],
+        missingAll: readiness.missingAll || [],
+        missingAny: readiness.missingAny || [],
+        warnings: readiness.warnings || []
+      };
+    })
   };
 }
 
@@ -152,6 +240,12 @@ function writerPrompt(instance, engine, section, context) {
     (section.allowedVisuals || []).length
       ? `Herramientas visuales permitidas en esta sección: ${section.allowedVisuals.join(", ")}. Selecciona solo las que sean útiles.`
       : "No generes herramientas visuales en esta sección salvo que la aplicación las habilite.",
+    context.dataReadiness && context.dataReadiness.requirement !== "none"
+      ? `Estado de datos de esta sección: ${context.dataReadiness.status}. ${(context.dataReadiness.warnings || []).join(" ")}`
+      : "",
+    context.dataReadiness && !context.dataReadiness.ready && context.dataReadiness.requirement === "recommended"
+      ? "Los datos recomendados no están listos. No inventes cifras ni resultados; utiliza únicamente fuentes o datos maestros disponibles y registra la limitación en alerts."
+      : "",
     "Contexto estructurado:",
     JSON.stringify({
       engine: { id: engine.engineId, version: engine.version, family: engine.family, population: engine.population },
@@ -169,6 +263,7 @@ function writerPrompt(instance, engine, section, context) {
       masterData: context.masterData,
       imports: context.imports,
       filteredData: context.filteredData,
+      dataReadiness: context.dataReadiness,
       dataContract: context.filteredData ? {
         calculationComplete: true,
         querySignature: context.filteredData.querySignature,
@@ -249,6 +344,10 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
   const set = providerSets(userDataPath);
   if (!set.writer) throw new Error("Configura al menos una IA en Ajustes.");
   const context = sectionDataContext(userDataPath, instance, section);
+  if (context.dataReadiness && context.dataReadiness.requirement === "required" && !context.dataReadiness.ready) {
+    const detail = (context.dataReadiness.warnings || []).join(" ");
+    throw new Error(`La sección "${section.title}" requiere datos antes de generar. ${detail}`.trim());
+  }
   const db = hub.dbFor(userDataPath);
   const system = baseSystem(engine, section);
   const prompt = writerPrompt(instance, engine, section, context);
@@ -381,6 +480,8 @@ async function regenerateStale(userDataPath, instanceId, options) {
 }
 
 module.exports = {
+  dataReadinessForSection,
+  instanceDataReadiness,
   generateSection,
   generateDocument,
   regenerateStale,

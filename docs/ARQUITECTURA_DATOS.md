@@ -966,3 +966,252 @@ No es necesario cambiar:
 - otros motores documentales.
 
 Por tanto, la siguiente configuración puede hacerse documento por documento sin volver a rediseñar la aplicación.
+
+
+## Bloque 3 nuevo · Datos y Excel por documento
+
+Los motores documentales ya no dependen de consultas Excel escritas manualmente sección por sección.
+
+Cada uno de los 33 `engineId` tiene un **plan explícito de datos**. El plan puede contener cero o más bindings.
+
+Un plan vacío significa de forma explícita:
+
+```text
+este documento no necesita consultar Excel/CSV directamente
+```
+
+y no:
+
+```text
+todavía no sabemos si usa datos
+```
+
+### Campos canónicos
+
+Los motores solicitan conceptos estables, no encabezados físicos del Excel.
+
+Ejemplos:
+
+```text
+student_id
+career
+core
+grade
+plagiarism_percent
+requirement_status
+activity_name
+attendance
+impact_score
+formation_level
+subject
+finding
+agreement
+```
+
+El mapeo traduce:
+
+```text
+"Porcentaje de plagio"
+        ↓
+plagiarism_percent
+```
+
+o:
+
+```text
+"Cédula"
+   ↓
+student_id
+```
+
+Por tanto, cambiar un encabezado de Excel no exige modificar el motor documental.
+
+### Binding por sección
+
+Un binding declara:
+
+- sección que consume los datos;
+- si los datos son `recommended` o `required`;
+- campos obligatorios;
+- grupos de campos alternativos;
+- campos opcionales;
+- dimensiones;
+- medidas numéricas;
+- agrupaciones;
+- deduplicación;
+- filtros propios;
+- campos usados para identificar el alcance;
+- política de privacidad;
+- permiso o prohibición de filas crudas para IA.
+
+Ejemplo conceptual:
+
+```text
+tit.regular.plagio-trabajo
+  RESULTADO_ANTIPLAGIO
+    required:
+      student_id
+      plagiarism_percent
+    scope:
+      student_id
+    privacy:
+      student_specific
+```
+
+### Estado de disponibilidad
+
+Antes de generar una sección la app inspecciona:
+
+- archivos disponibles;
+- hojas;
+- mapeos confirmados;
+- campos canónicos;
+- alcance de la instancia.
+
+El resultado puede ser:
+
+```text
+ready
+no_imports
+mapping_pending
+missing_fields
+not_configured
+```
+
+La interfaz traduce estos estados a:
+
+- Datos listos;
+- Sin Excel/CSV;
+- Mapeo pendiente;
+- Campos faltantes.
+
+### Datos obligatorios
+
+Si un binding es `required`, la IA no puede generar la sección mientras falten los campos.
+
+Ejemplo:
+
+```text
+Antiplagio sin plagiarism_percent
+  → bloquea generación
+  → no llama a la IA
+  → indica qué dato falta
+```
+
+Un binding `recommended` no bloquea el documento. Si los datos no están disponibles, la IA recibe explícitamente la limitación y tiene prohibido inventar cifras.
+
+### Aislamiento entre archivos
+
+La disponibilidad no se calcula únicamente con la unión global de campos.
+
+Los campos obligatorios deben coexistir en una hoja compatible.
+
+Esto evita:
+
+```text
+Excel A: student_id
+Excel B: plagiarism_percent
+→ NO se considera antiplagio listo
+```
+
+si no existe una hoja donde ambos conceptos estén relacionados fila a fila.
+
+Además, una vez encontrada la fuente compatible, la consulta se restringe a sus:
+
+- `importIds`;
+- hojas.
+
+Ejemplo:
+
+```text
+Notas.xlsx
+Antiplagio.xlsx
+
+Informe de resultados
+  → Notas.xlsx
+
+Porcentaje de plagio
+  → Antiplagio.xlsx
+```
+
+Los dos motores no mezclan filas aunque estén en el mismo expediente.
+
+### Alcance individual
+
+Los motores por estudiante, persona o actividad pueden exigir que el alcance encuentre un identificador mapeado.
+
+Para una persona, por ejemplo, se puede resolver el identificador contra cualquiera de los campos disponibles:
+
+```text
+person_id
+teacher_id
+teacher_name
+```
+
+Para actividad:
+
+```text
+activity_id
+activity_name
+```
+
+Cuando hay más de una alternativa, el sistema busca coincidencia en cualquiera de ellas.
+
+### Privacidad
+
+Los documentos agregados conservan el comportamiento:
+
+- porcentajes antes que cantidades absolutas;
+- grupos pequeños protegidos;
+- filas crudas deshabilitadas por defecto.
+
+Los documentos individuales pueden usar filas explícitamente autorizadas, pero solo con un `select` limitado a campos permitidos.
+
+### Números y porcentajes
+
+El motor numérico admite valores como:
+
+```text
+12,5%
+1.234,50
+100
+```
+
+y los convierte de forma determinística para cálculos.
+
+La IA recibe los resultados calculados y no vuelve a calcular promedios, porcentajes o conteos.
+
+### Trazabilidad
+
+Cada slice conserva:
+
+- archivo;
+- SHA-256;
+- hash del mapeo;
+- hoja;
+- filas consultadas;
+- firma de consulta.
+
+Los filtros y bindings forman parte del esquema versionado del motor porque se almacenan dentro de `section.data`.
+
+### Planes actuales
+
+Los 33 motores tienen plan explícito.
+
+Los bindings iniciales cubren, entre otros:
+
+- resultados de titulación;
+- requisitos;
+- cronogramas;
+- designaciones;
+- posibles temas;
+- antiplagio individual;
+- inducción;
+- detección de necesidades;
+- capacitación;
+- formación;
+- construcción curricular;
+- impacto;
+- planes individuales.
+
+Estos bindings usan campos canónicos. Cuando se reciban los Excel institucionales reales, el trabajo restante es confirmar el mapeo y, si corresponde, afinar reglas específicas sin rediseñar la arquitectura.

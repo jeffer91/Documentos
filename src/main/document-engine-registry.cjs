@@ -2,6 +2,7 @@
   "use strict";
 
   const outline = require("./document-outline-service.cjs");
+  const dataBindings = require("./document-data-binding-service.cjs");
   const VERSION = "4.0.0";
 
   const SELECTED_DOCUMENT_IDS = [
@@ -217,8 +218,18 @@
   function compileSectionsForEngine(engineId) {
     const blueprint = ENGINE_BLUEPRINTS[engineId];
     if (!blueprint) throw new Error(`El motor ${engineId} no tiene blueprint independiente.`);
-    return outline.compileOutline(engineId, blueprint, SECTION_LIBRARY, {
+    const compiled = outline.compileOutline(engineId, blueprint, SECTION_LIBRARY, {
       allowedVisuals: ALL_VISUAL_TOOLS
+    });
+    const sections = dataBindings.decorateSections(engineId, compiled.sections);
+    const dataPlanValidation = dataBindings.validatePlan(engineId, sections);
+    if (!dataPlanValidation.ok) {
+      throw new Error(dataPlanValidation.errors.join(" | "));
+    }
+    return Object.assign({}, compiled, {
+      sections,
+      dataPlanValidation,
+      dataBindings: dataBindings.bindingsForEngine(engineId) || []
     });
   }
 
@@ -245,6 +256,20 @@
 
   function allStructureReports() {
     return engines.map((item) => engineStructureReport(item.engineId));
+  }
+
+  function dataPlanReport() {
+    const report = dataBindings.plansReport(engines.map((item) => item.engineId));
+    const invalidPlans = engines
+      .map((item) => ({
+        engineId: item.engineId,
+        validation: dataBindings.validatePlan(item.engineId, item.sections)
+      }))
+      .filter((item) => !item.validation.ok);
+    return Object.assign({}, report, {
+      invalidPlans,
+      valid: report.enginesWithoutPlan.length === 0 && invalidPlans.length === 0
+    });
   }
 
   function registryIndependenceReport() {
@@ -299,6 +324,9 @@
       outlineStatus: "scaffold",
       outlineVersion: 1,
       outlineSummary: compiled.validation.summary,
+      dataPlanStatus: "configured",
+      dataPlanVersion: 1,
+      dataBindingCount: compiled.dataBindings.length,
       sections: compiled.sections,
       rules: BASE_RULES.slice(),
       dependencies: [],
@@ -469,6 +497,7 @@
     registryIndependenceReport,
     engineStructureReport,
     allStructureReports,
+    dataPlanReport,
     getEngine,
     enginesForDocument,
     filterCatalog

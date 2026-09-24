@@ -11,17 +11,65 @@ const DEFAULT_UI_ROWS = 500;
 const MAX_AI_SAMPLE_ROWS = 50;
 
 const CANONICAL_FIELD_ALIASES = Object.freeze({
-  student_id: ["cédula", "cedula", "identificación", "identificacion", "documento", "dni"],
-  student_name: ["estudiante", "nombre completo", "nombres y apellidos", "apellidos y nombres", "nombres"],
+  record_id: ["id", "registro", "id registro", "código", "codigo"],
+  student_id: ["cédula", "cedula", "identificación", "identificacion", "documento", "dni", "id estudiante"],
+  student_name: ["estudiante", "nombre completo", "nombres y apellidos", "apellidos y nombres", "nombres", "nombre estudiante"],
+  person_id: ["id persona", "cédula docente", "cedula docente", "identificación docente", "identificacion docente"],
+  teacher_id: ["id docente", "código docente", "codigo docente", "cédula docente", "cedula docente"],
+  teacher_name: ["docente", "nombre docente", "profesor", "nombre profesor"],
   career: ["carrera", "programa", "programa académico", "programa academico"],
   campus: ["sede", "campus"],
   core: ["núcleo", "nucleo"],
   component: ["componente", "tipo de evaluación", "tipo de evaluacion", "evaluación", "evaluacion"],
   grade: ["nota", "calificación", "calificacion", "puntaje"],
   modality: ["modalidad"],
-  level: ["nivel", "grado", "tipo de carrera"],
+  level: ["nivel", "grado", "tipo de carrera", "nivel académico", "nivel academico"],
   period: ["período", "periodo"],
-  status: ["estado", "resultado"]
+  population: ["población", "poblacion", "tipo de población", "tipo de poblacion"],
+  segment: ["segmento", "grupo", "subgrupo"],
+  session: ["sesión", "sesion", "jornada de análisis", "jornada de analisis"],
+  status: ["estado", "resultado"],
+
+  requirement_name: ["requisito", "nombre requisito", "tipo de requisito"],
+  requirement_status: ["estado requisito", "cumplimiento requisito", "requisito cumplido", "cumple requisito"],
+  requirement_date: ["fecha requisito", "fecha cumplimiento", "fecha validación", "fecha validacion"],
+
+  topic: ["tema", "tema de titulación", "tema de titulacion", "tema propuesto"],
+  document_title: ["título", "titulo", "título documento", "titulo documento", "nombre documento"],
+  tutor_name: ["tutor", "docente tutor", "nombre tutor"],
+  methodologist_name: ["metodológico", "metodologico", "docente metodológico", "docente metodologico", "nombre metodológico", "nombre metodologico"],
+  plagiarism_percent: ["porcentaje plagio", "porcentaje de plagio", "% plagio", "similitud", "porcentaje similitud", "porcentaje de similitud"],
+
+  attendance: ["asistencia", "asistió", "asistio", "presente"],
+  attendance_date: ["fecha asistencia", "fecha de asistencia"],
+  completion: ["cumplimiento", "completado", "finalizado", "completó", "completo"],
+  hours: ["horas", "duración horas", "duracion horas", "número de horas", "numero de horas"],
+
+  activity_id: ["id actividad", "código actividad", "codigo actividad"],
+  activity_name: ["actividad", "nombre actividad", "actividad de capacitación", "actividad de capacitacion"],
+  event_name: ["evento", "nombre evento"],
+  event_date: ["fecha evento", "fecha del evento"],
+  start_date: ["fecha inicio", "inicio", "fecha de inicio"],
+  end_date: ["fecha fin", "fin", "fecha de fin"],
+  responsible: ["responsable", "encargado", "responsable actividad"],
+
+  training_name: ["capacitación", "capacitacion", "curso", "nombre capacitación", "nombre capacitacion"],
+  need: ["necesidad", "necesidad detectada", "necesidad de capacitación", "necesidad de capacitacion", "necesidad de formación", "necesidad de formacion"],
+  priority: ["prioridad", "nivel de prioridad"],
+  competency: ["competencia", "competencia requerida", "competencia docente"],
+  area: ["área", "area", "área de conocimiento", "area de conocimiento"],
+  satisfaction_score: ["satisfacción", "satisfaccion", "nivel satisfacción", "nivel satisfaccion", "puntaje satisfacción", "puntaje satisfaccion"],
+  impact_score: ["impacto", "nivel impacto", "nivel de impacto", "puntaje impacto"],
+
+  formation_program: ["programa de formación", "programa de formacion", "formación", "formacion", "programa académico formación", "programa academico formacion"],
+  formation_level: ["nivel de formación", "nivel de formacion", "tipo de formación", "tipo de formacion"],
+  degree_level: ["nivel de título", "nivel de titulo", "tercer nivel", "cuarto nivel", "quinto nivel"],
+  institution: ["institución", "institucion", "universidad", "entidad formadora"],
+
+  subject: ["asignatura", "materia", "unidad curricular"],
+  finding: ["hallazgo", "observación", "observacion", "novedad"],
+  agreement: ["acuerdo", "compromiso", "acción acordada", "accion acordada"],
+  due_date: ["fecha compromiso", "fecha límite", "fecha limite", "fecha cumplimiento acuerdo"]
 });
 
 function id(prefix) {
@@ -423,6 +471,68 @@ function selectedImports(db, dossierId, options) {
   return all.filter((row) => (!ids || ids.has(String(row.id))) && importMatchesScope(row, options || {}));
 }
 
+function canonicalFieldsForSheet(mapping, sheetName, headers) {
+  const fields = mappingFieldSpecs(mapping || {}, sheetName);
+  const normalizedHeaders = new Set((headers || []).map(normalizeText));
+  return Object.entries(fields).reduce((acc, [canonical, spec]) => {
+    const candidates = sourceCandidates(spec);
+    if (candidates.some((candidate) => normalizedHeaders.has(normalizeText(candidate)))) acc.push(String(canonical));
+    return acc;
+  }, []);
+}
+
+function inspectDataAvailability(userDataPath, dossierId, options) {
+  const db = hub.dbFor(userDataPath);
+  const input = options || {};
+  const imports = selectedImports(db, dossierId, input);
+  const available = new Set();
+  const importDetails = [];
+  let totalRows = 0;
+  let mappedSheets = 0;
+
+  imports.forEach((importRow) => {
+    const mapping = JSON.parse(importRow.mapping_json || "{}");
+    const sheets = db.prepare(
+      "SELECT sheet_name, headers_json, row_count FROM data_sheets_v3 WHERE import_id = ? ORDER BY created_at"
+    ).all(importRow.id);
+    const sheetDetails = [];
+
+    sheets.forEach((sheet) => {
+      if (!sheetSelected(sheet.sheet_name, input)) return;
+      const headers = JSON.parse(sheet.headers_json || "[]");
+      const fields = canonicalFieldsForSheet(mapping, sheet.sheet_name, headers);
+      fields.forEach((field) => available.add(field));
+      if (fields.length) mappedSheets += 1;
+      totalRows += Number(sheet.row_count || 0);
+      sheetDetails.push({
+        name: sheet.sheet_name,
+        rowCount: Number(sheet.row_count || 0),
+        canonicalFields: fields.sort()
+      });
+    });
+
+    importDetails.push({
+      importId: importRow.id,
+      sourceName: importRow.source_name,
+      sha256: importRow.sha256,
+      scopeType: importRow.scope_type,
+      scopeKey: importRow.scope_key,
+      hasMapping: Object.keys(mapping || {}).length > 0,
+      sheets: sheetDetails
+    });
+  });
+
+  return {
+    dossierId,
+    hasImports: imports.length > 0,
+    importCount: imports.length,
+    totalRows,
+    mappedSheets,
+    availableFields: Array.from(available).sort(),
+    imports: importDetails
+  };
+}
+
 function sheetSelected(sheetName, input) {
   if (!input || input.sheet == null) return true;
   if (Array.isArray(input.sheet)) return input.sheet.map(String).includes(String(sheetName));
@@ -457,6 +567,19 @@ function allRows(userDataPath, dossierId, options) {
   return rows;
 }
 
+function numericValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw) return NaN;
+  const normalized = raw
+    .replace(/\s+/g, "")
+    .replace(/%$/, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function compare(value, operator, expected) {
   const op = String(operator || "eq").toLowerCase();
   if (op === "exists") return value !== "" && value != null;
@@ -476,8 +599,8 @@ function compare(value, operator, expected) {
     const normalized = new Set(set.map(normalizeText));
     return !normalized.has(normalizeText(value));
   }
-  const leftNumber = Number(value);
-  const rightNumber = Number(expected);
+  const leftNumber = numericValue(value);
+  const rightNumber = numericValue(expected);
   if (["gt", "gte", "lt", "lte"].includes(op) && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
     if (op === "gt") return leftNumber > rightNumber;
     if (op === "gte") return leftNumber >= rightNumber;
@@ -635,7 +758,7 @@ function queryData(userDataPath, dossierId, query) {
 }
 
 function numericStats(rows, field) {
-  const values = rows.map((row) => Number(row[field])).filter(Number.isFinite);
+  const values = rows.map((row) => numericValue(row[field])).filter(Number.isFinite);
   if (!values.length) return null;
   let min = values[0];
   let max = values[0];
@@ -870,6 +993,7 @@ module.exports = {
   MAX_UI_ROWS,
   CANONICAL_FIELD_ALIASES,
   normalizeText,
+  numericValue,
   importDataFile,
   getImport,
   listImports,
@@ -877,6 +1001,7 @@ module.exports = {
   validateQueryFields,
   setMapping,
   suggestMapping,
+  inspectDataAvailability,
   queryData,
   summarize,
   aiSlice
