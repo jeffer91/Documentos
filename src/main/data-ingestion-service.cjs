@@ -567,6 +567,19 @@ function allRows(userDataPath, dossierId, options) {
   return rows;
 }
 
+function numericValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw) return NaN;
+  const normalized = raw
+    .replace(/\s+/g, "")
+    .replace(/%$/, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function compare(value, operator, expected) {
   const op = String(operator || "eq").toLowerCase();
   if (op === "exists") return value !== "" && value != null;
@@ -586,8 +599,8 @@ function compare(value, operator, expected) {
     const normalized = new Set(set.map(normalizeText));
     return !normalized.has(normalizeText(value));
   }
-  const leftNumber = Number(value);
-  const rightNumber = Number(expected);
+  const leftNumber = numericValue(value);
+  const rightNumber = numericValue(expected);
   if (["gt", "gte", "lt", "lte"].includes(op) && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
     if (op === "gt") return leftNumber > rightNumber;
     if (op === "gte") return leftNumber >= rightNumber;
@@ -745,7 +758,7 @@ function queryData(userDataPath, dossierId, query) {
 }
 
 function numericStats(rows, field) {
-  const values = rows.map((row) => Number(row[field])).filter(Number.isFinite);
+  const values = rows.map((row) => numericValue(row[field])).filter(Number.isFinite);
   if (!values.length) return null;
   let min = values[0];
   let max = values[0];
@@ -980,6 +993,7 @@ module.exports = {
   MAX_UI_ROWS,
   CANONICAL_FIELD_ALIASES,
   normalizeText,
+  numericValue,
   importDataFile,
   getImport,
   listImports,
