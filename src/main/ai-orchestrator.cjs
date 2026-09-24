@@ -3,6 +3,7 @@ const ingestion = require("./data-ingestion-service.cjs");
 const providers = require("./ai-provider-service.cjs");
 const registry = require("./document-engine-registry.cjs");
 const knowledge = require("./knowledge-source-service.cjs");
+const editorial = require("./editorial-structure-service.cjs");
 
 function now() {
   return new Date().toISOString();
@@ -43,7 +44,16 @@ function baseSystem(engine, section) {
     "No inventes hechos. Si falta información, crea una alerta y redacta sin afirmar el dato ausente.",
     "Respeta privacidad institucional: en resultados agregados prefiere porcentajes y evita cantidades absolutas innecesarias.",
     "Nunca introduzcas conclusiones que no estén respaldadas por resultados.",
-    "Devuelve SOLO JSON válido con las claves: content, alerts, claims.",
+    "La estructura final y APA 7 los aplica la aplicación; tú debes devolver contenido semántico estructurado.",
+    "Devuelve SOLO JSON válido con las claves: content, blocks, alerts, claims.",
+    "blocks es una lista ordenada de objetos.",
+    "Tipos admitidos de bloque: prose, list, table, figure, image, visual, quote, callout, reference_list.",
+    "Para prose usa {type:'prose',role:'context|body|analysis|summary',text:'...'}",
+    "Para table usa {type:'table',title:'...',data:{headers:[...],rows:[[...]]},note:'...'}",
+    "Para visual usa {type:'visual',visualType:'...',title:'...',data:{...},note:'...'}",
+    "Antes de toda tabla o figura debe existir un bloque prose con role context/body; después debe existir prose con role analysis.",
+    "No fuerces una herramienta visual. Úsala únicamente cuando aporte comprensión.",
+    "Cuando sustentes texto en una fuente institucional, usa el token [[CITE:CLAVE]] con una citationKey proporcionada; nunca inventes claves.",
     "alerts es una lista de objetos {type,severity,message,blocking}.",
     "claims es una lista de objetos {text,sourceType,sourceKey,confidence}.",
     `Documento: ${engine.label}.`,
@@ -92,37 +102,68 @@ function sectionDataContext(userDataPath, instance, section) {
 
 function writerPrompt(instance, engine, section, context) {
   const prior = instance.sections
-    .filter((item) => item.order < section.order && item.content)
+    .filter((item) => item.order < section.order && (item.content || (item.blocks || []).length))
     .slice(-4)
-    .map((item) => ({ key: item.key, title: item.title, content: item.content.slice(0, 5000) }));
+    .map((item) => ({ key: item.key, title: item.title, content: String(item.content || "").slice(0, 5000) }));
+  const derived = (section.derivedFrom || []).map((key) => {
+    const source = instance.sections.find((item) => item.key === key);
+    return source ? {
+      key: source.key,
+      title: source.title,
+      content: String(source.content || "").slice(0, 12000),
+      blocks: (source.blocks || []).slice(0, 30)
+    } : { key, missing: true };
+  });
   return [
     "Redacta la sección solicitada.",
-    "Usa puntos y subpuntos cuando mejore la claridad.",
-    "Mantén coherencia con las secciones previas.",
+    "Respeta la jerarquía definida por la aplicación; no inventes nuevos títulos de primer nivel.",
+    "Mantén coherencia con las secciones previas y con las secciones de las que deriva.",
     "Si un dato es simulado o inferido, NO lo presentes como verificado: inclúyelo en alerts.",
+    section.type === "executive_summary"
+      ? `El resumen ejecutivo debe ser muy concreto, priorizar los hallazgos críticos y no superar aproximadamente ${section.maxWords || 600} palabras.`
+      : "",
+    (section.allowedVisuals || []).length
+      ? `Herramientas visuales permitidas en esta sección: ${section.allowedVisuals.join(", ")}. Selecciona solo las que sean útiles.`
+      : "No generes herramientas visuales en esta sección salvo que la aplicación las habilite.",
     "Contexto estructurado:",
     JSON.stringify({
       engine: { id: engine.engineId, version: engine.version, family: engine.family, population: engine.population },
       instance: { scopeType: instance.scopeType, scopeKey: instance.scopeKey },
-      section: { key: section.key, title: section.title, type: section.type },
+      section: {
+        key: section.key,
+        title: section.title,
+        type: section.type,
+        level: section.level,
+        numbering: section.numbering,
+        allowedVisuals: section.allowedVisuals || [],
+        derivedFrom: section.derivedFrom || []
+      },
       masterData: context.masterData,
       imports: context.imports,
       filteredData: context.filteredData,
       institutionalSources: context.institutionalSources,
+      derivedSections: derived,
       previousSections: prior
     })
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 function reviewerPrompt(engine, section, draft, context) {
   return [
     "Revisa el borrador de esta sección.",
     "Comprueba coherencia, trazabilidad, privacidad institucional, datos no sustentados, contradicciones y redacción.",
-    "Si detectas problemas, corrige el texto en correctedContent.",
-    "Devuelve SOLO JSON válido con: approved, issues, correctedContent, alerts.",
+    "Verifica que cada tabla/figura tenga contexto previo y análisis posterior.",
+    "Verifica que las herramientas visuales estén dentro de las permitidas para la sección.",
+    "Si detectas problemas, corrige content y blocks.",
+    "Devuelve SOLO JSON válido con: approved, issues, correctedContent, correctedBlocks, alerts.",
     JSON.stringify({
       engine: engine.engineId,
-      section: section.key,
+      section: {
+        key: section.key,
+        type: section.type,
+        allowedVisuals: section.allowedVisuals || [],
+        derivedFrom: section.derivedFrom || []
+      },
       draft,
       masterData: context.masterData,
       filteredData: context.filteredData,
@@ -160,6 +201,16 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
   if (!section) throw new Error("Sección no válida.");
   if (section.locked && !(options && options.force)) return instance;
 
+  if (section.type === "references") {
+    return hub.updateSection(userDataPath, instanceId, sectionKey, {
+      content: "",
+      status: "reviewed",
+      blocks: [{ type: "reference_list", role: "body", data: {} }],
+      provenance: { source: "system", engineId: engine.engineId, generatedAt: now() },
+      alerts: []
+    });
+  }
+
   const set = providerSets(userDataPath);
   if (!set.writer) throw new Error("Configura al menos una IA en Ajustes.");
   const context = sectionDataContext(userDataPath, instance, section);
@@ -185,7 +236,12 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
   }
   if (!writerResult || !usedWriter) throw lastWriterError || new Error("Ninguna IA pudo redactar la sección.");
 
+  let blocks = editorial.normalizeBlocks(writerResult.blocks || []);
   let content = String(writerResult.content || "");
+  if (!blocks.length && content) {
+    blocks = editorial.normalizeBlocks([{ type: "prose", role: "body", text: content }]);
+  }
+  if (blocks.length) content = editorial.plainTextFromBlocks(blocks);
   let alerts = Array.isArray(writerResult.alerts) ? writerResult.alerts : [];
   const provenance = {
     source: "ai",
@@ -213,7 +269,13 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
       });
       const review = parseJsonObject(result.text);
       finishJob(db, reviewJobId, { parsed: review, provider: result.provider.name }, null);
-      if (review.correctedContent) content = String(review.correctedContent);
+      if (Array.isArray(review.correctedBlocks) && review.correctedBlocks.length) {
+        blocks = editorial.normalizeBlocks(review.correctedBlocks);
+        content = editorial.plainTextFromBlocks(blocks);
+      } else if (review.correctedContent) {
+        content = String(review.correctedContent);
+        if (!blocks.length) blocks = editorial.normalizeBlocks([{ type: "prose", role: "body", text: content }]);
+      }
       if (Array.isArray(review.alerts)) alerts = alerts.concat(review.alerts);
       if (Array.isArray(review.issues) && review.issues.length) {
         alerts = alerts.concat(review.issues.map((issue) => ({
@@ -230,6 +292,14 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
     }
   }
 
+  const editorialValidation = editorial.validateSectionBlocks(section, blocks);
+  editorialValidation.errors.forEach((message) => {
+    alerts.push({ type: "editorial", severity: "error", message, blocking: true });
+  });
+  editorialValidation.warnings.forEach((message) => {
+    alerts.push({ type: "editorial", severity: "warning", message, blocking: false });
+  });
+
   const dedup = [];
   const seen = new Set();
   alerts.forEach((alert) => {
@@ -242,6 +312,7 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
 
   instance = hub.updateSection(userDataPath, instanceId, sectionKey, {
     content,
+    blocks,
     status: "reviewed",
     provenance,
     alerts: dedup
