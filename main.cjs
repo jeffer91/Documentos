@@ -258,7 +258,8 @@ function registerIpc() {
         ok: true,
         instance,
         editorialValidation: instance ? editorial.validateDocumentInstance(instance) : null,
-        citationValidation: instance ? citationService.validateInstanceCitations(userData(), instance) : null
+        citationValidation: instance ? citationService.validateInstanceCitations(userData(), instance) : null,
+        dataReadiness: instance ? aiOrchestrator.instanceDataReadiness(userData(), instanceId) : null
       };
     },
     "instances",
