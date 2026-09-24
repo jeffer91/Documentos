@@ -715,7 +715,19 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
   const validation = editorial.validateSectionBlocks(rowToSection(sectionRow, db), normalized);
   const updatedBlocks = replaceSectionBlocks(db, sectionRow.id, normalized);
   const content = editorial.plainTextFromBlocks(updatedBlocks);
-  db.prepare("UPDATE document_sections_v3 SET content = ?, updated_at = ? WHERE id = ?").run(content, now(), sectionRow.id);
+  const ts = now();
+  const currentProvenance = json(sectionRow.provenance_json, {});
+  db.prepare(`
+    UPDATE document_sections_v3
+    SET content = ?, status = 'edited', provenance_json = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    content,
+    JSON.stringify(Object.assign({}, currentProvenance, { blockEditedBy: "human", blockEditedAt: ts })),
+    ts,
+    sectionRow.id
+  );
+  db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
   audit(db, {
     dossierId: instance.dossierId,
     instanceId,
@@ -724,7 +736,8 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
     action: "replace",
     detail: { blockCount: updatedBlocks.length, errors: validation.errors, warnings: validation.warnings }
   });
-  return { blocks: updatedBlocks, validation };
+  markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Cambió ${instance.label}: ${sectionKey}`);
+  return { blocks: updatedBlocks, validation, instance: getDocumentInstance(userDataPath, instanceId) };
 }
 
 function updateSection(userDataPath, instanceId, sectionKey, patch) {
