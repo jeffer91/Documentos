@@ -841,7 +841,7 @@
         <button class="ghost" type="button" data-arch-action="export-draft">Generar borrador Word + PDF</button>
       </div>
       <div class="output-choice">
-        <div><h3>Versión final</h3><p>Solo puede cerrarse cuando todas las secciones obligatorias estén aprobadas y los controles finales sean válidos.</p></div>
+        <div><h3>Versión final</h3><p>Solo puede cerrarse cuando todas las secciones obligatorias estén aprobadas y los controles finales sean válidos. Las alertas quedan en la trazabilidad interna y no forman parte de la versión final visible.</p></div>
         ${state.instance.finalFrozenAt
           ? '<div class="button-row"><button class="secondary" type="button" data-arch-action="export-final">Exportar final Word + PDF</button><button class="ghost" type="button" data-arch-action="working-copy">Nueva versión de trabajo</button></div>'
           : '<button class="secondary" type="button" data-arch-action="freeze-final">Aprobar y congelar versión final</button>'}
@@ -872,7 +872,7 @@
     ];
   
     view().innerHTML = `
-      ${state.generationRun && state.generationRun.status === "partial" ? `<div class="notice-warn"><b>Generación parcial</b><span>${escapeHtml(generationMessage(state.generationRun))}</span></div>` : ""}
+      ${state.generationRun && state.generationRun.status === "partial" ? `<div class="notice-warn"><b>Generación parcial</b><span>${escapeHtml(generationMessage(state.generationRun))}</span><button class="ghost small-inline" type="button" data-arch-action="resume-document">Reanudar pendientes</button></div>` : ""}
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Revisa las secciones afectadas.</span></div>` : ""}
       <div class="arch-dossier-head compact-document-head">
         <div>
