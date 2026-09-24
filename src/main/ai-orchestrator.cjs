@@ -192,7 +192,7 @@ function finishJob(db, jobId, response, error) {
 }
 
 async function generateSection(userDataPath, instanceId, sectionKey, options) {
-  let instance = hub.getDocumentInstance(userDataPath, instanceId);
+  let instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   if (instance.finalFrozenAt) throw new Error("La versión final está congelada.");
   const engine = registry.getEngine(instance.engineId);
@@ -321,7 +321,7 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
 }
 
 async function generateDocument(userDataPath, instanceId, options) {
-  let instance = hub.getDocumentInstance(userDataPath, instanceId);
+  let instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   const startAt = options && options.startAt ? String(options.startAt) : "";
   let enabled = !startAt;
@@ -336,7 +336,7 @@ async function generateDocument(userDataPath, instanceId, options) {
 }
 
 async function regenerateStale(userDataPath, instanceId, options) {
-  const instance = hub.getDocumentInstance(userDataPath, instanceId);
+  const instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
   for (const section of instance.sections) {
     if (section.locked || section.status === "approved") continue;
