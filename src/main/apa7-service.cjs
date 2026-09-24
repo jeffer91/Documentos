@@ -73,28 +73,43 @@ function headingHtml(section) {
   return `<h${semanticLevel} class="apa-heading level-${styleLevel}" data-actual-level="${actualLevel}">${esc(title)}</h${semanticLevel}>`;
 }
 
+function citedInline(value, citations) {
+  const replaced = citationService.replaceCitationTokens(String(value == null ? "" : value), citations || []);
+  return { html: esc(replaced.text), missing: replaced.missing || [] };
+}
+
 function tableHtml(block, number, citations) {
   const headers = Array.isArray(block.data && block.data.headers) ? block.data.headers : [];
   const rows = Array.isArray(block.data && block.data.rows) ? block.data.rows : [];
   const note = paragraphs(block.note || "", citations);
+  const missing = [].concat(note.missing || []);
+  const renderedHeaders = headers.map((header) => {
+    const rendered = citedInline(header, citations);
+    missing.push(...rendered.missing);
+    return "<th>" + rendered.html + "</th>";
+  }).join("");
+  const renderedRows = rows.map((row) => {
+    const values = Array.isArray(row) ? row : headers.map((header) => row && row[header]);
+    return "<tr>" + headers.map((_header, index) => {
+      const rendered = citedInline(values[index], citations);
+      missing.push(...rendered.missing);
+      return "<td>" + rendered.html + "</td>";
+    }).join("") + "</tr>";
+  }).join("");
+
   return {
-    html: `
+    html: \`
       <div class="apa-table-block" data-keep-together="true">
-        <p class="apa-object-number">Tabla ${number}</p>
-        <p class="apa-object-title">${esc(block.title || "Tabla")}</p>
+        <p class="apa-object-number">Tabla \${number}</p>
+        <p class="apa-object-title">\${esc(block.title || "Tabla")}</p>
         <table class="apa-table">
-          <thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join("")}</tr></thead>
-          <tbody>
-            ${rows.map((row) => {
-              const values = Array.isArray(row) ? row : headers.map((header) => row && row[header]);
-              return `<tr>${headers.map((_header, index) => `<td>${esc(values[index])}</td>`).join("")}</tr>`;
-            }).join("")}
-          </tbody>
+          <thead><tr>\${renderedHeaders}</tr></thead>
+          <tbody>\${renderedRows}</tbody>
         </table>
-        ${block.note ? `<div class="apa-note"><span>Nota.</span> ${note.html}</div>` : ""}
+        \${block.note ? \`<div class="apa-note"><span>Nota.</span> \${note.html}</div>\` : ""}
       </div>
-    `,
-    missing: note.missing
+    \`,
+    missing: Array.from(new Set(missing))
   };
 }
 
@@ -130,9 +145,15 @@ function imageHtml(block, number, assetDir, citations) {
   };
 }
 
-function listHtml(block) {
+function listHtml(block, citations) {
   const items = Array.isArray(block.data && block.data.items) ? block.data.items : [];
-  return `<ul class="apa-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+  const missing = [];
+  const html = items.map((item) => {
+    const rendered = citedInline(item, citations);
+    missing.push(...rendered.missing);
+    return `<li>${rendered.html}</li>`;
+  }).join("");
+  return { html: `<ul class="apa-list">${html}</ul>`, missing: Array.from(new Set(missing)) };
 }
 
 function referencesHtml(references) {
@@ -147,7 +168,7 @@ function renderBlock(block, maps, assetDir, citations, references) {
   if (block.type === "prose" || block.type === "quote" || block.type === "callout") {
     return paragraphs(block.text, citations);
   }
-  if (block.type === "list") return { html: listHtml(block), missing: [] };
+  if (block.type === "list") return listHtml(block, citations);
   if (block.type === "table") return tableHtml(block, maps.tables.get(block.key) || 1, citations);
   if (["figure", "image", "visual"].includes(block.type)) {
     return imageHtml(block, maps.figures.get(block.key) || 1, assetDir, citations);
