@@ -657,7 +657,23 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
       `).run(ts, `La sección ya no existe en el motor ${nextVersion}.`, ts, instanceId, key);
     });
 
-    const structuralImpact = plan.structuralChange || versionChanged || definitionChanged;
+    const migrationReviewKeys = Array.from(new Set(
+      plan.structuralChange
+        ? [].concat(plan.added, plan.reactivated, plan.updated)
+        : (versionChanged || definitionChanged)
+          ? plan.target.map((sectionItem) => sectionItem.key)
+          : []
+    ));
+    if (migrationReviewKeys.length) {
+      const placeholders = migrationReviewKeys.map(() => "?").join(",");
+      db.prepare(`
+        UPDATE document_sections_v3
+        SET status = 'migration_pending', locked = 0, updated_at = ?
+        WHERE instance_id = ? AND active = 1 AND section_key IN (${placeholders})
+      `).run(ts, instanceId, ...migrationReviewKeys);
+    }
+
+    const structuralImpact = migrationReviewKeys.length > 0;
     db.prepare(`
       UPDATE document_instances_v3
       SET document_id = ?, label = ?, engine_version = ?, engine_schema_hash = ?, migration_revision = ?, last_migrated_at = ?,
@@ -684,6 +700,7 @@ function synchronizeEngineInstance(userDataPath, instanceId, engineOverride) {
       reactivated: plan.reactivated,
       updated: plan.updated,
       archived: plan.archived,
+      reviewRequired: migrationReviewKeys,
       versionChanged,
       definitionChanged,
       baselineEstablished: !previousHash
@@ -917,6 +934,34 @@ function listArchivedSections(userDataPath, instanceId) {
   `).all(instanceId).map((row) => rowToSection(row, db));
 }
 
+function refreshInstanceAfterContentChange(db, instanceId, ts) {
+  const pending = Number(db.prepare(`
+    SELECT COUNT(*) AS total
+    FROM document_sections_v3
+    WHERE instance_id = ? AND active = 1 AND status = 'migration_pending'
+  `).get(instanceId).total || 0);
+
+  if (pending > 0) {
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET status = 'draft', stale = 1,
+          stale_reason = CASE
+            WHEN stale_reason = '' THEN 'La migración del motor todavía tiene secciones pendientes de revisión.'
+            ELSE stale_reason
+          END,
+          updated_at = ?
+      WHERE id = ?
+    `).run(ts, instanceId);
+  } else {
+    db.prepare(`
+      UPDATE document_instances_v3
+      SET status = 'draft', stale = 0, stale_reason = '', updated_at = ?
+      WHERE id = ?
+    `).run(ts, instanceId);
+  }
+  return pending;
+}
+
 function replaceSectionBlocks(db, sectionId, blocks) {
   const normalized = editorial.normalizeBlocks(blocks || []);
   const lockedRows = db.prepare("SELECT block_key FROM document_blocks_v4 WHERE section_id = ? AND locked = 1").all(sectionId);
@@ -979,7 +1024,7 @@ function setSectionBlocks(userDataPath, instanceId, sectionKey, blocks) {
     ts,
     sectionRow.id
   );
-  db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
+  refreshInstanceAfterContentChange(db, instanceId, ts);
   audit(db, {
     dossierId: instance.dossierId,
     instanceId,
@@ -1023,7 +1068,7 @@ function updateSection(userDataPath, instanceId, sectionKey, patch) {
     status === "generated" || status === "reviewed" || status === "approved" ? ts : current.generated_at,
     ts, instanceId, sectionKey
   );
-  db.prepare("UPDATE document_instances_v3 SET status = 'draft', stale = 0, stale_reason = '', updated_at = ? WHERE id = ?").run(ts, instanceId);
+  refreshInstanceAfterContentChange(db, instanceId, ts);
   audit(db, { dossierId: instance.dossierId, instanceId, entityType: "section", entityId: sectionKey, action: "update", detail: { status, locked, alertCount: (alerts || []).length } });
   markEngineDependentsStale(db, instance.dossierId, instance.engineId, `Cambió ${instance.label}: ${sectionKey}`);
   return getDocumentInstance(userDataPath, instanceId);
