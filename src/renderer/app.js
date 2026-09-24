@@ -27,6 +27,8 @@
     editorGuide: null,
     saveState: "saved",
     requirements: null,
+    homeUnitId: "",
+    homeSearch: "",
     externalAi: {
       templateId: "",
       guide: "",
@@ -395,55 +397,349 @@
     }, false);
   }
 
-  function unitCard(unit) {
-    const count = unit.processes.reduce((sum, process) => sum + process.documents.length, 0);
-    return `<button class="unit-card" type="button" data-action="open-unit" data-id="${escapeHtml(unit.id)}">
-      <span class="unit-icon">${escapeHtml(unit.icon)}</span>
-      <h3>${escapeHtml(unit.name)}</h3>
-      <p>${unit.processes.length} procesos · ${count} documentos</p>
-    </button>`;
+  const HOME_FAVORITES_KEY = "documentos-home-favorites-v1";
+
+  function normalizeHomeSearch(value) {
+    return String(value == null ? "" : value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  function projectRows(projects, limit) {
-    const items = typeof limit === "number" ? projects.slice(0, limit) : projects;
-    if (!items.length) {
-      return '<div class="empty"><b>Sin documentos</b>Crea uno desde UTET o UGPA.</div>';
+  function homeFavoriteIds() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(HOME_FAVORITES_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (_error) {
+      return [];
     }
+  }
 
-    return `<div class="doc-list">${items.map((project) => `
-      <button class="doc-row" type="button" data-action="open-project" data-id="${escapeHtml(project.id)}">
-        <span class="doc-icon">${project.status === "generated" ? "P" : "▤"}</span>
-        <span class="doc-main">
-          <h3>${escapeHtml(project.documentName || "Documento")}</h3>
-          <p>${escapeHtml(project.unitId)} · ${escapeHtml(project.processCode)} · ${new Date(project.updatedAt).toLocaleDateString()}</p>
+  function saveHomeFavoriteIds(ids) {
+    try {
+      localStorage.setItem(HOME_FAVORITES_KEY, JSON.stringify(Array.from(new Set(ids || [])).slice(0, 12)));
+    } catch (_error) {
+      // Los favoritos son una comodidad local; nunca deben bloquear la app.
+    }
+  }
+
+  function homeSelectedUnit() {
+    return state.homeUnitId ? catalog.findUnit(state.homeUnitId) : null;
+  }
+
+  function homeUnitOrder() {
+    const byId = new Map((catalog.units || []).map((unit) => [unit.id, unit]));
+    return ["UGPA", "UTET"]
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .concat((catalog.units || []).filter((unit) => !["UGPA", "UTET"].includes(unit.id)));
+  }
+
+  function homeSearchScore(query, primary, searchable) {
+    const q = normalizeHomeSearch(query);
+    if (!q) return 1;
+    const main = normalizeHomeSearch(primary);
+    const text = normalizeHomeSearch(searchable);
+    const tokens = q.split(" ").filter(Boolean);
+    if (!tokens.every((token) => text.includes(token))) return 0;
+    let score = 0;
+    if (main === q) score += 160;
+    if (main.startsWith(q)) score += 100;
+    if (main.includes(q)) score += 70;
+    if (text.includes(q)) score += 40;
+    tokens.forEach((token) => {
+      if (main.startsWith(token)) score += 18;
+      else if (main.includes(token)) score += 12;
+      else score += 5;
+    });
+    return score;
+  }
+
+  function homeDocumentMatches(query, limit) {
+    const selected = state.homeUnitId;
+    return catalog.allDocuments()
+      .filter((item) => !selected || item.unit.id === selected)
+      .map((item) => {
+        const searchable = [
+          item.document.name,
+          item.document.code,
+          item.document.type,
+          item.process.name,
+          item.process.fullName,
+          item.process.code,
+          item.unit.id,
+          item.unit.name,
+          item.unit.fullName
+        ].join(" ");
+        return Object.assign({}, item, {
+          score: homeSearchScore(query, item.document.name, searchable)
+        });
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.document.name.localeCompare(b.document.name, "es"))
+      .slice(0, Number(limit || 6));
+  }
+
+  function homeProcessMatches(query, limit) {
+    const selected = state.homeUnitId;
+    const items = (catalog.units || []).flatMap((unit) =>
+      (unit.processes || []).map((process) => ({ unit, process }))
+    );
+    return items
+      .filter((item) => !selected || item.unit.id === selected)
+      .map((item) => {
+        const searchable = [
+          item.process.name,
+          item.process.fullName,
+          item.process.code,
+          item.unit.id,
+          item.unit.name,
+          item.unit.fullName,
+          ...(item.process.documents || []).map((document) => `${document.name} ${document.code}`)
+        ].join(" ");
+        return Object.assign({}, item, {
+          score: homeSearchScore(query, item.process.name, searchable)
+        });
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.process.name.localeCompare(b.process.name, "es"))
+      .slice(0, Number(limit || 4));
+  }
+
+  function homeProcessBrowserMarkup() {
+    const unit = homeSelectedUnit();
+    if (!unit) {
+      return `
+        <div class="home-search-empty">
+          <b>Selecciona UGPA o UTET</b>
+          <span>Verás sus procesos aquí. También puedes buscar directamente en todo el catálogo.</span>
+        </div>
+      `;
+    }
+    return `
+      <div class="home-process-head">
+        <span>Procesos de <b>${escapeHtml(unit.short)}</b></span>
+        <button class="home-link" type="button" data-action="open-unit" data-id="${escapeHtml(unit.id)}">Ver todos</button>
+      </div>
+      <div class="home-process-browser">
+        ${(unit.processes || []).map((process) => `
+          <button class="home-process-item" type="button" data-action="open-process" data-id="${escapeHtml(process.id)}">
+            <span>
+              <b>${escapeHtml(process.name)}</b>
+              <small>${escapeHtml(process.code)}</small>
+            </span>
+            <em>${process.documents.length}</em>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function homePredictorMarkup(query) {
+    const clean = String(query || "").trim();
+    if (!clean) return homeProcessBrowserMarkup();
+    const documents = homeDocumentMatches(clean, 6);
+    const processes = homeProcessMatches(clean, 3);
+    const favoriteIds = new Set(homeFavoriteIds());
+    if (!documents.length && !processes.length) {
+      return `
+        <div class="home-search-empty">
+          <b>Sin coincidencias</b>
+          <span>Prueba por nombre, código, proceso o palabra clave.</span>
+        </div>
+      `;
+    }
+    return `
+      <div class="home-predictor-groups">
+        ${documents.length ? `
+          <div class="home-result-label">Documentos</div>
+          ${documents.map(({ unit, process, document }) => `
+            <div class="home-result-row">
+              <button class="home-result-open" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
+                <span class="home-result-unit ${escapeHtml(unit.id.toLowerCase())}">${escapeHtml(unit.short)}</span>
+                <span class="home-result-copy">
+                  <b>${escapeHtml(document.name)}</b>
+                  <small>${escapeHtml(process.name)} · ${escapeHtml(document.code)}</small>
+                </span>
+                <span class="home-result-arrow">→</span>
+              </button>
+              <button
+                class="home-favorite-toggle ${favoriteIds.has(document.id) ? "active" : ""}"
+                type="button"
+                data-action="toggle-home-favorite"
+                data-id="${escapeHtml(document.id)}"
+                aria-label="${favoriteIds.has(document.id) ? "Quitar de favoritos" : "Agregar a favoritos"}"
+                title="${favoriteIds.has(document.id) ? "Quitar de favoritos" : "Agregar a favoritos"}"
+              >${favoriteIds.has(document.id) ? "★" : "☆"}</button>
+            </div>
+          `).join("")}
+        ` : ""}
+        ${processes.length ? `
+          <div class="home-result-label">Procesos</div>
+          ${processes.map(({ unit, process }) => `
+            <button class="home-result-row home-result-process" type="button" data-action="open-process" data-id="${escapeHtml(process.id)}">
+              <span class="home-result-unit ${escapeHtml(unit.id.toLowerCase())}">${escapeHtml(unit.short)}</span>
+              <span class="home-result-copy">
+                <b>${escapeHtml(process.name)}</b>
+                <small>${escapeHtml(process.fullName)} · ${process.documents.length} documentos</small>
+              </span>
+              <span class="home-result-arrow">→</span>
+            </button>
+          `).join("")}
+        ` : ""}
+      </div>
+    `;
+  }
+
+  function homeQuickAccessMarkup() {
+    const favorites = homeFavoriteIds()
+      .map((id) => catalog.findDocument(id))
+      .filter(Boolean);
+    const recentIds = [];
+    [...state.projects]
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+      .forEach((project) => {
+        if (project.documentId && !recentIds.includes(project.documentId)) recentIds.push(project.documentId);
+      });
+    const items = (favorites.length
+      ? favorites
+      : recentIds.map((id) => catalog.findDocument(id)).filter(Boolean))
+      .slice(0, 4);
+    if (!items.length) {
+      return '<div class="home-mini-empty">Busca un documento y usa ☆ para dejarlo aquí.</div>';
+    }
+    return `<div class="home-quick-list">${items.map(({ unit, process, document }) => `
+      <button class="home-quick-item" type="button" data-action="new-document" data-id="${escapeHtml(document.id)}">
+        <span class="home-quick-mark ${escapeHtml(unit.id.toLowerCase())}">${escapeHtml(unit.short.slice(0, 1))}</span>
+        <span>
+          <b>${escapeHtml(document.name)}</b>
+          <small>${escapeHtml(unit.short)} · ${escapeHtml(process.name)}</small>
         </span>
-        <span class="status ${statusClass(project.status)}">${statusLabel(project.status)}</span>
+        <em>→</em>
       </button>
     `).join("")}</div>`;
   }
 
+  function homeContinueMarkup() {
+    const items = [...state.projects]
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+      .slice(0, 3);
+    if (!items.length) {
+      return '<div class="home-mini-empty">Tus borradores recientes aparecerán aquí.</div>';
+    }
+    return `<div class="home-continue-list">${items.map((project) => {
+      const found = catalog.findDocument(project.documentId);
+      const context = found
+        ? `${found.unit.short} · ${found.process.name}`
+        : [project.unitId, project.processCode].filter(Boolean).join(" · ");
+      return `
+        <button class="home-continue-item" type="button" data-action="open-project" data-id="${escapeHtml(project.id)}">
+          <span class="home-continue-copy">
+            <b>${escapeHtml(project.documentName || "Documento")}</b>
+            <small>${escapeHtml(context)}</small>
+          </span>
+          <span class="status ${statusClass(project.status)}">${statusLabel(project.status)}</span>
+          <span class="home-result-arrow">→</span>
+        </button>
+      `;
+    }).join("")}</div>`;
+  }
+
   function renderHome() {
-    setHeader("Documentos", "Inicio", false);
+    setHeader("Documentos institucionales", "Inicio", false);
     const generated = state.projects.filter((item) => item.status === "generated").length;
     const drafts = state.projects.filter((item) => item.status === "draft" || item.status === "analyzed").length;
     const activeTemplates = state.templates.filter(templateIsUsable).length;
-
+    const selectedUnit = homeSelectedUnit();
+    const units = homeUnitOrder();
     view.innerHTML = `
-      <div class="hero">
-        <section class="hero-copy">
-          <h2>Plantilla → PDF.</h2>
-          <p>Elige el documento. La plantilla decide qué datos pedir.</p>
-        </section>
-        <section class="hero-side">
-          <div class="quick-line"><span>PDF</span><b>${generated}</b></div>
-          <div class="quick-line"><span>Borradores</span><b>${drafts}</b></div>
-          <div class="quick-line"><span>Plantillas activas</span><b>${activeTemplates}</b></div>
-        </section>
+      <div class="home-dashboard">
+        <div class="home-intro">
+          <div>
+            <h2>¿Qué necesitas crear o continuar?</h2>
+            <p>Elige una unidad o encuentra directamente el documento.</p>
+          </div>
+          <div class="home-stats" aria-label="Resumen">
+            <span><b>${drafts}</b> borradores</span>
+            <span><b>${activeTemplates}</b> plantillas</span>
+            <span><b>${generated}</b> finalizados</span>
+          </div>
+        </div>
+  
+        <div class="home-unit-grid" aria-label="Unidades">
+          ${units.map((unit) => {
+            const documentCount = (unit.processes || []).reduce((sum, process) => sum + (process.documents || []).length, 0);
+            const active = state.homeUnitId === unit.id;
+            return `
+              <button
+                class="home-unit-card ${escapeHtml(unit.id.toLowerCase())} ${active ? "active" : ""}"
+                type="button"
+                data-action="filter-home-unit"
+                data-id="${escapeHtml(unit.id)}"
+                aria-pressed="${active ? "true" : "false"}"
+              >
+                <span class="home-unit-title">${escapeHtml(unit.short)}</span>
+                <span class="home-unit-copy">
+                  <b>${escapeHtml(unit.fullName)}</b>
+                  <small>${unit.processes.length} procesos · ${documentCount} documentos</small>
+                </span>
+                <span class="home-unit-arrow">${active ? "✓" : "→"}</span>
+              </button>
+            `;
+          }).join("")}
+        </div>
+  
+        <div class="home-search-area">
+          <div class="home-search-shell">
+            <span class="home-search-icon">⌕</span>
+            <input
+              id="homeSearch"
+              class="home-search-input"
+              type="search"
+              autocomplete="off"
+              value="${escapeHtml(state.homeSearch || "")}"
+              placeholder="${escapeHtml(selectedUnit ? `Buscar en ${selectedUnit.short}: documento, proceso o código...` : "Buscar documento, proceso o código...")}"
+              role="combobox"
+              aria-controls="homePredictor"
+              aria-expanded="${state.homeSearch || state.homeUnitId ? "true" : "false"}"
+            />
+            ${selectedUnit ? `
+              <button class="home-filter-chip" type="button" data-action="clear-home-unit" title="Buscar en todas las unidades">
+                ${escapeHtml(selectedUnit.short)} ×
+              </button>
+            ` : ""}
+          </div>
+          <div id="homePredictor" class="home-predictor">
+            ${homePredictorMarkup(state.homeSearch)}
+          </div>
+        </div>
+  
+        <div class="home-lower-grid">
+          <section class="home-compact-panel">
+            <div class="home-panel-head">
+              <div>
+                <h3>${homeFavoriteIds().length ? "Favoritos" : "Accesos rápidos"}</h3>
+                <span>${homeFavoriteIds().length ? "Tus documentos frecuentes" : "Basado en tu actividad reciente"}</span>
+              </div>
+            </div>
+            ${homeQuickAccessMarkup()}
+          </section>
+  
+          <section class="home-compact-panel">
+            <div class="home-panel-head">
+              <div>
+                <h3>Continuar trabajando</h3>
+                <span>Últimos borradores y documentos</span>
+              </div>
+              <button class="home-link" type="button" data-route="library">Ver todos</button>
+            </div>
+            ${homeContinueMarkup()}
+          </section>
+        </div>
       </div>
-      <div class="section-head"><div><h2>Unidades</h2></div></div>
-      <div class="unit-grid">${catalog.units.map(unitCard).join("")}</div>
-      <div class="section-head"><div><h2>Recientes</h2></div><button class="ghost" type="button" data-route="library">Ver todos</button></div>
-      ${projectRows(state.projects, 5)}
     `;
   }
 
@@ -2151,6 +2447,13 @@
       scheduleSave();
     }
 
+    if (event.target.id === "homeSearch") {
+      state.homeSearch = event.target.value;
+      const predictor = document.getElementById("homePredictor");
+      if (predictor) predictor.innerHTML = homePredictorMarkup(state.homeSearch);
+      event.target.setAttribute("aria-expanded", state.homeSearch || state.homeUnitId ? "true" : "false");
+    }
+
     if (event.target.id === "externalAiGuide") state.externalAi.guide = event.target.value;
     if (event.target.id === "externalAiResponse") state.externalAi.response = event.target.value;
     if (event.target.id === "librarySearch") renderLibrary(event.target.value);
@@ -2161,6 +2464,27 @@
     if (event.target.id === "careerSelector") changeGuideCareer(Number(event.target.value));
   });
 
+  view.addEventListener("keydown", (event) => {
+    if (event.target.id !== "homeSearch") return;
+
+    if (event.key === "Escape") {
+      state.homeSearch = "";
+      event.target.value = "";
+      const predictor = document.getElementById("homePredictor");
+      if (predictor) predictor.innerHTML = homePredictorMarkup("");
+      event.target.setAttribute("aria-expanded", state.homeUnitId ? "true" : "false");
+      return;
+    }
+
+    if (event.key === "Enter" && String(event.target.value || "").trim()) {
+      event.preventDefault();
+      const documentMatch = homeDocumentMatches(event.target.value, 1)[0];
+      if (documentMatch) return navigate("editor", { documentId: documentMatch.document.id });
+      const processMatch = homeProcessMatches(event.target.value, 1)[0];
+      if (processMatch) return navigate("process", { processId: processMatch.process.id });
+    }
+  });
+
   document.addEventListener("click", async (event) => {
     const routeButton = event.target.closest("[data-route]");
     if (routeButton) return navigate(routeButton.dataset.route);
@@ -2169,6 +2493,42 @@
     if (!button || state.busy) return;
 
     const action = button.dataset.action;
+    if (action === "filter-home-unit") {
+      state.homeUnitId = state.homeUnitId === button.dataset.id ? "" : button.dataset.id;
+      state.homeSearch = "";
+      renderHome();
+      setTimeout(() => {
+        const input = document.getElementById("homeSearch");
+        if (input) input.focus();
+      }, 0);
+      return;
+    }
+    if (action === "clear-home-unit") {
+      state.homeUnitId = "";
+      renderHome();
+      setTimeout(() => {
+        const input = document.getElementById("homeSearch");
+        if (input) input.focus();
+      }, 0);
+      return;
+    }
+    if (action === "toggle-home-favorite") {
+      const ids = homeFavoriteIds();
+      const documentId = button.dataset.id;
+      const next = ids.includes(documentId)
+        ? ids.filter((id) => id !== documentId)
+        : [documentId, ...ids];
+      saveHomeFavoriteIds(next);
+      renderHome();
+      setTimeout(() => {
+        const input = document.getElementById("homeSearch");
+        if (input) {
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+      }, 0);
+      return;
+    }
     if (action === "open-unit") return navigate("unit", { unitId: button.dataset.id });
     if (action === "open-process") return navigate("process", { processId: button.dataset.id });
     if (action === "new-document") return navigate("editor", { documentId: button.dataset.id });
