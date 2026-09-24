@@ -228,15 +228,37 @@
     `).join("")}</div>`;
   }
 
+  function mappedFieldCount(mapping) {
+    const input = mapping && typeof mapping === "object" ? mapping : {};
+    const base = input.fields && typeof input.fields === "object"
+      ? input.fields
+      : Object.fromEntries(Object.entries(input).filter(([key]) => !["sheets", "sheetFields", "version"].includes(key)));
+    let total = Object.keys(base || {}).length;
+    const perSheet = input.sheets || input.sheetFields || {};
+    Object.values(perSheet || {}).forEach((value) => {
+      const fields = value && value.fields && typeof value.fields === "object" ? value.fields : value;
+      if (fields && typeof fields === "object") total += Object.keys(fields).length;
+    });
+    return total;
+  }
+
   function importsHtml() {
     if (!(state.imports || []).length) return '<div class="empty compact-empty"><b>Sin archivos de datos</b>El motor está listo para uno o varios Excel/CSV.</div>';
     return `<div class="arch-data-list">${state.imports.map((item) => {
       const profile = item.profile || {};
       const sheets = profile.sheets || [];
+      const mapped = mappedFieldCount(item.mapping || {});
       return `
         <div class="arch-data-row">
-          <div><b>${escapeHtml(item.sourceName)}</b><small>${Number(profile.totalRows || 0)} filas · ${sheets.length} hoja(s)</small></div>
-          <span class="status good">Validado</span>
+          <div>
+            <b>${escapeHtml(item.sourceName)}</b>
+            <small>${Number(profile.totalRows || 0)} filas · ${sheets.length} hoja(s) · alcance: ${escapeHtml(item.scopeType || "dossier")}${item.scopeKey ? " / " + escapeHtml(item.scopeKey) : ""}</small>
+            <small class="${mapped ? "arch-ok-text" : "arch-warn-text"}">Mapeo canónico: ${mapped ? mapped + " campo(s)" : "pendiente"} · SHA-256 ${escapeHtml(String(item.sha256 || "").slice(0, 12))}…</small>
+          </div>
+          <div class="button-row">
+            <button class="ghost small-inline" data-arch-action="suggest-mapping" data-id="${escapeHtml(item.id)}">Sugerir</button>
+            <button class="secondary small-inline" data-arch-action="edit-mapping" data-id="${escapeHtml(item.id)}">Mapeo</button>
+          </div>
         </div>
       `;
     }).join("")}</div>`;
@@ -541,6 +563,54 @@
     await renderDossier(state.dossier.id);
   }
 
+  async function suggestMapping(importId) {
+    const response = await api.suggestDataMapping(importId);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo analizar el mapeo.");
+    const suggestion = response.suggestion || {};
+    const lines = [];
+    (suggestion.sheets || []).forEach((sheet) => {
+      lines.push(`[${sheet.sheet}]`);
+      const entries = Object.entries(sheet.suggestions || {});
+      if (!entries.length) lines.push("  Sin sugerencias seguras.");
+      entries.forEach(([canonical, item]) => {
+        lines.push(`  ${canonical} ← ${item.source} (${Math.round(Number(item.confidence || 0) * 100)}%)`);
+      });
+    });
+    window.alert(`Sugerencias de mapeo para ${suggestion.sourceName || "archivo"}\n\n${lines.join("\n")}\n\nEstas sugerencias no se aplican automáticamente.`);
+  }
+
+  async function editMapping(importId) {
+    const item = (state.imports || []).find((entry) => entry.id === importId);
+    if (!item) return;
+    const example = {
+      fields: {
+        student_id: "Cédula",
+        student_name: "Estudiante",
+        career: "Carrera",
+        campus: "Sede",
+        core: "Núcleo",
+        component: "Componente",
+        grade: "Nota"
+      }
+    };
+    const initial = Object.keys(item.mapping || {}).length
+      ? JSON.stringify(item.mapping, null, 2)
+      : JSON.stringify(example, null, 2);
+    const raw = window.prompt("Mapeo canónico JSON. Cambia únicamente las columnas que existan en tu Excel:", initial);
+    if (raw == null) return;
+    let mapping;
+    try {
+      mapping = JSON.parse(raw);
+    } catch (_error) {
+      return toast("El mapeo debe ser JSON válido.");
+    }
+    const response = await api.saveDataMapping(importId, mapping);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo guardar el mapeo.");
+    const warnings = response.dataImport && response.dataImport.mappingValidation && response.dataImport.mappingValidation.warnings || [];
+    toast(warnings.length ? `Mapeo guardado con ${warnings.length} advertencia(s).` : "Mapeo guardado y listo para consultas.");
+    await renderDossier(state.dossier.id);
+  }
+
   async function addKnowledge() {
     const response = await api.addKnowledgeSource(state.dossier.id, {
       sourceType: "institutional",
@@ -715,6 +785,8 @@
       if (action === "open-dossier") { state.instance = null; return renderDossier(button.dataset.id); }
       if (action === "add-master") return addMaster();
       if (action === "add-data-import") return addDataImport();
+      if (action === "suggest-mapping") return suggestMapping(button.dataset.id);
+      if (action === "edit-mapping") return editMapping(button.dataset.id);
       if (action === "add-knowledge") return addKnowledge();
       if (action === "clone-dossier") return cloneDossier();
       if (action === "edit-citation") return editCitation(button.dataset.sourceId);
