@@ -114,28 +114,115 @@ function parseJson(value, fallback) {
   try { return JSON.parse(value || ""); } catch (_error) { return fallback; }
 }
 
+
+function splitAuthors(author, metadata) {
+  if (metadata && Array.isArray(metadata.authors) && metadata.authors.length) {
+    return metadata.authors.map((item) => {
+      if (typeof item === "string") return clean(item);
+      if (!item || typeof item !== "object") return "";
+      const family = clean(item.family || item.surname || item.lastName);
+      const given = clean(item.given || item.initials || item.firstName);
+      return [family, given].filter(Boolean).join(", ");
+    }).filter(Boolean);
+  }
+  const raw = clean(author);
+  if (!raw) return [];
+  return raw.split(/\s*[;|]\s*/).map(clean).filter(Boolean);
+}
+
+function surname(author) {
+  const raw = clean(author);
+  if (!raw) return "";
+  if (raw.includes(",")) return clean(raw.split(",")[0]);
+  const parts = raw.split(/\s+/);
+  return parts[parts.length - 1];
+}
+
+function canonicalYear(year, metadata) {
+  const direct = clean(year);
+  if (direct) return direct;
+  const date = clean(metadata && (metadata.date || metadata.publicationDate));
+  const match = date.match(/^(\d{4})/);
+  return match ? match[1] : "";
+}
+
+function validateCitation(citation) {
+  const c = citation || {};
+  const type = normalizeSourceType(c.sourceType);
+  const metadata = c.metadata || {};
+  const errors = [];
+  const warnings = [];
+  const authors = splitAuthors(c.author, metadata);
+  const hasAuthor = Boolean(clean(c.corporateAuthor) || authors.length);
+  const hasDate = Boolean(clean(c.year) || clean(metadata.date) || clean(metadata.publicationDate));
+
+  if (!clean(c.title)) errors.push("Falta el título.");
+  if (!hasDate) errors.push("Falta el año o fecha de publicación.");
+
+  if (["journal_article", "book", "book_chapter", "thesis", "webpage", "report", "institutional", "policy", "manual", "standard", "conference_paper", "dataset"].includes(type) && !hasAuthor) {
+    errors.push("Falta autor personal o institucional.");
+  }
+
+  if (type === "journal_article") {
+    if (!authors.length) errors.push("Un artículo científico necesita autor personal.");
+    if (!clean(metadata.journalTitle)) errors.push("Falta el nombre de la revista.");
+    if (!clean(metadata.volume)) warnings.push("No se registró volumen de revista.");
+  }
+  if (type === "book" && !clean(c.publisher || metadata.publisher)) errors.push("Falta la editorial.");
+  if (type === "book_chapter") {
+    if (!clean(metadata.bookTitle)) errors.push("Falta el título del libro.");
+    if (!clean(c.publisher || metadata.publisher)) errors.push("Falta la editorial del libro.");
+  }
+  if (type === "thesis") {
+    if (!clean(metadata.institution)) errors.push("Falta la institución de la tesis.");
+    if (!clean(metadata.thesisType)) errors.push("Falta el tipo de tesis/trabajo académico.");
+  }
+  if (type === "webpage" && !normalizeUrl(c.url || metadata.url)) errors.push("Una página web necesita URL.");
+  if (type === "law" && !clean(metadata.legalNumber || metadata.identifier || metadata.officialPublication)) {
+    errors.push("La norma legal necesita número/identificador o publicación oficial.");
+  }
+  if (["regulation", "resolution"].includes(type) && !clean(c.corporateAuthor || metadata.issuingBody)) {
+    errors.push("Falta el organismo emisor.");
+  }
+  if (type === "resolution" && !clean(metadata.identifier || metadata.resolutionNumber)) {
+    errors.push("Falta el número/identificador de la resolución.");
+  }
+  if (type === "standard" && !clean(metadata.standardNumber || metadata.identifier)) {
+    errors.push("Falta el número de la norma técnica.");
+  }
+  if (type === "conference_paper" && !clean(metadata.conferenceName)) {
+    errors.push("Falta el nombre del congreso/evento.");
+  }
+  if (type === "dataset" && !clean(c.publisher || metadata.repository || metadata.publisher)) {
+    warnings.push("No se registró repositorio/editor del conjunto de datos.");
+  }
+  return { ok: errors.length === 0, errors, warnings, sourceType: type };
+}
+
 function rowToCitation(row) {
   if (!row) return null;
-  const complete = Boolean((row.author || row.corporate_author) && row.title && row.year);
-  return {
+  const metadata = parseJson(row.metadata_json, {});
+  const citation = {
     id: row.id,
     dossierId: row.dossier_id,
     sourceId: row.source_id || "",
     citationKey: row.citation_key,
-    sourceType: row.source_type,
+    sourceType: normalizeSourceType(row.source_type),
     author: row.author || "",
     corporateAuthor: row.corporate_author || "",
-    year: row.year || "",
+    year: canonicalYear(row.year, metadata),
     title: row.title || "",
     publisher: row.publisher || "",
     url: row.url || "",
     doi: row.doi || "",
-    metadata: parseJson(row.metadata_json, {}),
+    metadata,
     active: Boolean(row.active),
-    complete,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+  citation.validation = validateCitation(citation);
+  citation.complete = citation.validation.ok;
+  return citation;
 }
 
 function upsertCitation(userDataPath, dossierId, input) {
