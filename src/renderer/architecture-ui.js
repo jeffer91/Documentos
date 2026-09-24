@@ -383,19 +383,22 @@
   }
 
   function alertBlock(section) {
-    const alerts = section.alerts || [];
+    if (state.instance && state.instance.finalFrozenAt) return "";
+    const alerts = [];
+    (section.alerts || []).forEach((alert) => alerts.push(Object.assign({ source: "section" }, alert || {})));
+    (section.blocks || []).forEach((block) => {
+      (block.alerts || []).forEach((alert) => alerts.push(Object.assign({
+        source: "block",
+        blockKey: block.key || ""
+      }, alert || {})));
+    });
     if (!alerts.length) return "";
     return `<div class="arch-alerts">${alerts.map((alert) => `
       <div class="arch-alert ${alert.severity === "error" ? "error" : ""}">
-        <b>${escapeHtml(alert.type || "alerta")}</b>
+        <b>${escapeHtml(alert.type || "Alerta")}${alert.source === "block" && alert.blockKey ? " · " + escapeHtml(alert.blockKey) : ""}</b>
         <span>${escapeHtml(alert.message || "")}</span>
       </div>
     `).join("")}</div>`;
-  }
-
-  function visualLabel(id) {
-    const tool = state.capabilities && (state.capabilities.visualTools || []).find((item) => item.id === id);
-    return tool ? tool.label : id;
   }
 
   function blockSummary(section) {
@@ -499,7 +502,8 @@
     state.currentView = "instance";
     await loadInstance(instanceId || state.instance && state.instance.id);
     setHeader(state.instance.label, `Procesos / ${state.dossier ? state.dossier.label : "Documento"}`, true);
-    const alerts = state.instance.sections.reduce((sum, section) => sum + (section.alerts || []).length, 0);
+    const alertSummary = state.instance.alertTrace && state.instance.alertTrace.summary || { total: 0, bySeverity: {} };
+    const alerts = state.instance.finalFrozenAt ? 0 : Number(alertSummary.total || 0);
     const editorialErrors = state.editorialValidation && state.editorialValidation.errors || [];
     const editorialWarnings = state.editorialValidation && state.editorialValidation.warnings || [];
     const citationIssues = state.citationValidation
@@ -509,6 +513,7 @@
       ${editorialErrors.length ? `<div class="notice-warn"><b>Control editorial pendiente</b><span>${escapeHtml(editorialErrors.slice(0,3).join(" · "))}</span></div>` : ""}
       ${!editorialErrors.length && editorialWarnings.length ? `<div class="notice-soft"><b>Observaciones editoriales</b><span>${escapeHtml(editorialWarnings.slice(0,3).join(" · "))}</span></div>` : ""}
       ${citationIssues.length ? `<div class="notice-warn"><b>Citas APA pendientes</b><span>${escapeHtml(citationIssues.slice(0,6).join(", "))}</span></div>` : ""}
+      ${state.instance.finalFrozenAt && Number(alertSummary.total || 0) ? `<div class="notice-soft"><b>Trazabilidad interna</b><span>${Number(alertSummary.total || 0)} alerta(s) quedaron congeladas para auditoría. No forman parte de la versión final visible.</span></div>` : ""}
       ${state.instance.engineState === "frozen_historical" ? `<div class="notice-soft"><b>Versión final histórica</b><span>Esta versión permanece congelada con el motor v${escapeHtml(state.instance.engineVersion)}. El motor vigente es v${escapeHtml(state.instance.currentEngineVersion)} y no modificará esta final.</span></div>` : ""}
       ${state.instance.archivedSectionCount ? `<div class="notice-soft"><b>Historial estructural preservado</b><span>${Number(state.instance.archivedSectionCount)} sección(es) retirada(s) del motor permanecen archivadas y fuera del documento activo.</span></div>` : ""}
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Regenera las secciones no bloqueadas.</span></div>` : ""}
@@ -841,7 +846,10 @@
     const response = await api.freezeDocumentInstance(state.instance.id);
     if (!response || !response.ok) return toast(response && response.error || "No se pudo aprobar la versión final.");
     state.instance = response.instance;
-    toast("Versión final congelada. Los cambios futuros no la modificarán.");
+    const traceTotal = Number(state.instance.alertTrace && state.instance.alertTrace.summary && state.instance.alertTrace.summary.total || 0);
+    toast(traceTotal
+      ? `Versión final congelada. ${traceTotal} alerta(s) quedaron solo en trazabilidad interna.`
+      : "Versión final congelada. Los cambios futuros no la modificarán.");
     await renderInstance(state.instance.id);
   }
 
