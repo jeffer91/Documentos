@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("documentosApp", {
   ensureDocumentInstance: (dossierId, engineId, scope) => ipcRenderer.invoke("instances:ensure", dossierId, engineId, scope || {}),
   getDocumentInstance: (instanceId) => ipcRenderer.invoke("instances:get", instanceId),
   listDocumentInstances: (dossierId) => ipcRenderer.invoke("instances:list", dossierId),
+  listEngineMigrations: (instanceId) => ipcRenderer.invoke("instances:migrations", instanceId),
+  listArchivedDocumentSections: (instanceId) => ipcRenderer.invoke("instances:archived-sections", instanceId),
   updateDocumentSection: (instanceId, sectionKey, patch) => ipcRenderer.invoke("instances:update-section", instanceId, sectionKey, patch || {}),
   setDocumentSectionBlocks: (instanceId, sectionKey, blocks) => ipcRenderer.invoke("instances:set-blocks", instanceId, sectionKey, blocks || []),
   validateEditorialDocument: (instanceId) => ipcRenderer.invoke("editorial:validate", instanceId),
