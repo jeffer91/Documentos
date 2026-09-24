@@ -277,7 +277,10 @@
         <div>
           <b>${escapeHtml(item.name)}</b>
           <small>${escapeHtml(item.sourceType)} · ${Number(item.textLength || 0)} caracteres · SHA-256 registrado</small>
-          <small class="${citation && citation.complete ? "arch-ok-text" : "arch-warn-text"}">APA: ${citation && citation.complete ? "completo" : "pendiente de metadatos"}</small>
+          <small class="${citation && citation.complete ? "arch-ok-text" : "arch-warn-text"}">APA: ${citation && citation.complete ? "completo" : "pendiente de metadatos"}${citation && citation.sourceType ? " · " + escapeHtml(citation.sourceType) : ""}</small>
+          ${citation && !citation.complete && citation.validation && citation.validation.errors && citation.validation.errors.length
+            ? `<small class="arch-warn-text">${escapeHtml(citation.validation.errors.slice(0, 2).join(" · "))}</small>`
+            : ""}
         </div>
         <div class="button-row">
           <button class="ghost small-inline" data-arch-action="edit-citation" data-source-id="${escapeHtml(item.id)}">APA</button>
@@ -623,28 +626,84 @@
     await renderDossier(state.dossier.id);
   }
 
+  function citationMetadataTemplate(type, current) {
+    const meta = Object.assign({}, current && current.metadata || {});
+    const pick = (keys) => Object.fromEntries(keys.map((key) => [key, meta[key] || ""]));
+    if (type === "journal_article") return pick(["journalTitle", "volume", "issue", "pages", "date"]);
+    if (type === "book") return pick(["edition", "date"]);
+    if (type === "book_chapter") return pick(["bookTitle", "editors", "pages", "date"]);
+    if (type === "thesis") return pick(["thesisType", "institution", "repository", "date"]);
+    if (type === "webpage") return pick(["siteName", "date"]);
+    if (type === "report") return pick(["reportNumber", "date"]);
+    if (type === "law") return pick(["legalNumber", "officialPublication", "jurisdiction", "date", "shortTitle"]);
+    if (type === "regulation") return pick(["issuingBody", "regulationNumber", "officialPublication", "date", "shortTitle"]);
+    if (type === "resolution") return pick(["issuingBody", "resolutionNumber", "identifier", "officialPublication", "date", "shortTitle"]);
+    if (type === "standard") return pick(["standardNumber", "identifier", "date"]);
+    if (type === "conference_paper") return pick(["conferenceName", "location", "date"]);
+    if (type === "dataset") return pick(["repository", "date"]);
+    return pick(["documentCode", "version", "date", "shortTitle"]);
+  }
+
   async function editCitation(sourceId) {
     const source = (state.knowledgeSources || []).find((item) => item.id === sourceId);
     if (!source) return;
     const current = citationForSource(sourceId) || {};
-    const corporateAuthor = window.prompt("Autor institucional/corporativo (deja vacío si es autor personal):", current.corporateAuthor || "");
+    const types = state.capabilities && state.capabilities.citationTypes || [];
+    const fallbackTypes = [
+      { id: "institutional", label: "Documento institucional" },
+      { id: "journal_article", label: "Artículo científico" },
+      { id: "book", label: "Libro" },
+      { id: "thesis", label: "Tesis" },
+      { id: "webpage", label: "Página web" },
+      { id: "report", label: "Informe" },
+      { id: "law", label: "Ley" },
+      { id: "regulation", label: "Reglamento" },
+      { id: "resolution", label: "Resolución" }
+    ];
+    const available = types.length ? types : fallbackTypes;
+    const currentIndex = Math.max(0, available.findIndex((item) => item.id === current.sourceType));
+    const menu = available.map((item, index) => (index + 1) + ". " + item.label + " [" + item.id + "]").join("\n");
+    const selected = window.prompt("Tipo de fuente APA 7:\n\n" + menu + "\n\nEscribe el número:", String(currentIndex + 1));
+    if (selected == null) return;
+    const typeIndex = Number(selected) - 1;
+    if (!Number.isInteger(typeIndex) || typeIndex < 0 || typeIndex >= available.length) return toast("Tipo de fuente no válido.");
+    const sourceType = available[typeIndex].id;
+
+    const corporateAuthor = window.prompt("Autor institucional/corporativo (vacío si son autores personales):", current.corporateAuthor || "");
     if (corporateAuthor == null) return;
-    const author = window.prompt("Autor personal en formato Apellido, Iniciales (opcional):", current.author || "");
+    const author = window.prompt("Autor(es) personales. Usa “Apellido, Iniciales; Apellido, Iniciales” para varios:", current.author || "");
     if (author == null) return;
-    const year = window.prompt("Año de publicación (o s. f. si realmente no existe):", current.year || "");
+    const year = window.prompt("Año (ej. 2026). Si hay fecha completa, puedes dejarlo vacío y ponerla en metadatos:", current.year || "");
     if (year == null) return;
     const titleValue = window.prompt("Título de la fuente:", current.title || source.name || "");
     if (titleValue == null) return;
-    const publisher = window.prompt("Editorial / institución publicadora (opcional):", current.publisher || "");
+    const publisher = window.prompt("Editorial / institución publicadora (cuando corresponda):", current.publisher || "");
     if (publisher == null) return;
-    const url = window.prompt("URL (opcional):", current.url || "");
+    const url = window.prompt("URL (cuando corresponda):", current.url || "");
     if (url == null) return;
-    const doi = window.prompt("DOI (opcional):", current.doi || "");
+    const doi = window.prompt("DOI (cuando corresponda):", current.doi || "");
     if (doi == null) return;
+
+    const template = citationMetadataTemplate(sourceType, current);
+    const metadataRaw = window.prompt(
+      "Metadatos específicos en JSON. Completa los campos que correspondan al tipo seleccionado:",
+      JSON.stringify(template, null, 2)
+    );
+    if (metadataRaw == null) return;
+    let metadata;
+    try {
+      metadata = Object.assign({}, current.metadata || {}, JSON.parse(metadataRaw), {
+        reviewedByHuman: true,
+        provisional: false
+      });
+    } catch (_error) {
+      return toast("Los metadatos APA deben ser JSON válido.");
+    }
+
     const response = await api.saveCitation(state.dossier.id, {
-      citationKey: current.citationKey || `SRC:${sourceId}`,
+      citationKey: current.citationKey || "SRC:" + sourceId,
       sourceId,
-      sourceType: source.sourceType || "institutional",
+      sourceType,
       corporateAuthor,
       author,
       year,
@@ -652,10 +711,16 @@
       publisher,
       url,
       doi,
-      metadata: Object.assign({}, current.metadata || {}, { reviewedByHuman: true })
+      metadata
     });
     if (!response || !response.ok) return toast(response && response.error || "No se pudo guardar la referencia APA.");
-    toast("Metadatos APA guardados.");
+    const saved = response.citation;
+    if (saved && !saved.complete) {
+      const errors = saved.validation && saved.validation.errors || [];
+      toast("Referencia guardada, pero todavía está incompleta: " + errors.slice(0, 2).join(" · "));
+    } else {
+      toast("Referencia APA 7 completa y guardada.");
+    }
     await renderDossier(state.dossier.id);
   }
 
