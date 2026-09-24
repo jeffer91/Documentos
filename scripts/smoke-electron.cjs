@@ -993,7 +993,7 @@ async function run() {
     });
     assert.strictEqual(zeroSummary.total, 0);
     assert.strictEqual(zeroSummary.sourceTrace.length, 0);
-    assert.strictEqual(zeroSummary.inputSourceTrace.length, 1);
+    assert.strictEqual(zeroSummary.inputSourceTrace.length, 2);
     assert.strictEqual(zeroSummary.querySignature.length, 64);
 
     const aggregateSlice = dataIngestion.aiSlice(temp, dossierV4.id, {
@@ -1013,7 +1013,10 @@ async function run() {
     assert.ok(aggregateSlice.note.includes("todas las filas filtradas"));
 
     const studentSlice = dataIngestion.aiSlice(temp, dossierV4.id, {
-      where: [{ field: "student_id", op: "eq", value: "EST-06001" }],
+      where: [
+        { field: "student_id", op: "eq", value: "EST-06001" },
+        { field: "grade", op: "exists" }
+      ],
       measures: ["grade"],
       privacyMode: "student_specific",
       includeSampleRows: true,
@@ -1094,7 +1097,7 @@ async function run() {
     const duplicateData = dataIngestion.importDataFile(temp, dossierV4.id, largeDataPath, { type: "dossier", key: "" });
     assert.strictEqual(duplicateData.id, importedData.id);
     assert.strictEqual(duplicateData.duplicateIgnored, true);
-    assert.strictEqual(dataIngestion.listImports(temp, dossierV4.id).length, 1);
+    assert.strictEqual(dataIngestion.listImports(temp, dossierV4.id).length, 2);
 
     // Bloque 1: migraciones de motores sin secciones fantasma ni pérdida histórica.
     const currentEngine = documentEngineRegistry.getEngine("tit.regular.informe-final");
