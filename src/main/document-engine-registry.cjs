@@ -204,14 +204,9 @@
     "ccc.comunicado-matriz": Object.freeze(["ANTECEDENTE","INFORMACION","DISPOSICIONES"])
   });
 
-  function deepClone(value) {
-    if (Array.isArray(value)) return value.map(deepClone);
-    if (!value || typeof value !== "object") return value;
-    return Object.keys(value).reduce((acc, key) => {
-      acc[key] = deepClone(value[key]);
-      return acc;
-    }, {});
-  }
+  const ALL_VISUAL_TOOLS = Array.from(new Set(
+    Object.values(VISUAL_TOOLSETS).flat()
+  ));
 
   function deepFreeze(value) {
     if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -219,52 +214,37 @@
     return Object.freeze(value);
   }
 
-  function cloneNode(item, order, ownerEngineId) {
-    const copy = deepClone(item || {});
-    copy.order = order;
-    copy.definitionOwner = ownerEngineId || copy.definitionOwner || "";
-    copy.allowedVisuals = Array.isArray(copy.allowedVisuals) ? copy.allowedVisuals.slice() : [];
-    copy.derivedFrom = Array.isArray(copy.derivedFrom) ? copy.derivedFrom.slice() : [];
-    copy.data = copy.data && typeof copy.data === "object" ? deepClone(copy.data) : {};
-    copy.children = (copy.children || []).map((child, index) => cloneNode(child, index + 1, ownerEngineId));
-    return copy;
-  }
-
-  function materializeBlueprintEntry(entry, ownerEngineId, index) {
-    if (typeof entry === "string") {
-      const base = SECTION_LIBRARY[entry];
-      if (!base) throw new Error(`El motor ${ownerEngineId} usa una sección no registrada: ${entry}.`);
-      return cloneNode(base, index + 1, ownerEngineId);
-    }
-
-    if (entry && typeof entry === "object") {
-      const baseKey = entry.use || entry.key;
-      const base = entry.use ? SECTION_LIBRARY[baseKey] : {};
-      if (entry.use && !base) throw new Error(`El motor ${ownerEngineId} usa una sección no registrada: ${baseKey}.`);
-      const merged = Object.assign({}, deepClone(base || {}), deepClone(entry.overrides || entry));
-      delete merged.use;
-      delete merged.overrides;
-      return cloneNode(merged, index + 1, ownerEngineId);
-    }
-
-    throw new Error(`Blueprint inválido en ${ownerEngineId}, posición ${index + 1}.`);
-  }
-
-  function cloneSectionsForEngine(engineId) {
+  function compileSectionsForEngine(engineId) {
     const blueprint = ENGINE_BLUEPRINTS[engineId];
     if (!blueprint) throw new Error(`El motor ${engineId} no tiene blueprint independiente.`);
-    return blueprint.map((entry, index) => materializeBlueprintEntry(entry, engineId, index));
+    return outline.compileOutline(engineId, blueprint, SECTION_LIBRARY, {
+      allowedVisuals: ALL_VISUAL_TOOLS
+    });
   }
 
   function cloneEngine(item) {
-    if (!item) return null;
-    const copy = deepClone(item);
-    copy.sections = (item.sections || []).map((sectionItem, index) => cloneNode(sectionItem, index + 1, item.engineId));
-    copy.rules = Array.isArray(item.rules) ? item.rules.slice() : [];
-    copy.dependencies = Array.isArray(item.dependencies) ? item.dependencies.slice() : [];
-    copy.scopeKeys = Array.isArray(item.scopeKeys) ? item.scopeKeys.slice() : [];
-    copy.segments = Array.isArray(item.segments) ? item.segments.slice() : [];
-    return copy;
+    return item ? outline.deepClone(item) : null;
+  }
+
+  function engineStructureReport(engineId) {
+    const engine = engines.find((item) => item.engineId === engineId);
+    if (!engine) return null;
+    const validation = outline.validateCompiledOutline(engineId, engine.sections, {
+      allowedVisuals: ALL_VISUAL_TOOLS
+    });
+    return {
+      engineId,
+      outlineStatus: engine.outlineStatus || "scaffold",
+      outlineVersion: Number(engine.outlineVersion || 1),
+      ok: validation.ok,
+      errors: validation.errors,
+      warnings: validation.warnings,
+      summary: validation.summary
+    };
+  }
+
+  function allStructureReports() {
+    return engines.map((item) => engineStructureReport(item.engineId));
   }
 
   function registryIndependenceReport() {
