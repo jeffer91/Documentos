@@ -573,6 +573,50 @@ async function run() {
     assert.strictEqual(instanceV4.migrationRevision, 0);
     assert.strictEqual(instanceV4.engineState, "current");
 
+    // Nuevo Bloque 1: independencia real de los 33 motores.
+    const independenceReport = documentEngineRegistry.registryIndependenceReport();
+    assert.strictEqual(independenceReport.engineCount, 33);
+    assert.strictEqual(independenceReport.blueprintCount, 33);
+    assert.strictEqual(independenceReport.uniqueDefinitionOwners, 33);
+    assert.strictEqual(independenceReport.independent, true);
+    assert.deepStrictEqual(independenceReport.missingBlueprints, []);
+    assert.deepStrictEqual(independenceReport.orphanBlueprints, []);
+
+    const regularOwned = documentEngineRegistry.getEngine("tit.regular.informe-final");
+    const pvcOwned = documentEngineRegistry.getEngine("tit.pvc.informe-final");
+    assert.strictEqual(regularOwned.definitionOwner, "tit.regular.informe-final");
+    assert.strictEqual(pvcOwned.definitionOwner, "tit.pvc.informe-final");
+    assert.strictEqual(regularOwned.definitionSource, "engine_blueprint");
+    assert.strictEqual(pvcOwned.definitionSource, "engine_blueprint");
+    assert.ok(regularOwned.sections.every((item) => item.definitionOwner === regularOwned.engineId));
+    assert.ok(pvcOwned.sections.every((item) => item.definitionOwner === pvcOwned.engineId));
+    assert.notStrictEqual(regularOwned.sections, pvcOwned.sections);
+    assert.notStrictEqual(regularOwned.sections[0], pvcOwned.sections[0]);
+
+    const regularOriginalTitle = regularOwned.sections[0].title;
+    const pvcOriginalTitle = pvcOwned.sections[0].title;
+    regularOwned.sections[0].title = "Título mutado solo en copia";
+    regularOwned.dependencies.push("fake.dependency");
+    regularOwned.scopeKeys.push("fake-scope");
+    regularOwned.sections[0].data.runtimeMutation = true;
+
+    const regularReloadedOwned = documentEngineRegistry.getEngine("tit.regular.informe-final");
+    const pvcReloadedOwned = documentEngineRegistry.getEngine("tit.pvc.informe-final");
+    assert.strictEqual(regularReloadedOwned.sections[0].title, regularOriginalTitle);
+    assert.strictEqual(pvcReloadedOwned.sections[0].title, pvcOriginalTitle);
+    assert.ok(!regularReloadedOwned.dependencies.includes("fake.dependency"));
+    assert.ok(!regularReloadedOwned.scopeKeys.includes("fake-scope"));
+    assert.strictEqual(regularReloadedOwned.sections[0].data.runtimeMutation, undefined);
+
+    const regularBlueprintCopy = documentEngineRegistry.blueprintForEngine("tit.regular.informe-final");
+    regularBlueprintCopy.push("FAKE_SECTION");
+    assert.ok(!documentEngineRegistry.blueprintForEngine("tit.regular.informe-final").includes("FAKE_SECTION"));
+
+    // Los perfiles antiguos pueden coincidir como metadato, pero ya no construyen la estructura.
+    assert.strictEqual(regularReloadedOwned.profile, "report");
+    assert.strictEqual(pvcReloadedOwned.profile, "report");
+    assert.notStrictEqual(regularReloadedOwned.definitionOwner, pvcReloadedOwned.definitionOwner);
+
     // Bloque 2: jerarquía multinivel y reglas editoriales.
     const hierarchyInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.informe-final", {
       type: "period_population",

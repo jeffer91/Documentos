@@ -97,108 +97,219 @@
     annexes: section("ANEXOS", "Anexos", "annexes", { required: false, allowedVisuals: VISUAL_TOOLSETS.none })
   };
 
-  const profiles = {
-    detection: [
-      COMMON.intro, COMMON.legal, COMMON.alignment, COMMON.methodology,
-      section("CARACTERIZACION", "Caracterización del contexto", "data_ai"),
-      COMMON.results,
-      section("NECESIDADES_PRIORIZADAS", "Necesidades priorizadas", "derived_ai"),
-      COMMON.conclusions, COMMON.recommendations, COMMON.annexes
-    ],
-    planning: [
-      COMMON.intro, COMMON.legal, COMMON.alignment,
-      section("OBJETIVOS", "Objetivos", "semi_stable_ai"),
-      section("ALCANCE", "Alcance", "semi_stable_ai"),
-      COMMON.methodology,
-      section("PLANIFICACION", "Planificación", "data_ai"),
-      section("CRONOGRAMA", "Cronograma", "data_table"),
-      section("SEGUIMIENTO", "Seguimiento y control", "semi_stable_ai"),
-      COMMON.conclusions, COMMON.annexes
-    ],
-    report: [
-      COMMON.intro, COMMON.legal, COMMON.alignment, COMMON.methodology,
-      COMMON.results, COMMON.analysis, COMMON.executive,
-      COMMON.conclusions, COMMON.recommendations, COMMON.references, COMMON.annexes
-    ],
-    schedule: [
-      section("OBJETIVO", "Objetivo", "stable_ai"),
-      section("ALCANCE", "Alcance", "stable_ai"),
-      section("CRONOGRAMA", "Cronograma", "data_table"),
-      section("CONSIDERACIONES", "Consideraciones", "semi_stable_ai"),
-      COMMON.annexes
-    ],
-    designation: [
-      section("ANTECEDENTES", "Antecedentes", "stable_ai"),
-      section("CRITERIOS", "Criterios de designación", "semi_stable_ai"),
-      section("DESIGNACIONES", "Designaciones", "data_table"),
-      section("RESPONSABILIDADES", "Responsabilidades", "stable_ai"),
-      COMMON.annexes
-    ],
-    plagiarism: [
-      section("IDENTIFICACION", "Identificación", "data"),
-      section("FUENTE_ANTIPLAGIO", "Fuente del análisis", "data"),
-      section("RESULTADO_ANTIPLAGIO", "Resultado de antiplagio", "data_ai", { privacy: "student_specific" }),
-      section("OBSERVACIONES", "Observaciones", "ai"),
-      COMMON.annexes
-    ],
-    compactReport: [
-      COMMON.intro, COMMON.methodology, COMMON.results,
-      COMMON.analysis, COMMON.executive,
-      COMMON.conclusions, COMMON.recommendations, COMMON.references, COMMON.annexes
-    ],
-    curricular: [
-      COMMON.intro, COMMON.legal, COMMON.alignment, COMMON.methodology,
-      section("ANALISIS_CURRICULAR", "Análisis curricular", "data_ai"),
-      section("ACUERDOS", "Acuerdos y acciones", "data_ai"),
-      COMMON.conclusions, COMMON.recommendations, COMMON.annexes
-    ],
-    communication: [
-      section("ANTECEDENTE", "Antecedente", "stable_ai"),
-      section("INFORMACION", "Información comunicada", "data_ai"),
-      section("DISPOSICIONES", "Disposiciones", "semi_stable_ai")
-    ],
-    individualPlan: [
-      COMMON.intro,
-      section("DIAGNOSTICO_INDIVIDUAL", "Diagnóstico individual", "data_ai"),
-      section("PLAN_INDIVIDUAL", "Plan individual", "data_table"),
-      section("SEGUIMIENTO", "Seguimiento", "data_ai"),
-      COMMON.annexes
-    ]
-  };
+  // Biblioteca de secciones reutilizables. La biblioteca NO decide qué secciones
+  // componen un documento: cada engineId tiene su propio blueprint explícito.
+  const SECTION_LIBRARY = Object.freeze({
+    INTRODUCCION: COMMON.intro,
+    BASE_LEGAL: COMMON.legal,
+    ALINEACION_INSTITUCIONAL: COMMON.alignment,
+    METODOLOGIA: COMMON.methodology,
+    RESULTADOS: COMMON.results,
+    ANALISIS_RESULTADOS: COMMON.analysis,
+    RESUMEN_EJECUTIVO: COMMON.executive,
+    CONCLUSIONES: COMMON.conclusions,
+    RECOMENDACIONES: COMMON.recommendations,
+    REFERENCIAS: COMMON.references,
+    ANEXOS: COMMON.annexes,
 
-  function cloneNode(item, order) {
-    const copy = Object.assign({}, item, {
-      order,
-      allowedVisuals: Array.isArray(item.allowedVisuals) ? item.allowedVisuals.slice() : [],
-      derivedFrom: Array.isArray(item.derivedFrom) ? item.derivedFrom.slice() : [],
-      data: item.data ? JSON.parse(JSON.stringify(item.data)) : {},
-      children: []
-    });
-    copy.children = (item.children || []).map((child, index) => cloneNode(child, index + 1));
+    CARACTERIZACION: section("CARACTERIZACION", "Caracterización del contexto", "data_ai"),
+    NECESIDADES_PRIORIZADAS: section("NECESIDADES_PRIORIZADAS", "Necesidades priorizadas", "derived_ai"),
+    OBJETIVOS: section("OBJETIVOS", "Objetivos", "semi_stable_ai"),
+    OBJETIVO: section("OBJETIVO", "Objetivo", "stable_ai"),
+    ALCANCE: section("ALCANCE", "Alcance", "semi_stable_ai"),
+    PLANIFICACION: section("PLANIFICACION", "Planificación", "data_ai"),
+    CRONOGRAMA: section("CRONOGRAMA", "Cronograma", "data_table"),
+    SEGUIMIENTO: section("SEGUIMIENTO", "Seguimiento y control", "semi_stable_ai"),
+    CONSIDERACIONES: section("CONSIDERACIONES", "Consideraciones", "semi_stable_ai"),
+
+    ANTECEDENTES: section("ANTECEDENTES", "Antecedentes", "stable_ai"),
+    CRITERIOS: section("CRITERIOS", "Criterios de designación", "semi_stable_ai"),
+    DESIGNACIONES: section("DESIGNACIONES", "Designaciones", "data_table"),
+    RESPONSABILIDADES: section("RESPONSABILIDADES", "Responsabilidades", "stable_ai"),
+
+    IDENTIFICACION: section("IDENTIFICACION", "Identificación", "data"),
+    FUENTE_ANTIPLAGIO: section("FUENTE_ANTIPLAGIO", "Fuente del análisis", "data"),
+    RESULTADO_ANTIPLAGIO: section("RESULTADO_ANTIPLAGIO", "Resultado de antiplagio", "data_ai", { privacy: "student_specific" }),
+    OBSERVACIONES: section("OBSERVACIONES", "Observaciones", "ai"),
+
+    ANALISIS_CURRICULAR: section("ANALISIS_CURRICULAR", "Análisis curricular", "data_ai"),
+    ACUERDOS: section("ACUERDOS", "Acuerdos y acciones", "data_ai"),
+
+    ANTECEDENTE: section("ANTECEDENTE", "Antecedente", "stable_ai"),
+    INFORMACION: section("INFORMACION", "Información comunicada", "data_ai"),
+    DISPOSICIONES: section("DISPOSICIONES", "Disposiciones", "semi_stable_ai"),
+
+    DIAGNOSTICO_INDIVIDUAL: section("DIAGNOSTICO_INDIVIDUAL", "Diagnóstico individual", "data_ai"),
+    PLAN_INDIVIDUAL: section("PLAN_INDIVIDUAL", "Plan individual", "data_table"),
+    SEGUIMIENTO_INDIVIDUAL: section("SEGUIMIENTO", "Seguimiento", "data_ai")
+  });
+
+  // Fuente de estructura: 1 blueprint por engineId. No existe fallback a un
+  // perfil genérico. Dos motores pueden empezar con la misma secuencia hoy,
+  // pero la secuencia pertenece a cada motor y podrá evolucionar por separado.
+  const ENGINE_BLUEPRINTS = Object.freeze({
+    "tit.regular.plan-complexivo": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES","ANEXOS"]),
+    "tit.regular.plan-trabajo": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES","ANEXOS"]),
+    "tit.pvc.plan-articulo": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES","ANEXOS"]),
+
+    "tit.regular.informe-final": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "tit.pvc.informe-final": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "tit.requisitos.reporte-final": Object.freeze(["INTRODUCCION","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+
+    "tit.regular.cronograma-complexivo": Object.freeze(["OBJETIVO","ALCANCE","CRONOGRAMA","CONSIDERACIONES","ANEXOS"]),
+    "tit.regular.comunicado-complexivo": Object.freeze(["ANTECEDENTE","INFORMACION","DISPOSICIONES"]),
+    "tit.regular.designacion-tutores": Object.freeze(["ANTECEDENTES","CRITERIOS","DESIGNACIONES","RESPONSABILIDADES","ANEXOS"]),
+    "tit.regular.ficha-temas": Object.freeze(["INTRODUCCION","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "tit.regular.plagio-trabajo": Object.freeze(["IDENTIFICACION","FUENTE_ANTIPLAGIO","RESULTADO_ANTIPLAGIO","OBSERVACIONES","ANEXOS"]),
+
+    "tit.pvc.cronograma-articulo": Object.freeze(["OBJETIVO","ALCANCE","CRONOGRAMA","CONSIDERACIONES","ANEXOS"]),
+    "tit.pvc.designacion-metodologicos": Object.freeze(["ANTECEDENTES","CRITERIOS","DESIGNACIONES","RESPONSABILIDADES","ANEXOS"]),
+    "tit.pvc.plagio-articulo": Object.freeze(["IDENTIFICACION","FUENTE_ANTIPLAGIO","RESULTADO_ANTIPLAGIO","OBSERVACIONES","ANEXOS"]),
+    "tit.induccion.informe": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+
+    "cap.deteccion": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","CARACTERIZACION","RESULTADOS","NECESIDADES_PRIORIZADAS","CONCLUSIONES","RECOMENDACIONES","ANEXOS"]),
+    "cap.plan": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES","ANEXOS"]),
+    "cap.informe-cumplimiento": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+
+    "form.deteccion": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","CARACTERIZACION","RESULTADOS","NECESIDADES_PRIORIZADAS","CONCLUSIONES","RECOMENDACIONES","ANEXOS"]),
+    "form.plan": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES","ANEXOS"]),
+    "form.informe": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+
+    "ccc.acta-colectivos": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","ANALISIS_CURRICULAR","ACUERDOS","CONCLUSIONES","RECOMENDACIONES","ANEXOS"]),
+    "ccc.ficha-nivel": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","ANALISIS_CURRICULAR","ACUERDOS","CONCLUSIONES","RECOMENDACIONES","ANEXOS"]),
+    "ccc.guia-carrera": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","ANALISIS_CURRICULAR","ACUERDOS","CONCLUSIONES","RECOMENDACIONES","ANEXOS"]),
+
+    "cap.planificacion-actividad": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","OBJETIVOS","ALCANCE","METODOLOGIA","PLANIFICACION","CRONOGRAMA","SEGUIMIENTO","CONCLUSIONES","ANEXOS"]),
+    "cap.patrocinio": Object.freeze(["INTRODUCCION","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "cap.informe-final": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "cap.instrumento-impacto": Object.freeze(["INTRODUCCION","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "cap.impacto": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+
+    "plan-individual.plan": Object.freeze(["INTRODUCCION","DIAGNOSTICO_INDIVIDUAL","PLAN_INDIVIDUAL","SEGUIMIENTO_INDIVIDUAL","ANEXOS"]),
+    "plan-individual.reporte": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "form.seguimiento": Object.freeze(["INTRODUCCION","BASE_LEGAL","ALINEACION_INSTITUCIONAL","METODOLOGIA","RESULTADOS","ANALISIS_RESULTADOS","RESUMEN_EJECUTIVO","CONCLUSIONES","RECOMENDACIONES","REFERENCIAS","ANEXOS"]),
+    "ccc.comunicado-matriz": Object.freeze(["ANTECEDENTE","INFORMACION","DISPOSICIONES"])
+  });
+
+  function deepClone(value) {
+    if (Array.isArray(value)) return value.map(deepClone);
+    if (!value || typeof value !== "object") return value;
+    return Object.keys(value).reduce((acc, key) => {
+      acc[key] = deepClone(value[key]);
+      return acc;
+    }, {});
+  }
+
+  function deepFreeze(value) {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+    Object.getOwnPropertyNames(value).forEach((key) => deepFreeze(value[key]));
+    return Object.freeze(value);
+  }
+
+  function cloneNode(item, order, ownerEngineId) {
+    const copy = deepClone(item || {});
+    copy.order = order;
+    copy.definitionOwner = ownerEngineId || copy.definitionOwner || "";
+    copy.allowedVisuals = Array.isArray(copy.allowedVisuals) ? copy.allowedVisuals.slice() : [];
+    copy.derivedFrom = Array.isArray(copy.derivedFrom) ? copy.derivedFrom.slice() : [];
+    copy.data = copy.data && typeof copy.data === "object" ? deepClone(copy.data) : {};
+    copy.children = (copy.children || []).map((child, index) => cloneNode(child, index + 1, ownerEngineId));
     return copy;
   }
 
-  function cloneSections(name) {
-    return (profiles[name] || profiles.report).map((item, index) => cloneNode(item, index + 1));
+  function materializeBlueprintEntry(entry, ownerEngineId, index) {
+    if (typeof entry === "string") {
+      const base = SECTION_LIBRARY[entry];
+      if (!base) throw new Error(`El motor ${ownerEngineId} usa una sección no registrada: ${entry}.`);
+      return cloneNode(base, index + 1, ownerEngineId);
+    }
+
+    if (entry && typeof entry === "object") {
+      const baseKey = entry.use || entry.key;
+      const base = entry.use ? SECTION_LIBRARY[baseKey] : {};
+      if (entry.use && !base) throw new Error(`El motor ${ownerEngineId} usa una sección no registrada: ${baseKey}.`);
+      const merged = Object.assign({}, deepClone(base || {}), deepClone(entry.overrides || entry));
+      delete merged.use;
+      delete merged.overrides;
+      return cloneNode(merged, index + 1, ownerEngineId);
+    }
+
+    throw new Error(`Blueprint inválido en ${ownerEngineId}, posición ${index + 1}.`);
+  }
+
+  function cloneSectionsForEngine(engineId) {
+    const blueprint = ENGINE_BLUEPRINTS[engineId];
+    if (!blueprint) throw new Error(`El motor ${engineId} no tiene blueprint independiente.`);
+    return blueprint.map((entry, index) => materializeBlueprintEntry(entry, engineId, index));
+  }
+
+  function cloneEngine(item) {
+    if (!item) return null;
+    const copy = deepClone(item);
+    copy.sections = (item.sections || []).map((sectionItem, index) => cloneNode(sectionItem, index + 1, item.engineId));
+    copy.rules = Array.isArray(item.rules) ? item.rules.slice() : [];
+    copy.dependencies = Array.isArray(item.dependencies) ? item.dependencies.slice() : [];
+    copy.scopeKeys = Array.isArray(item.scopeKeys) ? item.scopeKeys.slice() : [];
+    copy.segments = Array.isArray(item.segments) ? item.segments.slice() : [];
+    return copy;
+  }
+
+  function registryIndependenceReport() {
+    const ids = Object.keys(ENGINE_BLUEPRINTS);
+    const engineIds = engines.map((item) => item.engineId);
+    const missingBlueprints = engineIds.filter((engineId) => !ENGINE_BLUEPRINTS[engineId]);
+    const orphanBlueprints = ids.filter((engineId) => !engineIds.includes(engineId));
+    const owners = engines.map((item) => item.definitionOwner);
+    return {
+      engineCount: engines.length,
+      blueprintCount: ids.length,
+      uniqueDefinitionOwners: new Set(owners).size,
+      missingBlueprints,
+      orphanBlueprints,
+      independent: (
+        engines.length > 0 &&
+        engines.length === ids.length &&
+        new Set(owners).size === engines.length &&
+        missingBlueprints.length === 0 &&
+        orphanBlueprints.length === 0
+      )
+    };
   }
 
   const engines = [];
-  function E(documentId, engineId, label, family, profile, cardinality, options) {
-    engines.push(Object.assign({
+  function E(documentId, engineId, label, family, legacyProfile, cardinality, options) {
+    if (engines.some((item) => item.engineId === engineId)) {
+      throw new Error(`Motor duplicado: ${engineId}.`);
+    }
+    const input = deepClone(options || {});
+    const engine = Object.assign({
       documentId,
       engineId,
       label,
       family,
-      profile,
+      // Se mantiene solo por compatibilidad de hash con instancias existentes.
+      // Ya no construye sections ni crea herencia estructural.
+      profile: legacyProfile,
+      legacyProfile,
+      definitionOwner: engineId,
+      definitionSource: "engine_blueprint",
+      independentDefinition: true,
       cardinality,
       version: VERSION,
-      sections: cloneSections(profile),
+      sections: cloneSectionsForEngine(engineId),
       rules: BASE_RULES.slice(),
       dependencies: [],
       scopeKeys: [],
+      segments: [],
       population: "all",
       active: true
-    }, options || {}));
+    }, input);
+    // options.sections no puede sustituir silenciosamente la definición del registro.
+    engine.sections = cloneSectionsForEngine(engineId);
+    engine.definitionOwner = engineId;
+    engine.definitionSource = "engine_blueprint";
+    engine.independentDefinition = true;
+    engines.push(deepFreeze(engine));
   }
 
   E("utet-plan-complexivo", "tit.regular.plan-complexivo", "Planificación de Examen Complexivo", "titulacion_regular", "planning", "period", {
@@ -304,6 +415,11 @@
     scopeKeys: ["period"], dependencies: ["ccc.guia-carrera"]
   });
 
+  const independence = registryIndependenceReport();
+  if (!independence.independent) {
+    throw new Error(`Registro de motores no independiente: ${JSON.stringify(independence)}`);
+  }
+
   const byEngine = new Map(engines.map((item) => [item.engineId, item]));
   const byDocument = new Map();
   engines.forEach((item) => {
@@ -312,23 +428,20 @@
   });
 
   function getEngine(engineId) {
-    return byEngine.get(engineId) || null;
+    return cloneEngine(byEngine.get(engineId) || null);
   }
 
   function enginesForDocument(documentId) {
-    return (byDocument.get(documentId) || []).map((item) => Object.assign({}, item, {
-      sections: item.sections.map((sectionItem, index) => cloneNode(sectionItem, index + 1)),
-      rules: item.rules.slice(),
-      dependencies: item.dependencies.slice()
-    }));
+    return (byDocument.get(documentId) || []).map(cloneEngine);
   }
 
   function allEngines() {
-    return engines.map((item) => Object.assign({}, item, {
-      sections: item.sections.map((sectionItem, index) => cloneNode(sectionItem, index + 1)),
-      rules: item.rules.slice(),
-      dependencies: item.dependencies.slice()
-    }));
+    return engines.map(cloneEngine);
+  }
+
+  function blueprintForEngine(engineId) {
+    const blueprint = ENGINE_BLUEPRINTS[engineId];
+    return blueprint ? deepClone(blueprint) : null;
   }
 
   function filterCatalog(catalog) {
@@ -349,6 +462,8 @@
     VISUAL_TOOLSETS,
     SELECTED_DOCUMENT_IDS,
     allEngines,
+    blueprintForEngine,
+    registryIndependenceReport,
     getEngine,
     enginesForDocument,
     filterCatalog
