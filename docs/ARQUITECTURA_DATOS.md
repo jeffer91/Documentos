@@ -719,3 +719,111 @@ La sección Referencias mantiene:
 ### Control de Word
 
 Los scripts PowerShell usados para DOCX/PDF ahora se validan sintácticamente en CI antes de ejecutar el smoke test. Esto evita que un cambio de maquetación deje scripts de Word cortados o duplicados sin ser detectado.
+
+
+## Bloque 1 nuevo · Independencia real de motores
+
+La estructura documental ya no se construye desde perfiles genéricos compartidos como `report`, `planning` o `detection`.
+
+Cada `engineId` tiene un **blueprint explícito propio**. Actualmente existen 33 motores y 33 blueprints registrados.
+
+Ejemplo conceptual:
+
+```text
+tit.regular.informe-final
+  → blueprint propio
+
+tit.pvc.informe-final
+  → blueprint propio
+```
+
+Aunque ambos puedan empezar hoy con una secuencia equivalente, ninguna de las dos secuencias depende de la otra.
+
+### Biblioteca vs. blueprint
+
+Existe una biblioteca de piezas reutilizables como:
+
+```text
+INTRODUCCION
+BASE_LEGAL
+METODOLOGIA
+RESULTADOS
+...
+```
+
+La biblioteca define una pieza base; **no define qué documento la usa ni en qué orden**.
+
+La composición pertenece exclusivamente al blueprint de cada motor.
+
+Si un documento necesita una variante particular de una pieza, su blueprint puede declarar una definición u override propio. No se debe modificar una pieza global para resolver una necesidad específica de un solo documento.
+
+### Propiedad de definición
+
+Cada motor y cada sección materializada registra:
+
+```text
+definitionOwner = engineId
+definitionSource = engine_blueprint
+independentDefinition = true
+```
+
+Esto permite verificar programáticamente quién es dueño de la estructura.
+
+### Registro inmutable
+
+El registro interno de motores queda congelado.
+
+`getEngine()`, `allEngines()` y `enginesForDocument()` entregan copias profundas. Por tanto:
+
+```text
+mutar la copia de Regulares
+≠
+mutar el registro
+≠
+mutar PVC
+```
+
+También `blueprintForEngine()` entrega una copia y nunca la definición interna.
+
+### Sin fallback genérico
+
+Un motor sin blueprint explícito provoca error al cargar el registro.
+
+No existe:
+
+```text
+si falta definición → usar report
+```
+
+Esta regla evita que un documento nuevo o mal configurado herede silenciosamente la estructura de otro.
+
+### Compatibilidad histórica
+
+El campo `profile` se conserva temporalmente como metadato de compatibilidad para no alterar innecesariamente los hashes de instancias existentes.
+
+Ya no participa en la creación de `sections`.
+
+La fuente estructural real es:
+
+```text
+ENGINE_BLUEPRINTS[engineId]
+```
+
+### Regla para la siguiente fase
+
+Cuando se definan puntos y subpuntos documento por documento, cada cambio se hará únicamente en el blueprint del motor correspondiente.
+
+Por ejemplo, agregar una sección a:
+
+```text
+tit.regular.informe-final
+```
+
+no modifica:
+
+```text
+tit.pvc.informe-final
+form.informe
+cap.informe-final
+...
+```
