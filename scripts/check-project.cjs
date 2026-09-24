@@ -37,6 +37,10 @@ const REQUIRED_FILES = [
   "src/main/ai-orchestrator.cjs",
   "src/main/draft-export-service.cjs",
   "src/main/knowledge-source-service.cjs",
+  "src/main/editorial-structure-service.cjs",
+  "src/main/visual-renderer-service.cjs",
+  "src/main/citation-service.cjs",
+  "src/main/apa7-service.cjs",
   "src/renderer/architecture-ui.js",
   "scripts/render-word.ps1",
   "scripts/export-draft.ps1",
@@ -270,6 +274,94 @@ function architectureV3Check() {
   };
 }
 
+function editorialV4Check() {
+  const editorial = require(path.join(ROOT, "src/main/editorial-structure-service.cjs"));
+  const visual = require(path.join(ROOT, "src/main/visual-renderer-service.cjs"));
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+
+  const nested = editorial.flattenSections([
+    {
+      key: "A",
+      title: "A",
+      children: [{
+        key: "B",
+        title: "B",
+        children: [{ key: "C", title: "C" }]
+      }]
+    },
+    { key: "D", title: "D" }
+  ]);
+
+  const validBlocks = editorial.validateSectionBlocks(
+    { title: "Resultados", type: "data_ai", allowedVisuals: ["foda"] },
+    [
+      { type: "prose", role: "context", text: "La siguiente tabla sintetiza los resultados institucionales observados." },
+      { type: "table", title: "Resultados", data: { headers: ["Indicador"], rows: [["Cumplimiento"]] } },
+      { type: "prose", role: "analysis", text: "Los resultados muestran una tendencia que debe interpretarse con el contexto del período." }
+    ]
+  );
+  const orphanBlocks = editorial.validateSectionBlocks(
+    { title: "Resultados", type: "data_ai", allowedVisuals: [] },
+    [{ type: "table", title: "Huérfana", data: { headers: ["A"], rows: [["1"]] } }]
+  );
+
+  const tools = visual.listTools();
+  const sampleSvg = visual.renderSvg("foda", {
+    strengths: ["Fortaleza"],
+    opportunities: ["Oportunidad"],
+    weaknesses: ["Debilidad"],
+    threats: ["Amenaza"]
+  });
+
+  const apaSource = fs.readFileSync(path.join(ROOT, "src/main/apa7-service.cjs"), "utf8");
+  const wordSource = fs.readFileSync(path.join(ROOT, "scripts/export-draft.ps1"), "utf8");
+  const mainSource = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
+  const reportEngine = registry.getEngine("tit.regular.informe-final");
+  const reportKeys = (reportEngine && reportEngine.sections || []).map((item) => item.key);
+
+  return {
+    hierarchy:
+      nested.length === 4 &&
+      nested[0].numbering === "1" &&
+      nested[1].numbering === "1.1" &&
+      nested[2].numbering === "1.1.1" &&
+      nested[3].numbering === "2",
+    topLevelPageBreak: nested[0].pageBreakBefore === true && nested[3].pageBreakBefore === true,
+    tablePolicy: validBlocks.ok && !orphanBlocks.ok &&
+      orphanBlocks.errors.some((item) => item.includes("contexto previo")) &&
+      orphanBlocks.errors.some((item) => item.includes("análisis posterior")),
+    visualTools: tools.length >= 13 && tools.some((item) => item.id === "ishikawa") &&
+      tools.some((item) => item.id === "foda") &&
+      tools.some((item) => item.id === "came") &&
+      tools.some((item) => item.id === "process_flow") &&
+      tools.some((item) => item.id === "cards"),
+    svgRenderer: sampleSvg.includes("<svg") && sampleSvg.includes("Fortalezas"),
+    apaRenderer:
+      apaSource.includes("lineHeight: 2") &&
+      apaSource.includes("2.54") &&
+      apaSource.includes("apa-reference") &&
+      apaSource.includes("Tabla") &&
+      apaSource.includes("Figura"),
+    wordPagination:
+      wordSource.includes("PageBreakBefore") &&
+      wordSource.includes("KeepWithNext") &&
+      wordSource.includes("WidowControl"),
+    reportSections:
+      reportKeys.includes("ANALISIS_RESULTADOS") &&
+      reportKeys.includes("RESUMEN_EJECUTIVO") &&
+      reportKeys.includes("REFERENCIAS"),
+    ipc:
+      mainSource.includes("editorial:capabilities") &&
+      mainSource.includes("citations:save") &&
+      mainSource.includes("instances:set-blocks"),
+    bridge:
+      preload.includes("getEditorialCapabilities") &&
+      preload.includes("saveCitation") &&
+      preload.includes("setDocumentSectionBlocks")
+  };
+}
+
 function main() {
   const errors = [];
   const warnings = [];
@@ -341,6 +433,26 @@ function main() {
   }
 
   try {
+    const editorialV4 = editorialV4Check();
+    if (
+      !editorialV4.hierarchy ||
+      !editorialV4.topLevelPageBreak ||
+      !editorialV4.tablePolicy ||
+      !editorialV4.visualTools ||
+      !editorialV4.svgRenderer ||
+      !editorialV4.apaRenderer ||
+      !editorialV4.wordPagination ||
+      !editorialV4.reportSections ||
+      !editorialV4.ipc ||
+      !editorialV4.bridge
+    ) {
+      errors.push("El motor editorial v4 no superó la validación interna.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el motor editorial v4: ${error.message}`);
+  }
+
+  try {
     const markers = markerCheck();
     if (!markers.ok || markers.count !== 10 || !markers.hasTableColumns || !markers.hasAliases || !markers.hasList) {
       errors.push("El parser de marcadores no superó la prueba interna.");
@@ -403,7 +515,7 @@ function main() {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
   }
 
-  console.log("Documentos ITSQMET · diagnóstico v3.0.0");
+  console.log("Documentos ITSQMET · diagnóstico v4.0.0");
   console.log("-----------------------------------");
   if (catalog) console.log(`Catálogo: ${catalog.units} unidades · ${catalog.processes} procesos · ${catalog.documents} documentos`);
   warnings.forEach((warning) => console.log(`AVISO: ${warning}`));
@@ -412,7 +524,7 @@ function main() {
     errors.forEach((error) => console.error(`ERROR: ${error}`));
     process.exitCode = 1;
   } else {
-    console.log("OK: arquitectura v3, 32 documentos activos, 33 motores, datos por expediente, IA automática y compatibilidad V2 correctos.");
+    console.log("OK: v4 validada · jerarquía multinivel, bloques, 13 herramientas visuales, APA 7, paginación y arquitectura v3 compatibles.");
   }
 }
 
