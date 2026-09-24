@@ -370,3 +370,38 @@ El uso de propiedades de párrafo evita insertar saltos manuales que puedan crea
 ```
 
 El renderer sustituye el token por la cita en texto y construye la lista de referencias. Las claves inexistentes o incompletas impiden aprobar una versión final.
+
+
+## Ciclo de vida de motores y migraciones
+
+Los borradores documentales ya no sobrescriben silenciosamente su estructura cuando cambia un motor.
+
+Cada instancia conserva:
+
+- versión del motor aplicada;
+- hash determinístico de la definición del motor;
+- revisión de migración;
+- fecha de la última migración;
+- secciones activas y secciones archivadas.
+
+Al abrir, generar o exportar un borrador, la aplicación compara la definición guardada con el motor vigente. La migración se ejecuta de forma transaccional:
+
+1. agrega secciones nuevas;
+2. actualiza metadatos estructurales de secciones existentes sin borrar su contenido;
+3. reactiva una sección archivada si vuelve a existir;
+4. archiva las secciones retiradas del motor en lugar de eliminarlas;
+5. actualiza la versión y el hash del motor;
+6. marca el borrador para revisión cuando el cambio puede afectar contenido;
+7. registra el antes/después y las acciones en `engine_migrations_v4` y en la auditoría.
+
+Las secciones archivadas mantienen su contenido y sus bloques, pero quedan fuera del documento activo, de la generación IA y de la exportación.
+
+### Versiones finales
+
+Una instancia con `final_frozen_at` nunca se migra automáticamente. Si el motor evoluciona, la final se identifica como versión histórica y conserva su estructura, versión y snapshot originales.
+
+Para continuar trabajando desde una final histórica se crea una nueva copia de trabajo basada en el motor vigente. Solo se copian automáticamente las secciones que siguen existiendo; las secciones antiguas permanecen preservadas en la versión final de origen.
+
+### Detección de cambios
+
+El hash del motor contempla estructura, reglas, cardinalidad, población, dependencias y configuración relevante. Por ello, un cambio estructural puede detectarse aunque accidentalmente no se haya incrementado el número de versión.
