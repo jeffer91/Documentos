@@ -15,7 +15,7 @@ function readHead(filePath, length) {
   if (!filePath || !fs.existsSync(filePath)) return Buffer.alloc(0);
   const fd = fs.openSync(filePath, "r");
   try {
-    const buffer = Buffer.alloc(Math.max(8, Number(length || 16)));
+    const buffer = Buffer.alloc(Math.max(1, Number(length || 16)));
     const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
     return buffer.subarray(0, read);
   } finally {
