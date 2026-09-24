@@ -19,6 +19,7 @@ const citationService = require("../src/main/citation-service.cjs");
 const dataIngestion = require("../src/main/data-ingestion-service.cjs");
 const dataBindings = require("../src/main/document-data-binding-service.cjs");
 const aiOrchestrator = require("../src/main/ai-orchestrator.cjs");
+const aiProviderService = require("../src/main/ai-provider-service.cjs");
 const draftExport = require("../src/main/draft-export-service.cjs");
 const exportQuality = require("../src/main/export-quality-service.cjs");
 const apa7 = require("../src/main/apa7-service.cjs");
@@ -1740,6 +1741,197 @@ async function run() {
     assert.deepStrictEqual(finalApaExport.generatedFormats, ["html"]);
     assert.ok(fs.existsSync(finalApaExport.manifestPath));
 
+    // Bloque 6: generación IA completa, fallback, preservación humana y reanudación.
+    let aiResilienceInstance = processHub.ensureDocumentInstance(
+      temp,
+      dossierV4.id,
+      "tit.regular.comunicado-complexivo",
+      { type: "period_segment", key: "ai-resilience" }
+    );
+    aiResilienceInstance = processHub.updateSection(temp, aiResilienceInstance.id, "ANTECEDENTE", {
+      content: "Antecedente editado manualmente que la generación completa no puede sobrescribir.",
+      status: "edited",
+      provenance: { source: "human", editedAt: new Date().toISOString() },
+      alerts: []
+    });
+
+    await assert.rejects(
+      () => aiOrchestrator.generateSection(temp, aiResilienceInstance.id, "ANTECEDENTE", {}),
+      /edición humana/
+    );
+
+    const originalListProviders = aiProviderService.listProviders;
+    const originalCallProvider = aiProviderService.callProvider;
+    const providerCalls = [];
+    let failInformation = true;
+    let reviewerSawBlocks = false;
+
+    aiProviderService.listProviders = () => [
+      {
+        id: "writer-primary",
+        name: "Writer primario",
+        role: "writer",
+        priority: 1,
+        enabled: true,
+        config: { retries: 0 }
+      },
+      {
+        id: "writer-fallback",
+        name: "Writer fallback",
+        role: "writer",
+        priority: 2,
+        enabled: true,
+        config: { retries: 0 }
+      },
+      {
+        id: "reviewer-one",
+        name: "Reviewer",
+        role: "reviewer",
+        priority: 3,
+        enabled: true,
+        config: { retries: 0 }
+      }
+    ];
+
+    aiProviderService.callProvider = async (_userDataPath, providerId, request) => {
+      providerCalls.push({ providerId, system: request.system || "", prompt: request.prompt || "" });
+      if (providerId === "writer-primary") {
+        const error = new Error("Writer primario: rate limit");
+        error.statusCode = 429;
+        throw error;
+      }
+
+      if (providerId === "writer-fallback") {
+        const isInformation = String(request.prompt || "").includes('"key":"INFORMACION"');
+        if (isInformation && failInformation) {
+          const error = new Error("Writer fallback: error permanente simulado");
+          error.statusCode = 400;
+          throw error;
+        }
+        return {
+          provider: { id: providerId, name: "Writer fallback" },
+          text: JSON.stringify({
+            content: "Contenido generado por el writer fallback.",
+            blocks: [{
+              type: "prose",
+              role: "body",
+              text: "Contenido generado por el writer fallback con estructura utilizable."
+            }],
+            alerts: [],
+            claims: [{ text: "Contenido de prueba", sourceType: "system", sourceKey: "smoke", confidence: 1 }]
+          }),
+          raw: {}
+        };
+      }
+
+      if (providerId === "reviewer-one") {
+        reviewerSawBlocks = reviewerSawBlocks || String(request.prompt || "").includes('"blocks"');
+        return {
+          provider: { id: providerId, name: "Reviewer" },
+          text: JSON.stringify({
+            approved: true,
+            issues: [],
+            alerts: []
+          }),
+          raw: {}
+        };
+      }
+
+      throw new Error("Proveedor no esperado.");
+    };
+
+    try {
+      const partialAiRun = await aiOrchestrator.generateDocument(temp, aiResilienceInstance.id, {
+        reviewers: 1,
+        providerRetries: 0,
+        continueOnError: true
+      });
+      assert.ok(partialAiRun.generationRun);
+      assert.strictEqual(partialAiRun.generationRun.status, "partial");
+      assert.strictEqual(partialAiRun.generationRun.result.resumable, true);
+      assert.ok(partialAiRun.generationRun.result.preserved.some((item) =>
+        item.key === "ANTECEDENTE" && item.reason === "human_edited"
+      ));
+      assert.ok(partialAiRun.generationRun.result.failed.some((item) => item.key === "INFORMACION"));
+      assert.ok(partialAiRun.generationRun.result.completed.some((item) => item.key === "DISPOSICIONES"));
+      const partialHuman = partialAiRun.sections.find((item) => item.key === "ANTECEDENTE");
+      assert.strictEqual(
+        partialHuman.content,
+        "Antecedente editado manualmente que la generación completa no puede sobrescribir."
+      );
+      assert.strictEqual(
+        providerCalls.some((item) =>
+          item.providerId.startsWith("writer") &&
+          item.prompt.includes('"key":"ANTECEDENTE"')
+        ),
+        false
+      );
+      assert.ok(providerCalls.some((item) =>
+        item.providerId === "writer-primary" &&
+        item.prompt.includes('"key":"DISPOSICIONES"')
+      ));
+      assert.ok(providerCalls.some((item) =>
+        item.providerId === "writer-fallback" &&
+        item.prompt.includes('"key":"DISPOSICIONES"')
+      ));
+      assert.strictEqual(reviewerSawBlocks, true);
+
+      const latestPartial = aiOrchestrator.latestGenerationRun(temp, aiResilienceInstance.id);
+      assert.strictEqual(latestPartial.id, partialAiRun.generationRun.id);
+      assert.strictEqual(latestPartial.status, "partial");
+      assert.ok(aiOrchestrator.listGenerationRuns(temp, aiResilienceInstance.id, 10).length >= 1);
+
+      failInformation = false;
+      const resumedAiRun = await aiOrchestrator.resumeDocument(temp, aiResilienceInstance.id, {
+        reviewers: 1,
+        providerRetries: 0,
+        continueOnError: true
+      });
+      assert.ok(resumedAiRun.generationRun);
+      assert.strictEqual(resumedAiRun.generationRun.status, "completed");
+      assert.strictEqual(resumedAiRun.generationRun.result.resumable, false);
+      assert.ok(resumedAiRun.generationRun.result.completed.some((item) => item.key === "INFORMACION"));
+      assert.ok(resumedAiRun.generationRun.result.skipped.some((item) => item.key === "DISPOSICIONES"));
+      assert.ok(resumedAiRun.generationRun.result.preserved.some((item) => item.key === "ANTECEDENTE"));
+      const resumedInfo = resumedAiRun.sections.find((item) => item.key === "INFORMACION");
+      assert.strictEqual(resumedInfo.status, "reviewed");
+      assert.ok(resumedInfo.content.includes("writer fallback"));
+
+      const aiJobs = db.prepare(`
+        SELECT provider_id, status, attempt
+        FROM ai_jobs_v3
+        WHERE instance_id = ?
+        ORDER BY created_at
+      `).all(aiResilienceInstance.id);
+      assert.ok(aiJobs.some((item) => item.provider_id === "writer-primary" && item.status === "failed"));
+      assert.ok(aiJobs.some((item) => item.provider_id === "writer-fallback" && item.status === "completed"));
+      assert.ok(aiJobs.some((item) => item.provider_id === "reviewer-one" && item.status === "completed"));
+
+      const runRows = db.prepare(`
+        SELECT status, result_json
+        FROM ai_generation_runs_v6
+        WHERE instance_id = ?
+        ORDER BY started_at
+      `).all(aiResilienceInstance.id);
+      assert.strictEqual(runRows.length, 2);
+      assert.strictEqual(runRows[0].status, "partial");
+      assert.strictEqual(runRows[1].status, "completed");
+    } finally {
+      aiProviderService.listProviders = originalListProviders;
+      aiProviderService.callProvider = originalCallProvider;
+    }
+
+    assert.strictEqual(aiOrchestrator.retryableProviderError(Object.assign(new Error("rate"), { statusCode: 429 })), true);
+    assert.strictEqual(aiOrchestrator.retryableProviderError(Object.assign(new Error("auth"), { statusCode: 401 })), false);
+    assert.strictEqual(
+      aiOrchestrator.sectionPreservationReason({
+        status: "edited",
+        locked: false,
+        provenance: { source: "human" }
+      }, {}),
+      "human_edited"
+    );
+
     errorService.record(temp, {
       module: "smoke",
       action: "test",
@@ -1755,7 +1947,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(backup.path, "documentos.db")));
 
     console.log(
-      "SMOKE OK: Electron, SQLite v6, catálogo, arquitectura v4, jerarquía, bloques, visuales, APA/citas, IA, cálculos, integridad, versiones y respaldo."
+      "SMOKE OK: Electron, SQLite v6, catálogo, arquitectura v4, jerarquía, bloques, visuales, APA/citas, IA resiliente, reanudación, cálculos, integridad, versiones y respaldo."
     );
   } finally {
     database.closeAll();

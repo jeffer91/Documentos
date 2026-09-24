@@ -18,6 +18,7 @@
     editorialValidation: null,
     citationValidation: null,
     dataReadiness: null,
+    generationRun: null,
     busy: false,
     currentView: "home"
   };
@@ -93,6 +94,7 @@
     state.editorialValidation = response.editorialValidation || null;
     state.citationValidation = response.citationValidation || null;
     state.dataReadiness = response.dataReadiness || null;
+    state.generationRun = response.generationRun || null;
     return state.instance;
   }
 
@@ -513,6 +515,7 @@
       ${editorialErrors.length ? `<div class="notice-warn"><b>Control editorial pendiente</b><span>${escapeHtml(editorialErrors.slice(0,3).join(" · "))}</span></div>` : ""}
       ${!editorialErrors.length && editorialWarnings.length ? `<div class="notice-soft"><b>Observaciones editoriales</b><span>${escapeHtml(editorialWarnings.slice(0,3).join(" · "))}</span></div>` : ""}
       ${citationIssues.length ? `<div class="notice-warn"><b>Citas APA pendientes</b><span>${escapeHtml(citationIssues.slice(0,6).join(", "))}</span></div>` : ""}
+      ${state.generationRun && state.generationRun.status === "partial" ? `<div class="notice-warn"><b>Generación parcial</b><span>${escapeHtml(generationMessage(state.generationRun))}</span></div>` : ""}
       ${state.instance.finalFrozenAt && Number(alertSummary.total || 0) ? `<div class="notice-soft"><b>Trazabilidad interna</b><span>${Number(alertSummary.total || 0)} alerta(s) quedaron congeladas para auditoría. No forman parte de la versión final visible.</span></div>` : ""}
       ${state.instance.engineState === "frozen_historical" ? `<div class="notice-soft"><b>Versión final histórica</b><span>Esta versión permanece congelada con el motor v${escapeHtml(state.instance.engineVersion)}. El motor vigente es v${escapeHtml(state.instance.currentEngineVersion)} y no modificará esta final.</span></div>` : ""}
       ${state.instance.archivedSectionCount ? `<div class="notice-soft"><b>Historial estructural preservado</b><span>${Number(state.instance.archivedSectionCount)} sección(es) retirada(s) del motor permanecen archivadas y fuera del documento activo.</span></div>` : ""}
@@ -528,6 +531,9 @@
 
       <div class="button-row arch-toolbar">
         <button class="primary" data-arch-action="generate-document">Generar / revisar todo</button>
+        ${state.generationRun && state.generationRun.result && state.generationRun.result.resumable
+          ? '<button class="ghost" data-arch-action="resume-document">Reanudar pendientes</button>'
+          : ''}
         <button class="ghost" data-arch-action="export-selected">Borrador seleccionado</button>
         <button class="ghost" data-arch-action="export-draft">Borrador completo</button>
         ${state.instance.finalFrozenAt
@@ -809,24 +815,79 @@
   }
 
   async function generateSection(key) {
+    const current = state.instance.sections.find((item) => item.key === key);
+    const provenance = current && current.provenance || {};
+    const hasHumanEdits = Boolean(
+      current &&
+      (
+        provenance.source === "human" ||
+        provenance.blockEditedBy === "human" ||
+        provenance.approvedBy === "human"
+      )
+    );
+
+    if (current && (current.locked || current.status === "approved")) {
+      return toast("La sección está aprobada y bloqueada. Crea una nueva versión de trabajo para modificarla.");
+    }
+
+    let overrideHuman = false;
+    if (hasHumanEdits) {
+      if (!window.confirm("Esta sección tiene cambios manuales. ¿Deseas reemplazarlos con una nueva generación de IA?")) return;
+      overrideHuman = true;
+    }
+
     setBusy(true);
-    const response = await api.generateEngineSection(state.instance.id, key, { reviewers: 2 });
+    const response = await api.generateEngineSection(state.instance.id, key, {
+      reviewers: 2,
+      overrideHuman
+    });
     setBusy(false);
     if (!response || !response.ok) return toast(response && response.error || "No se pudo generar la sección.");
     state.instance = response.instance;
-    toast("Sección generada y revisada.");
+    const updated = state.instance.sections.find((item) => item.key === key);
+    toast(updated && updated.status === "needs_review"
+      ? "Sección generada, pero requiere revisión humana."
+      : "Sección generada y revisada.");
     await renderInstance(state.instance.id);
+  }
+
+  function generationMessage(run) {
+    if (!run) return "Documento generado y revisado por bloques.";
+    const result = run.result || {};
+    const completed = Array.isArray(result.completed) ? result.completed.length : 0;
+    const preserved = Array.isArray(result.preserved) ? result.preserved.length : 0;
+    const failed = Array.isArray(result.failed) ? result.failed.length : 0;
+    const blocked = Array.isArray(result.blocked) ? result.blocked.length : 0;
+    if (run.status === "partial" || failed || blocked) {
+      return `Generación parcial: ${completed} completada(s), ${preserved} preservada(s), ${failed} fallida(s), ${blocked} bloqueada(s). Puedes reanudar pendientes.`;
+    }
+    return `Generación completa: ${completed} sección(es) generada(s) y ${preserved} preservada(s).`;
   }
 
   async function generateDocument() {
     setBusy(true);
     const response = state.instance.stale
-      ? await api.regenerateStaleDocument(state.instance.id, { reviewers: 2 })
-      : await api.generateEngineDocument(state.instance.id, { reviewers: 2 });
+      ? await api.regenerateStaleDocument(state.instance.id, { reviewers: 2, continueOnError: true })
+      : await api.generateEngineDocument(state.instance.id, { reviewers: 2, continueOnError: true });
     setBusy(false);
     if (!response || !response.ok) return toast(response && response.error || "No se pudo generar el documento.");
     state.instance = response.instance;
-    toast("Documento generado y revisado por bloques.");
+    state.generationRun = response.generationRun || state.instance.generationRun || null;
+    toast(generationMessage(state.generationRun));
+    await renderInstance(state.instance.id);
+  }
+
+  async function resumeDocument() {
+    setBusy(true);
+    const response = await api.resumeEngineDocument(state.instance.id, {
+      reviewers: 2,
+      continueOnError: true
+    });
+    setBusy(false);
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo reanudar la generación.");
+    state.instance = response.instance;
+    state.generationRun = response.generationRun || state.instance.generationRun || null;
+    toast(generationMessage(state.generationRun));
     await renderInstance(state.instance.id);
   }
 
@@ -917,6 +978,7 @@
       }
       if (action === "generate-section") return generateSection(button.dataset.key);
       if (action === "generate-document") return generateDocument();
+      if (action === "resume-document") return resumeDocument();
       if (action === "export-section") return exportDocument({ sectionKeys: [button.dataset.key], includeAlerts: true, final: false, formats: ["docx", "pdf"] });
       if (action === "export-selected") {
         const keys = selectedSections();

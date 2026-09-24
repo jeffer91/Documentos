@@ -1574,3 +1574,200 @@ CI comprueba:
 GitHub Actions usa Linux y no dispone de Microsoft Word de escritorio.
 
 Por esa razón, el comportamiento físico específico de Word se verifica en tiempo de ejecución en Windows mediante `word-report.json`, además de la validación sintáctica y estructural realizada por CI.
+
+
+## Bloque 6 nuevo · Generación IA resiliente
+
+La generación completa del documento funciona como una **sesión reanudable**.
+
+### Dos niveles de trazabilidad IA
+
+`ai_jobs_v3` registra cada llamada individual:
+
+```text
+writer / reviewer
+proveedor
+intento
+request
+response
+error
+```
+
+`ai_generation_runs_v6` registra la ejecución completa del documento:
+
+```text
+run
+  ├── completed
+  ├── skipped
+  ├── preserved
+  ├── failed
+  ├── blocked
+  ├── currentSectionKey
+  ├── nextSectionKey
+  └── resumable
+```
+
+### Generación completa
+
+La aplicación procesa el árbol sección por sección.
+
+No reinicia el documento cuando una sección falla.
+
+Por defecto:
+
+```text
+continueOnError = true
+```
+
+Si una sección falla:
+
+- se registra el error;
+- se continúa con secciones independientes;
+- las secciones que dependan de resultados no disponibles se marcan como bloqueadas;
+- la sesión termina como `partial`;
+- se conserva `nextSectionKey`;
+- la interfaz ofrece **Reanudar pendientes**.
+
+### Reanudación
+
+Una reanudación:
+
+- no rehace secciones `reviewed`;
+- no toca secciones aprobadas;
+- no reemplaza edición humana;
+- vuelve a intentar secciones pendientes o fallidas;
+- vuelve a evaluar dependencias previamente bloqueadas.
+
+Cuando ya no quedan fallos ni bloqueos:
+
+```text
+status = completed
+resumable = false
+```
+
+### Protección de trabajo humano
+
+`force` no significa sobrescribir todo.
+
+Una sección se preserva si:
+
+- está aprobada;
+- está bloqueada;
+- `provenance.source = human`;
+- `blockEditedBy = human`;
+- `approvedBy = human`.
+
+Una edición humana solo puede reemplazarse mediante una confirmación explícita:
+
+```text
+overrideHuman = true
+```
+
+La interfaz pide confirmación antes de enviar esa opción.
+
+Una sección aprobada/bloqueada no puede regenerarse desde la misma versión de trabajo.
+
+### Regeneración por datos desactualizados
+
+`regenerateStale` usa:
+
+```text
+force = true
+overrideHuman = false
+```
+
+Esto permite recalcular contenido generado por IA sin destruir cambios manuales ni aprobaciones.
+
+### Fallback y reintentos
+
+Los proveedores siguen el orden de prioridad.
+
+Un writer puede reintentarse ante errores transitorios:
+
+- HTTP 408;
+- HTTP 409;
+- HTTP 425;
+- HTTP 429;
+- HTTP 5xx;
+- timeout;
+- conexión interrumpida;
+- servicio temporalmente no disponible.
+
+Errores permanentes, por ejemplo 401/400 de configuración, no se repiten innecesariamente.
+
+Después de agotar reintentos se intenta el siguiente writer.
+
+Los reintentos están limitados para evitar bucles infinitos.
+
+### Salida utilizable
+
+Un writer no se considera exitoso si no devuelve:
+
+- `content`; o
+- al menos un `block`.
+
+Una respuesta vacía pasa al siguiente proveedor.
+
+### Reviewer
+
+El reviewer recibe:
+
+- texto;
+- bloques;
+- alertas;
+- datos;
+- fuentes;
+- contrato de la sección.
+
+Esto evita revisar únicamente una versión textual mientras la tabla o visual real queda fuera del análisis.
+
+Si el reviewer devuelve `correctedBlocks`, estos sustituyen la estructura.
+
+Si devuelve solo `correctedContent` cuando ya existen bloques, la app conserva la estructura del writer y registra una alerta de formato para evitar que contenido y bloques queden inconsistentes.
+
+### Estado reviewed vs needs_review
+
+La sección termina como `reviewed` únicamente si:
+
+- la estructura editorial es válida;
+- ningún reviewer la rechazó;
+- al menos un reviewer solicitado terminó correctamente.
+
+En caso contrario:
+
+```text
+status = needs_review
+```
+
+El contenido se conserva para revisión humana.
+
+### Memoria del documento
+
+Para documentos extensos, el prompt no depende únicamente de las últimas cuatro secciones.
+
+El motor incluye una memoria compacta de hasta 20 secciones previas con:
+
+- clave;
+- título;
+- estado;
+- resumen;
+- claims;
+- cantidad de alertas.
+
+También incluye el estado del árbol completo.
+
+Así un documento de muchas secciones mantiene continuidad sin reenviar cientos de páginas completas en cada llamada.
+
+### UI
+
+La pantalla del documento muestra:
+
+- generación completa;
+- generación parcial;
+- cantidad de secciones completadas;
+- preservadas;
+- fallidas;
+- bloqueadas;
+- botón **Reanudar pendientes** cuando corresponde.
+
+La generación individual avisa cuando el resultado queda en `needs_review`.

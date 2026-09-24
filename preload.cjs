@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("documentosApp", {
   testAiProvider: (providerId) => ipcRenderer.invoke("ai-providers:test", providerId),
   generateEngineSection: (instanceId, sectionKey, options) => ipcRenderer.invoke("ai-engine:generate-section", instanceId, sectionKey, options || {}),
   generateEngineDocument: (instanceId, options) => ipcRenderer.invoke("ai-engine:generate-document", instanceId, options || {}),
+  resumeEngineDocument: (instanceId, options) => ipcRenderer.invoke("ai-engine:resume-document", instanceId, options || {}),
+  listGenerationRuns: (instanceId, limit) => ipcRenderer.invoke("ai-engine:generation-runs", instanceId, limit || 20),
   regenerateStaleDocument: (instanceId, options) => ipcRenderer.invoke("ai-engine:regenerate-stale", instanceId, options || {}),
   exportEngineDocument: (instanceId, options) => ipcRenderer.invoke("document-export:v3", instanceId, options || {}),
   createProject: (meta) => ipcRenderer.invoke("projects:create", meta),

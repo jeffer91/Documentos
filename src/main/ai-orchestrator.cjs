@@ -5,6 +5,7 @@ const providers = require("./ai-provider-service.cjs");
 const registry = require("./document-engine-registry.cjs");
 const knowledge = require("./knowledge-source-service.cjs");
 const editorial = require("./editorial-structure-service.cjs");
+const generationRuns = require("./ai-generation-run-service.cjs");
 
 function now() {
   return new Date().toISOString();
@@ -12,6 +13,96 @@ function now() {
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0))));
+}
+
+function retryableProviderError(error) {
+  const status = Number(error && error.statusCode || 0);
+  if ([408, 409, 425, 429].includes(status) || status >= 500) return true;
+  const text = String(error && error.message || error || "").toLowerCase();
+  return [
+    "timeout",
+    "timed out",
+    "aborted",
+    "rate limit",
+    "overloaded",
+    "temporarily",
+    "unavailable",
+    "connection",
+    "econnreset",
+    "fetch failed"
+  ].some((part) => text.includes(part));
+}
+
+function humanEdited(section) {
+  const provenance = section && section.provenance || {};
+  return Boolean(
+    section &&
+    (
+      provenance.source === "human" ||
+      provenance.blockEditedBy === "human" ||
+      provenance.approvedBy === "human"
+    )
+  );
+}
+
+function hasSectionContent(section) {
+  return Boolean(
+    section &&
+    (
+      String(section.content || "").trim() ||
+      (Array.isArray(section.blocks) && section.blocks.length)
+    )
+  );
+}
+
+function sectionPreservationReason(section, options) {
+  const input = options || {};
+  if (!section) return "missing";
+  if (section.locked || section.status === "approved") return "approved_or_locked";
+  if (humanEdited(section) && input.overrideHuman !== true) return "human_edited";
+  if (!input.force && section.status === "reviewed") return "already_reviewed";
+  if (!input.force && section.status === "needs_review") return "needs_human_review";
+  return "";
+}
+
+function documentMemory(instance, section) {
+  const before = (instance.sections || [])
+    .filter((item) => Number(item.order || 0) < Number(section.order || 0) && hasSectionContent(item))
+    .slice(-20)
+    .map((item) => ({
+      key: item.key,
+      title: item.title,
+      status: item.status,
+      summary: String(item.content || "").slice(0, 1600),
+      claims: Array.isArray(item.provenance && item.provenance.claims)
+        ? item.provenance.claims.slice(0, 6)
+        : [],
+      alertCount: Array.isArray(item.alerts) ? item.alerts.length : 0
+    }));
+
+  return {
+    priorSections: before,
+    outline: (instance.sections || []).map((item) => ({
+      key: item.key,
+      title: item.title,
+      order: item.order,
+      level: item.level,
+      status: item.status,
+      locked: Boolean(item.locked),
+      hasContent: hasSectionContent(item)
+    }))
+  };
+}
+
+function writerPayloadUsable(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  const content = String(payload.content || "").trim();
+  const blocks = Array.isArray(payload.blocks) ? payload.blocks : [];
+  return Boolean(content || blocks.length);
 }
 
 function parseJsonObject(text) {
@@ -201,10 +292,8 @@ function instanceDataReadiness(userDataPath, instanceId) {
 }
 
 function writerPrompt(instance, engine, section, context) {
-  const prior = instance.sections
-    .filter((item) => item.order < section.order && (item.content || (item.blocks || []).length))
-    .slice(-4)
-    .map((item) => ({ key: item.key, title: item.title, content: String(item.content || "").slice(0, 5000) }));
+  const memory = documentMemory(instance, section);
+  const prior = memory.priorSections;
   const derived = (section.derivedFrom || []).map((key) => {
     const source = instance.sections.find((item) => item.key === key);
     return source ? {
@@ -272,7 +361,8 @@ function writerPrompt(instance, engine, section, context) {
       } : null,
       institutionalSources: context.institutionalSources,
       derivedSections: derived,
-      previousSections: prior
+      previousSections: prior,
+      documentMemory: memory
     })
   ].filter(Boolean).join("\n\n");
 }
@@ -302,14 +392,24 @@ function reviewerPrompt(engine, section, draft, context) {
   ].join("\n\n");
 }
 
-function createJob(db, instanceId, sectionKey, role, providerId, request) {
+function createJob(db, instanceId, sectionKey, role, providerId, request, attempt) {
   const jobId = id("aijob");
   const ts = now();
   db.prepare(`
     INSERT INTO ai_jobs_v3
       (id, instance_id, section_key, role, provider_id, status, attempt, request_json, response_json, error_text, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'running', 1, ?, '{}', '', ?, ?)
-  `).run(jobId, instanceId, sectionKey || null, role, providerId || null, JSON.stringify(request || {}), ts, ts);
+    VALUES (?, ?, ?, ?, ?, 'running', ?, ?, '{}', '', ?, ?)
+  `).run(
+    jobId,
+    instanceId,
+    sectionKey || null,
+    role,
+    providerId || null,
+    Math.max(1, Number(attempt || 1)),
+    JSON.stringify(request || {}),
+    ts,
+    ts
+  );
   return jobId;
 }
 
@@ -321,6 +421,34 @@ function finishJob(db, jobId, response, error) {
   `).run(error ? "failed" : "completed", JSON.stringify(response || {}), error ? String(error.message || error) : "", now(), jobId);
 }
 
+async function callProviderWithRetries(userDataPath, db, candidate, role, instanceId, sectionKey, request, options) {
+  const input = options || {};
+  const configuredRetries = candidate && candidate.config && candidate.config.retries != null
+    ? Number(candidate.config.retries)
+    : 1;
+  const retries = Math.max(0, Math.min(Number(input.providerRetries != null ? input.providerRetries : configuredRetries), 2));
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
+    const jobId = createJob(db, instanceId, sectionKey, role, candidate.id, {
+      prompt: request.prompt,
+      engineId: request.engineId
+    }, attempt);
+    try {
+      const result = await providers.callProvider(userDataPath, candidate.id, request);
+      finishJob(db, jobId, { provider: result.provider.name, textLength: String(result.text || "").length }, null);
+      return result;
+    } catch (error) {
+      lastError = error;
+      finishJob(db, jobId, null, error);
+      if (attempt > retries || !retryableProviderError(error)) break;
+      await sleep(Math.min(1500, 250 * attempt));
+    }
+  }
+
+  throw lastError || new Error(`${candidate.name}: no se pudo completar la solicitud.`);
+}
+
 async function generateSection(userDataPath, instanceId, sectionKey, options) {
   let instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
@@ -329,7 +457,12 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
   if (!engine) throw new Error("Motor no disponible.");
   const section = instance.sections.find((item) => item.key === sectionKey);
   if (!section) throw new Error("Sección no válida.");
-  if (section.locked && !(options && options.force)) return instance;
+  if (section.locked || section.status === "approved") {
+    throw new Error("La sección está aprobada y bloqueada. Crea una nueva versión de trabajo para modificarla.");
+  }
+  if (humanEdited(section) && !(options && options.overrideHuman === true)) {
+    throw new Error("La sección contiene edición humana. Confirma explícitamente si deseas reemplazarla con IA.");
+  }
 
   if (section.type === "references") {
     return hub.updateSection(userDataPath, instanceId, sectionKey, {
@@ -356,16 +489,33 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
   let usedWriter = null;
   let lastWriterError = null;
   for (const candidate of set.writers || [set.writer]) {
-    const jobId = createJob(db, instanceId, sectionKey, "writer", candidate.id, { prompt, engineId: engine.engineId });
     try {
-      const result = await providers.callProvider(userDataPath, candidate.id, { system, prompt, maxTokens: options && options.maxTokens || 7000 });
-      writerResult = parseJsonObject(result.text);
+      const result = await callProviderWithRetries(
+        userDataPath,
+        db,
+        candidate,
+        "writer",
+        instanceId,
+        sectionKey,
+        {
+          system,
+          prompt,
+          maxTokens: options && options.maxTokens || candidate.config && candidate.config.maxTokens || 7000,
+          timeoutMs: options && options.timeoutMs || candidate.config && candidate.config.timeoutMs || 120000,
+          temperature: 0.2,
+          engineId: engine.engineId
+        },
+        options
+      );
+      const parsed = parseJsonObject(result.text);
+      if (!writerPayloadUsable(parsed)) {
+        throw new Error(`${candidate.name}: la respuesta no contiene contenido ni bloques utilizables.`);
+      }
+      writerResult = parsed;
       usedWriter = candidate;
-      finishJob(db, jobId, { parsed: writerResult, provider: result.provider.name }, null);
       break;
     } catch (error) {
       lastWriterError = error;
-      finishJob(db, jobId, null, error);
     }
   }
   if (!writerResult || !usedWriter) throw lastWriterError || new Error("Ninguna IA pudo redactar la sección.");
@@ -392,23 +542,41 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
     .slice(0, Math.max(1, Number(options && options.reviewers || 1)));
 
   for (const reviewer of reviewers) {
-    const reviewRequest = reviewerPrompt(engine, section, { content, alerts }, context);
-    const reviewJobId = createJob(db, instanceId, sectionKey, "reviewer", reviewer.id, { prompt: reviewRequest, engineId: engine.engineId });
+    const reviewRequest = reviewerPrompt(engine, section, { content, blocks, alerts }, context);
     try {
-      const result = await providers.callProvider(userDataPath, reviewer.id, {
-        system: "Eres revisor documental. Devuelve únicamente JSON válido.",
-        prompt: reviewRequest,
-        maxTokens: 6000,
-        temperature: 0.1
-      });
+      const result = await callProviderWithRetries(
+        userDataPath,
+        db,
+        reviewer,
+        "reviewer",
+        instanceId,
+        sectionKey,
+        {
+          system: "Eres revisor documental. Devuelve únicamente JSON válido.",
+          prompt: reviewRequest,
+          maxTokens: reviewer.config && reviewer.config.reviewMaxTokens || 6000,
+          timeoutMs: reviewer.config && reviewer.config.timeoutMs || 120000,
+          temperature: 0.1,
+          engineId: engine.engineId
+        },
+        options
+      );
       const review = parseJsonObject(result.text);
-      finishJob(db, reviewJobId, { parsed: review, provider: result.provider.name }, null);
       if (Array.isArray(review.correctedBlocks) && review.correctedBlocks.length) {
         blocks = editorial.normalizeBlocks(review.correctedBlocks);
         content = editorial.plainTextFromBlocks(blocks);
       } else if (review.correctedContent) {
-        content = String(review.correctedContent);
-        if (!blocks.length) blocks = editorial.normalizeBlocks([{ type: "prose", role: "body", text: content }]);
+        if (!blocks.length) {
+          content = String(review.correctedContent);
+          blocks = editorial.normalizeBlocks([{ type: "prose", role: "body", text: content }]);
+        } else {
+          alerts.push({
+            type: "review_format",
+            severity: "warning",
+            message: `${reviewer.name} devolvió texto corregido sin bloques; se conservó la estructura del writer para evitar inconsistencias.`,
+            blocking: false
+          });
+        }
       }
       if (Array.isArray(review.alerts)) alerts = alerts.concat(review.alerts);
       if (Array.isArray(review.issues) && review.issues.length) {
@@ -421,12 +589,16 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
       }
       provenance.reviewers = (provenance.reviewers || []).concat([{ id: reviewer.id, name: reviewer.name, approved: review.approved !== false }]);
     } catch (error) {
-      finishJob(db, reviewJobId, null, error);
       alerts.push({ type: "reviewer_failure", severity: "warning", message: `No se pudo completar la revisión con ${reviewer.name}: ${error.message}`, blocking: false });
     }
   }
 
   const editorialValidation = editorial.validateSectionBlocks(section, blocks);
+  const reviewerRejected = Boolean(
+    provenance.reviewers &&
+    provenance.reviewers.some((item) => item.approved === false)
+  );
+  const reviewerCoverageMissing = reviewers.length > 0 && !(provenance.reviewers && provenance.reviewers.length);
   editorialValidation.errors.forEach((message) => {
     alerts.push({ type: "editorial", severity: "error", message, blocking: true });
   });
@@ -444,39 +616,197 @@ async function generateSection(userDataPath, instanceId, sectionKey, options) {
     }
   });
 
+  const sectionStatus = editorialValidation.ok && !reviewerRejected && !reviewerCoverageMissing
+    ? "reviewed"
+    : "needs_review";
   instance = hub.updateSection(userDataPath, instanceId, sectionKey, {
     content,
     blocks,
-    status: "reviewed",
+    status: sectionStatus,
     provenance,
     alerts: dedup
   });
   return instance;
 }
 
-async function generateDocument(userDataPath, instanceId, options) {
+function dependencyProblems(instance, section, failedKeys, blockedKeys) {
+  const issues = [];
+  (section.derivedFrom || []).forEach((key) => {
+    const source = (instance.sections || []).find((item) => item.key === key);
+    if (!source) {
+      issues.push({ key, reason: "missing_dependency" });
+      return;
+    }
+    if (failedKeys.has(key) || blockedKeys.has(key)) {
+      issues.push({ key, reason: "dependency_failed" });
+      return;
+    }
+    if (!hasSectionContent(source) && source.type !== "references") {
+      issues.push({ key, reason: "dependency_empty" });
+    }
+  });
+  return issues;
+}
+
+async function runDocumentGeneration(userDataPath, instanceId, options, mode) {
+  const input = Object.assign({ continueOnError: true }, options || {});
   let instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
   if (!instance) throw new Error("Documento no válido.");
-  const startAt = options && options.startAt ? String(options.startAt) : "";
+  if (instance.finalFrozenAt) throw new Error("La versión final está congelada.");
+
+  const db = hub.dbFor(userDataPath);
+  const startAt = input.startAt ? String(input.startAt) : "";
   let enabled = !startAt;
+  const candidates = [];
   for (const section of instance.sections) {
     if (section.key === startAt) enabled = true;
-    if (!enabled) continue;
-    if (section.locked || section.status === "approved") continue;
-    if (!(options && options.force) && section.status === "reviewed") continue;
-    instance = await generateSection(userDataPath, instanceId, section.key, options || {});
+    if (enabled) candidates.push(section);
   }
-  return hub.getDocumentInstance(userDataPath, instanceId);
+  if (startAt && !enabled) throw new Error(`No existe la sección inicial ${startAt}.`);
+
+  const run = generationRuns.start(db, instanceId, mode || "document", candidates.length, {
+    startAt,
+    force: Boolean(input.force),
+    overrideHuman: Boolean(input.overrideHuman),
+    reviewers: Number(input.reviewers || 1),
+    continueOnError: input.continueOnError !== false
+  });
+
+  const result = {
+    completed: [],
+    skipped: [],
+    preserved: [],
+    failed: [],
+    blocked: [],
+    providers: [],
+    lastCompletedSectionKey: "",
+    nextSectionKey: "",
+    resumable: false
+  };
+  const failedKeys = new Set();
+  const blockedKeys = new Set();
+
+  try {
+    for (const original of candidates) {
+      instance = hub.getDocumentInstance(userDataPath, instanceId);
+      const section = instance.sections.find((item) => item.key === original.key);
+      if (!section) continue;
+
+      generationRuns.update(db, run.id, {
+        currentSectionKey: section.key,
+        result
+      });
+
+      const preservationReason = sectionPreservationReason(section, input);
+      if (preservationReason) {
+        const record = { key: section.key, title: section.title, reason: preservationReason };
+        if (preservationReason === "human_edited" || preservationReason === "approved_or_locked") {
+          result.preserved.push(record);
+        } else {
+          result.skipped.push(record);
+        }
+        generationRuns.update(db, run.id, { result });
+        continue;
+      }
+
+      const dependencyIssues = dependencyProblems(instance, section, failedKeys, blockedKeys);
+      if (dependencyIssues.length) {
+        const record = {
+          key: section.key,
+          title: section.title,
+          reason: "dependencies_not_ready",
+          dependencies: dependencyIssues
+        };
+        result.blocked.push(record);
+        blockedKeys.add(section.key);
+        generationRuns.update(db, run.id, { result });
+        continue;
+      }
+
+      try {
+        const generated = await generateSection(userDataPath, instanceId, section.key, input);
+        const generatedSection = generated.sections.find((item) => item.key === section.key);
+        result.completed.push({
+          key: section.key,
+          title: section.title,
+          status: generatedSection && generatedSection.status || "reviewed"
+        });
+        result.lastCompletedSectionKey = section.key;
+        const provenance = generatedSection && generatedSection.provenance || {};
+        if (provenance.writerProviderId) {
+          result.providers.push({
+            sectionKey: section.key,
+            writerProviderId: provenance.writerProviderId,
+            reviewerCount: Array.isArray(provenance.reviewers) ? provenance.reviewers.length : 0
+          });
+        }
+      } catch (error) {
+        failedKeys.add(section.key);
+        result.failed.push({
+          key: section.key,
+          title: section.title,
+          error: String(error && error.message || error)
+        });
+        if (input.continueOnError === false) {
+          result.nextSectionKey = section.key;
+          result.resumable = true;
+          generationRuns.finish(db, run.id, "failed", result);
+          error.generationRunId = run.id;
+          throw error;
+        }
+      }
+
+      generationRuns.update(db, run.id, { result });
+    }
+
+    const unresolved = result.failed.length > 0 || result.blocked.length > 0;
+    if (unresolved) {
+      const unresolvedKeys = new Set([
+        ...result.failed.map((item) => item.key),
+        ...result.blocked.map((item) => item.key)
+      ]);
+      result.nextSectionKey = candidates.find((item) => unresolvedKeys.has(item.key))?.key || "";
+    }
+    result.resumable = unresolved;
+    const finished = generationRuns.finish(db, run.id, unresolved ? "partial" : "completed", result);
+    const finalInstance = hub.getDocumentInstance(userDataPath, instanceId);
+    finalInstance.generationRun = finished;
+    return finalInstance;
+  } catch (error) {
+    const latest = generationRuns.get(db, run.id);
+    if (latest && latest.status === "running") {
+      generationRuns.finish(db, run.id, "failed", Object.assign(result, {
+        resumable: true,
+        nextSectionKey: result.nextSectionKey || latest.currentSectionKey || ""
+      }));
+    }
+    throw error;
+  }
+}
+
+async function generateDocument(userDataPath, instanceId, options) {
+  return runDocumentGeneration(userDataPath, instanceId, options || {}, "document");
+}
+
+async function resumeDocument(userDataPath, instanceId, options) {
+  return runDocumentGeneration(userDataPath, instanceId, Object.assign({}, options || {}, {
+    force: false
+  }), "resume");
 }
 
 async function regenerateStale(userDataPath, instanceId, options) {
-  const instance = hub.ensureCurrentDocumentInstance(userDataPath, instanceId);
-  if (!instance) throw new Error("Documento no válido.");
-  for (const section of instance.sections) {
-    if (section.locked || section.status === "approved") continue;
-    await generateSection(userDataPath, instanceId, section.key, Object.assign({}, options || {}, { force: true }));
-  }
-  return hub.getDocumentInstance(userDataPath, instanceId);
+  return runDocumentGeneration(userDataPath, instanceId, Object.assign({}, options || {}, {
+    force: true,
+    overrideHuman: false
+  }), "stale");
+}
+
+function latestGenerationRun(userDataPath, instanceId) {
+  return generationRuns.latest(hub.dbFor(userDataPath), instanceId);
+}
+
+function listGenerationRuns(userDataPath, instanceId, limit) {
+  return generationRuns.list(hub.dbFor(userDataPath), instanceId, limit);
 }
 
 module.exports = {
@@ -484,6 +814,11 @@ module.exports = {
   instanceDataReadiness,
   generateSection,
   generateDocument,
+  resumeDocument,
   regenerateStale,
-  parseJsonObject
+  latestGenerationRun,
+  listGenerationRuns,
+  parseJsonObject,
+  retryableProviderError,
+  sectionPreservationReason
 };
