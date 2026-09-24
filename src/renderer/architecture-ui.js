@@ -1568,10 +1568,12 @@
       await renderDossier(state.dossier.id);
       return true;
     }
-    if (state.currentView === "dossier" || state.currentView === "launcher" || state.currentView === "documents") {
+    if (state.currentView === "dossier") {
       await renderHome();
       return true;
     }
+    if (state.currentView === "launcher") return false;
+    if (state.currentView === "documents") return false;
     return false;
   }
 
