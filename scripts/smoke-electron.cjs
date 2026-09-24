@@ -17,6 +17,8 @@ const editorial = require("../src/main/editorial-structure-service.cjs");
 const visualRenderer = require("../src/main/visual-renderer-service.cjs");
 const citationService = require("../src/main/citation-service.cjs");
 const dataIngestion = require("../src/main/data-ingestion-service.cjs");
+const dataBindings = require("../src/main/document-data-binding-service.cjs");
+const aiOrchestrator = require("../src/main/ai-orchestrator.cjs");
 const draftExport = require("../src/main/draft-export-service.cjs");
 const documentEngineRegistry = require("../src/main/document-engine-registry.cjs");
 const { validateProject, validateSystemFields, validateExtractedData } = require("../src/main/project-validator.cjs");
@@ -816,6 +818,125 @@ async function run() {
       () => dataIngestion.setMapping(temp, importedData.id, { fields: { career: "Columna inexistente" } }),
       /no encontró/
     );
+
+    // Nuevo Bloque 3: bindings de datos reales por documento.
+    const dataPlanReport = documentEngineRegistry.dataPlanReport();
+    assert.strictEqual(dataPlanReport.valid, true);
+    assert.strictEqual(dataPlanReport.engineCount, 33);
+    assert.strictEqual(dataPlanReport.plannedEngineCount, 33);
+    assert.deepStrictEqual(dataPlanReport.enginesWithoutPlan, []);
+    assert.deepStrictEqual(dataPlanReport.invalidPlans, []);
+
+    const capNoData = aiOrchestrator.instanceDataReadiness(temp, capDetectionInstance.id);
+    const capNoDataResults = capNoData.sections.find((item) => item.sectionKey === "RESULTADOS");
+    assert.ok(capNoDataResults);
+    assert.strictEqual(capNoDataResults.status, "no_imports");
+    assert.strictEqual(capNoDataResults.ready, false);
+
+    const regularReadiness = aiOrchestrator.instanceDataReadiness(temp, instanceV4.id);
+    const regularResultsReady = regularReadiness.sections.find((item) => item.sectionKey === "RESULTADOS");
+    assert.ok(regularResultsReady);
+    assert.strictEqual(regularResultsReady.ready, true);
+    assert.strictEqual(regularResultsReady.status, "ready");
+    assert.ok(regularResultsReady.availableFields.includes("career"));
+    assert.ok(regularResultsReady.availableFields.includes("grade"));
+
+    const planInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.plan-complexivo", {
+      type: "period",
+      key: ""
+    });
+    const planReadiness = aiOrchestrator.instanceDataReadiness(temp, planInstance.id);
+    const planSchedule = planReadiness.sections.find((item) => item.sectionKey === "CRONOGRAMA");
+    assert.ok(planSchedule);
+    assert.strictEqual(planSchedule.ready, false);
+    assert.strictEqual(planSchedule.status, "missing_fields");
+    assert.ok(planSchedule.missingAny.some((group) => group.includes("event_date")));
+
+    const plagiarismInstance = processHub.ensureDocumentInstance(temp, dossierV4.id, "tit.regular.plagio-trabajo", {
+      type: "student",
+      key: "EST-06001"
+    });
+    let plagiarismReadiness = aiOrchestrator.instanceDataReadiness(temp, plagiarismInstance.id);
+    let plagiarismSectionReadiness = plagiarismReadiness.sections.find((item) => item.sectionKey === "RESULTADO_ANTIPLAGIO");
+    assert.ok(plagiarismSectionReadiness);
+    assert.strictEqual(plagiarismSectionReadiness.ready, false);
+    assert.strictEqual(plagiarismSectionReadiness.status, "missing_fields");
+    assert.ok(plagiarismSectionReadiness.missingAll.includes("plagiarism_percent"));
+
+    const plagiarismPath = path.join(temp, "antiplagio-estudiantes.xlsx");
+    const plagiarismWorkbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      plagiarismWorkbook,
+      XLSX.utils.aoa_to_sheet([
+        ["Cédula", "Estudiante", "Porcentaje de plagio", "Título documento"],
+        ["EST-06001", "Estudiante 6001", "12,5%", "Trabajo de titulación 6001"],
+        ["EST-06000", "Estudiante 6000", "7%", "Trabajo de titulación 6000"]
+      ]),
+      "Antiplagio"
+    );
+    XLSX.writeFile(plagiarismWorkbook, plagiarismPath);
+
+    const plagiarismImport = dataIngestion.importDataFile(temp, dossierV4.id, plagiarismPath, { type: "dossier", key: "" });
+    const plagiarismSuggestions = dataIngestion.suggestMapping(temp, plagiarismImport.id);
+    assert.strictEqual(plagiarismSuggestions.sheets[0].suggestions.student_id.source, "Cédula");
+    assert.strictEqual(plagiarismSuggestions.sheets[0].suggestions.plagiarism_percent.source, "Porcentaje de plagio");
+    dataIngestion.setMapping(temp, plagiarismImport.id, {
+      fields: {
+        student_id: "Cédula",
+        student_name: "Estudiante",
+        plagiarism_percent: "Porcentaje de plagio",
+        document_title: "Título documento"
+      }
+    });
+
+    plagiarismReadiness = aiOrchestrator.instanceDataReadiness(temp, plagiarismInstance.id);
+    plagiarismSectionReadiness = plagiarismReadiness.sections.find((item) => item.sectionKey === "RESULTADO_ANTIPLAGIO");
+    assert.strictEqual(plagiarismSectionReadiness.ready, true);
+    assert.strictEqual(plagiarismSectionReadiness.status, "ready");
+
+    const plagiarismLiveInstance = processHub.getDocumentInstance(temp, plagiarismInstance.id);
+    const plagiarismLiveSection = plagiarismLiveInstance.sections.find((item) => item.key === "RESULTADO_ANTIPLAGIO");
+    const resolvedPlagiarism = aiOrchestrator.dataReadinessForSection(
+      temp,
+      plagiarismLiveInstance,
+      plagiarismLiveSection
+    );
+    assert.strictEqual(resolvedPlagiarism.ready, true);
+    assert.deepStrictEqual(resolvedPlagiarism.query.importIds, [plagiarismImport.id]);
+    assert.deepStrictEqual(resolvedPlagiarism.query.sheet, ["Antiplagio"]);
+    assert.ok(resolvedPlagiarism.query.where.some((item) => item.field === "plagiarism_percent" && item.op === "exists"));
+    assert.ok(resolvedPlagiarism.query.where.some((item) => item.field === "student_id" && item.value === "EST-06001"));
+
+    const plagiarismSlice = dataIngestion.aiSlice(temp, dossierV4.id, resolvedPlagiarism.query);
+    assert.strictEqual(plagiarismSlice.population.total, 1);
+    assert.strictEqual(plagiarismSlice.summary.numeric.plagiarism_percent.average, 12.5);
+    assert.strictEqual(plagiarismSlice.sampleRows.length, 1);
+    assert.strictEqual(plagiarismSlice.sampleRows[0].student_id, "EST-06001");
+    assert.strictEqual(plagiarismSlice.sampleRows[0].plagiarism_percent, "12,5%");
+    assert.ok(plagiarismSlice.sourceTrace.every((item) => item.importId === plagiarismImport.id));
+
+    assert.strictEqual(dataIngestion.numericValue("12,5%"), 12.5);
+    assert.strictEqual(dataIngestion.numericValue("1.234,50"), 1234.5);
+
+    const regularLive = processHub.getDocumentInstance(temp, instanceV4.id);
+    const regularResultsSection = regularLive.sections.find((item) => item.key === "RESULTADOS");
+    const regularResolved = aiOrchestrator.dataReadinessForSection(temp, regularLive, regularResultsSection);
+    assert.strictEqual(regularResolved.ready, true);
+    assert.deepStrictEqual(regularResolved.query.importIds, [importedData.id]);
+    assert.deepStrictEqual(regularResolved.query.sheet, ["Notas"]);
+    assert.ok(!regularResolved.query.importIds.includes(plagiarismImport.id));
+
+    const splitBinding = dataBindings.bindingFor("tit.regular.plagio-trabajo", "RESULTADO_ANTIPLAGIO");
+    const splitReadiness = dataBindings.resolveBinding(splitBinding, { scopeType: "student", scopeKey: "EST-1" }, {
+      hasImports: true,
+      availableFields: ["student_id", "plagiarism_percent"],
+      imports: [
+        { importId: "one", sheets: [{ name: "A", canonicalFields: ["student_id"] }] },
+        { importId: "two", sheets: [{ name: "B", canonicalFields: ["plagiarism_percent"] }] }
+      ]
+    });
+    assert.strictEqual(splitReadiness.ready, false);
+    assert.ok(splitReadiness.warnings.some((item) => item.includes("misma hoja")));
 
     const pagedData = dataIngestion.queryData(temp, dossierV4.id, {
       scopeType: "period_population",
