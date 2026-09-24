@@ -17,6 +17,7 @@
     instance: null,
     editorialValidation: null,
     citationValidation: null,
+    dataReadiness: null,
     busy: false,
     currentView: "home"
   };
@@ -91,6 +92,7 @@
     state.instance = response.instance;
     state.editorialValidation = response.editorialValidation || null;
     state.citationValidation = response.citationValidation || null;
+    state.dataReadiness = response.dataReadiness || null;
     return state.instance;
   }
 
@@ -294,7 +296,8 @@
   function engineCard(engine) {
     const instance = instanceForEngine(engine.engineId);
     const outlineLabel = engine.outlineStatus === "confirmed" ? "estructura confirmada" : "estructura base";
-    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : "", outlineLabel].filter(Boolean).join(" · ");
+    const dataLabel = Number(engine.dataBindingCount || 0) ? `${Number(engine.dataBindingCount)} vínculo(s) de datos` : "sin Excel obligatorio";
+    const badges = [engine.cardinality, engine.population !== "all" ? engine.population : "", outlineLabel, dataLabel].filter(Boolean).join(" · ");
     if (instance) {
       const lifecycleLabel = instance.engineState === "migration_pending"
         ? "Migración pendiente"
@@ -453,12 +456,27 @@
     const allowed = section.allowedVisuals || [];
     const contract = section.contract || {};
     const number = section.numbering || String(section.order || "");
+    const readiness = state.dataReadiness && Array.isArray(state.dataReadiness.sections)
+      ? state.dataReadiness.sections.find((item) => item.sectionKey === section.key)
+      : null;
+    const readinessLabel = !readiness || !readiness.bindingId
+      ? ""
+      : readiness.ready
+        ? "Datos listos"
+        : readiness.status === "no_imports"
+          ? "Sin Excel/CSV"
+          : readiness.status === "mapping_pending"
+            ? "Mapeo pendiente"
+            : readiness.status === "missing_fields"
+              ? "Campos faltantes"
+              : "Datos pendientes";
+    const readinessClass = readiness && readiness.ready ? "good" : "warn";
     return `
       <article class="arch-section-card level-${level}" style="--section-level:${level}">
         <div class="arch-section-head">
           <div class="arch-section-title-wrap">
             <label><input type="checkbox" data-arch-section-select value="${escapeHtml(section.key)}"> <b>${escapeHtml(number)}.</b> ${escapeHtml(section.title)}</label>
-            <small>Nivel ${level} · ${escapeHtml(section.type)} · ${(section.blocks || []).length} bloque(s)</small>
+            <small>Nivel ${level} · ${escapeHtml(section.type)} · ${(section.blocks || []).length} bloque(s)${readinessLabel ? " · " + escapeHtml(readinessLabel) : ""}</small>
           </div>
           <div class="button-row">
             <span class="status ${section.status === "approved" ? "good" : section.alerts && section.alerts.length ? "warn" : ""}">${escapeHtml(section.status)}</span>
@@ -467,6 +485,7 @@
             <button class="secondary small-inline" data-arch-action="approve-section" data-key="${escapeHtml(section.key)}">${section.locked ? "Aprobada" : "Aprobar"}</button>
           </div>
         </div>
+        ${readiness && readiness.bindingId ? `<div class="notice-${readiness.ready ? "soft" : "warn"}"><b class="${readinessClass === "good" ? "arch-ok-text" : "arch-warn-text"}">${escapeHtml(readinessLabel)}</b><span>${escapeHtml((readiness.warnings || []).slice(0, 2).join(" · ") || (readiness.ready ? "La sección tiene los campos necesarios para consultar los datos." : "Revisa el archivo y su mapeo."))}</span></div>` : ""}
         ${contract.purpose ? `<div class="notice-soft arch-contract"><b>Regla propia</b><span>${escapeHtml(contract.purpose)}</span></div>` : ""}
         ${allowed.length ? `<div class="arch-visual-tools"><span>Herramientas habilitadas:</span>${allowed.map((id) => `<em>${escapeHtml(visualLabel(id))}</em>`).join("")}</div>` : ""}
         <div class="arch-block-summary">${blockSummary(section)}</div>
