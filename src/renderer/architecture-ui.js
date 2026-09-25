@@ -49,6 +49,137 @@
     setTimeout(() => element.classList.remove("show"), 3200);
   }
 
+  function appDialog(options) {
+    const config = options || {};
+    const fields = Array.isArray(config.fields) ? config.fields : [];
+
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "app-dialog-backdrop";
+      backdrop.innerHTML = `
+        <div class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title">
+          <form class="app-dialog-form">
+            <div class="app-dialog-head">
+              <div>
+                <h2 id="app-dialog-title">${escapeHtml(config.title || "Documentos ITSQMET")}</h2>
+                ${config.message ? `<p>${escapeHtml(config.message)}</p>` : ""}
+              </div>
+              <button class="app-dialog-close" type="button" data-dialog-cancel aria-label="Cerrar">×</button>
+            </div>
+            ${fields.length ? `
+              <div class="app-dialog-fields">
+                ${fields.map((field) => {
+                  const id = "dialog-" + escapeHtml(field.name || "value");
+                  const label = escapeHtml(field.label || "");
+                  const value = escapeHtml(field.value == null ? "" : field.value);
+                  const placeholder = escapeHtml(field.placeholder || "");
+                  const required = field.required ? "required" : "";
+                  if (field.multiline) {
+                    return `
+                      <label class="app-dialog-field" for="${id}">
+                        <span>${label}</span>
+                        <textarea id="${id}" name="${escapeHtml(field.name)}" placeholder="${placeholder}" ${required}>${value}</textarea>
+                      </label>
+                    `;
+                  }
+                  return `
+                    <label class="app-dialog-field" for="${id}">
+                      <span>${label}</span>
+                      <input id="${id}" name="${escapeHtml(field.name)}" type="${escapeHtml(field.type || "text")}" value="${value}" placeholder="${placeholder}" ${required}>
+                    </label>
+                  `;
+                }).join("")}
+              </div>
+            ` : ""}
+            <div class="app-dialog-actions">
+              ${config.cancelText === null ? "" : `<button class="ghost" type="button" data-dialog-cancel>${escapeHtml(config.cancelText || "Cancelar")}</button>`}
+              <button class="${config.danger ? "danger-button" : "primary"}" type="submit">${escapeHtml(config.confirmText || "Aceptar")}</button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      let settled = false;
+      const cleanup = () => {
+        document.removeEventListener("keydown", onKeyDown, true);
+        backdrop.remove();
+      };
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+      const onKeyDown = (event) => {
+        if (event.key === "Escape" && config.cancelText !== null) {
+          event.preventDefault();
+          finish(null);
+        }
+      };
+
+      backdrop.querySelectorAll("[data-dialog-cancel]").forEach((button) => {
+        button.addEventListener("click", () => finish(null));
+      });
+      backdrop.addEventListener("mousedown", (event) => {
+        if (event.target === backdrop && config.cancelText !== null) finish(null);
+      });
+      backdrop.querySelector("form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const values = {};
+        new FormData(event.currentTarget).forEach((value, key) => { values[key] = String(value); });
+        finish(values);
+      });
+
+      document.addEventListener("keydown", onKeyDown, true);
+      document.body.appendChild(backdrop);
+      window.setTimeout(() => {
+        const first = backdrop.querySelector("input, textarea, select, button[type='submit']");
+        if (first) first.focus();
+      }, 0);
+    });
+  }
+
+  async function appPrompt(message, defaultValue, options) {
+    const config = options || {};
+    const result = await appDialog({
+      title: config.title || "Ingresar información",
+      fields: [{
+        name: "value",
+        label: message,
+        value: defaultValue == null ? "" : defaultValue,
+        type: config.type || "text",
+        multiline: Boolean(config.multiline),
+        required: Boolean(config.required),
+        placeholder: config.placeholder || ""
+      }],
+      confirmText: config.confirmText || "Continuar",
+      cancelText: config.cancelText === undefined ? "Cancelar" : config.cancelText
+    });
+    return result ? result.value : null;
+  }
+
+  async function appConfirm(message, options) {
+    const config = options || {};
+    const result = await appDialog({
+      title: config.title || "Confirmar",
+      message,
+      confirmText: config.confirmText || "Confirmar",
+      cancelText: config.cancelText || "Cancelar",
+      danger: Boolean(config.danger)
+    });
+    return Boolean(result);
+  }
+
+  async function appAlert(message, options) {
+    const config = options || {};
+    await appDialog({
+      title: config.title || "Información",
+      message,
+      confirmText: config.confirmText || "Entendido",
+      cancelText: null
+    });
+  }
+
   function setHeader(screenTitle, crumbs, canBack) {
     if (title()) title().textContent = screenTitle || "Procesos";
     if (breadcrumb()) breadcrumb().textContent = crumbs || "Procesos";
@@ -250,7 +381,7 @@
     if (cardinality === "period_population") {
       scopeKey = state.dossier.population || engine.population || "all";
     } else if (cardinality !== "period") {
-      scopeKey = window.prompt(`Identificador para ${cardinality}:`, "") || "";
+      scopeKey = await appPrompt(`Identificador para ${cardinality}:`, "", { required: true }) || "";
       if (!scopeKey) return;
     }
     const response = await api.ensureDocumentInstance(state.dossier.id, engine.engineId, {
@@ -900,13 +1031,46 @@
   }
 
   async function newPeriod() {
-    const code = window.prompt("Código del período (ej. FEB-AGO-2026):");
-    if (!code) return;
-    const label = window.prompt("Nombre visible del período:", code);
-    if (!label) return;
-    const startDate = window.prompt("Fecha de inicio (AAAA-MM-DD, opcional):", "") || "";
-    const endDate = window.prompt("Fecha de fin (AAAA-MM-DD, opcional):", "") || "";
+    const values = await appDialog({
+      title: "Crear período",
+      message: "Define el período de trabajo. Las fechas son opcionales.",
+      fields: [
+        {
+          name: "code",
+          label: "Código del período",
+          placeholder: "Ej. FEB-AGO-2026",
+          required: true
+        },
+        {
+          name: "label",
+          label: "Nombre visible",
+          placeholder: "Si lo dejas vacío, se usará el código"
+        },
+        {
+          name: "startDate",
+          label: "Fecha de inicio",
+          type: "date"
+        },
+        {
+          name: "endDate",
+          label: "Fecha de fin",
+          type: "date"
+        }
+      ],
+      confirmText: "Crear período"
+    });
+    if (!values) return;
+
+    const code = String(values.code || "").trim();
+    const label = String(values.label || "").trim() || code;
+    const startDate = String(values.startDate || "").trim();
+    const endDate = String(values.endDate || "").trim();
+    if (!code) return toast("El código del período es obligatorio.");
+    if (startDate && endDate && startDate > endDate) return toast("La fecha de fin no puede ser anterior a la fecha de inicio.");
+
+    setBusy(true);
     const response = await api.createPeriod({ code, label, startDate, endDate });
+    setBusy(false);
     if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el período.");
     toast("Período creado.");
     await renderHome();
@@ -916,7 +1080,7 @@
     const select = document.getElementById(`arch-process-${button.dataset.periodId}`);
     if (!select) return;
     const [processKey, population] = String(select.value || "").split("|");
-    const label = window.prompt("Nombre del expediente:", `${select.options[select.selectedIndex].text} · ${button.dataset.periodId}`);
+    const label = await appPrompt("Nombre del expediente:", `${select.options[select.selectedIndex].text} · ${button.dataset.periodId}`, { required: true });
     if (!label) return;
     const response = await api.createDossier({ periodId: button.dataset.periodId, processKey, population, label });
     if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el expediente.");
@@ -925,9 +1089,9 @@
   }
 
   async function addMaster() {
-    const key = window.prompt("Clave del dato compartido (ej. CARRERAS, CRONOGRAMA, RESPONSABLES):");
+    const key = await appPrompt("Clave del dato compartido (ej. CARRERAS, CRONOGRAMA, RESPONSABLES):", "", { required: true });
     if (!key) return;
-    const value = window.prompt("Valor. Puedes pegar texto o JSON:");
+    const value = await appPrompt("Valor. Puedes pegar texto o JSON:", "", { multiline: true });
     if (value == null) return;
     const response = await api.setMasterData(state.dossier.id, {
       key: key.trim().toUpperCase().replace(/\s+/g, "_"),
@@ -960,7 +1124,7 @@
         lines.push(`  ${canonical} ← ${item.source} (${Math.round(Number(item.confidence || 0) * 100)}%)`);
       });
     });
-    window.alert(`Sugerencias de mapeo para ${suggestion.sourceName || "archivo"}\n\n${lines.join("\n")}\n\nEstas sugerencias no se aplican automáticamente.`);
+    await appAlert(`Sugerencias de mapeo para ${suggestion.sourceName || "archivo"}\n\n${lines.join("\n")}\n\nEstas sugerencias no se aplican automáticamente.`, { title: "Sugerencias de mapeo" });
   }
 
   async function editMapping(importId) {
@@ -980,7 +1144,7 @@
     const initial = Object.keys(item.mapping || {}).length
       ? JSON.stringify(item.mapping, null, 2)
       : JSON.stringify(example, null, 2);
-    const raw = window.prompt("Mapeo canónico JSON. Cambia únicamente las columnas que existan en tu Excel:", initial);
+    const raw = await appPrompt("Mapeo canónico JSON. Cambia únicamente las columnas que existan en tu Excel:", initial, { multiline: true, title: "Editar mapeo" });
     if (raw == null) return;
     let mapping;
     try {
@@ -1044,31 +1208,32 @@
     const available = types.length ? types : fallbackTypes;
     const currentIndex = Math.max(0, available.findIndex((item) => item.id === current.sourceType));
     const menu = available.map((item, index) => (index + 1) + ". " + item.label + " [" + item.id + "]").join("\n");
-    const selected = window.prompt("Tipo de fuente APA 7:\n\n" + menu + "\n\nEscribe el número:", String(currentIndex + 1));
+    const selected = await appPrompt("Tipo de fuente APA 7:\n\n" + menu + "\n\nEscribe el número:", String(currentIndex + 1), { title: "Referencia APA 7" });
     if (selected == null) return;
     const typeIndex = Number(selected) - 1;
     if (!Number.isInteger(typeIndex) || typeIndex < 0 || typeIndex >= available.length) return toast("Tipo de fuente no válido.");
     const sourceType = available[typeIndex].id;
 
-    const corporateAuthor = window.prompt("Autor institucional/corporativo (vacío si son autores personales):", current.corporateAuthor || "");
+    const corporateAuthor = await appPrompt("Autor institucional/corporativo (vacío si son autores personales):", current.corporateAuthor || "", { title: "Referencia APA 7" });
     if (corporateAuthor == null) return;
-    const author = window.prompt("Autor(es) personales. Usa “Apellido, Iniciales; Apellido, Iniciales” para varios:", current.author || "");
+    const author = await appPrompt("Autor(es) personales. Usa “Apellido, Iniciales; Apellido, Iniciales” para varios:", current.author || "", { title: "Referencia APA 7" });
     if (author == null) return;
-    const year = window.prompt("Año (ej. 2026). Si hay fecha completa, puedes dejarlo vacío y ponerla en metadatos:", current.year || "");
+    const year = await appPrompt("Año (ej. 2026). Si hay fecha completa, puedes dejarlo vacío y ponerla en metadatos:", current.year || "", { title: "Referencia APA 7" });
     if (year == null) return;
-    const titleValue = window.prompt("Título de la fuente:", current.title || source.name || "");
+    const titleValue = await appPrompt("Título de la fuente:", current.title || source.name || "", { title: "Referencia APA 7" });
     if (titleValue == null) return;
-    const publisher = window.prompt("Editorial / institución publicadora (cuando corresponda):", current.publisher || "");
+    const publisher = await appPrompt("Editorial / institución publicadora (cuando corresponda):", current.publisher || "", { title: "Referencia APA 7" });
     if (publisher == null) return;
-    const url = window.prompt("URL (cuando corresponda):", current.url || "");
+    const url = await appPrompt("URL (cuando corresponda):", current.url || "", { title: "Referencia APA 7" });
     if (url == null) return;
-    const doi = window.prompt("DOI (cuando corresponda):", current.doi || "");
+    const doi = await appPrompt("DOI (cuando corresponda):", current.doi || "", { title: "Referencia APA 7" });
     if (doi == null) return;
 
     const template = citationMetadataTemplate(sourceType, current);
-    const metadataRaw = window.prompt(
+    const metadataRaw = await appPrompt(
       "Metadatos específicos en JSON. Completa los campos que correspondan al tipo seleccionado:",
-      JSON.stringify(template, null, 2)
+      JSON.stringify(template, null, 2),
+      { multiline: true, title: "Metadatos APA 7" }
     );
     if (metadataRaw == null) return;
     let metadata;
@@ -1111,11 +1276,11 @@
     const choices = periods.filter((item) => item.id !== state.dossier.periodId);
     if (!choices.length) return toast("Crea primero otro período.");
     const menu = choices.map((item, index) => `${index + 1}. ${item.label} [${item.code}]`).join("\n");
-    const selected = window.prompt(`¿A qué período copiar la base?\n${menu}\n\nEscribe el número:`, "1");
+    const selected = await appPrompt(`¿A qué período copiar la base?\n${menu}\n\nEscribe el número:`, "1", { title: "Copiar expediente" });
     const index = Number(selected) - 1;
     if (!Number.isInteger(index) || index < 0 || index >= choices.length) return;
     const target = choices[index];
-    const label = window.prompt("Nombre del nuevo expediente:", `${state.dossier.processKey} · ${target.label}`);
+    const label = await appPrompt("Nombre del nuevo expediente:", `${state.dossier.processKey} · ${target.label}`, { required: true, title: "Copiar expediente" });
     if (!label) return;
     const response = await api.cloneDossier(state.dossier.id, target.id, label);
     if (!response || !response.ok) return toast(response && response.error || "No se pudo copiar el expediente.");
@@ -1129,7 +1294,7 @@
     let scopeKey = "";
     const cardinality = button.dataset.cardinality || engine.cardinality;
     if (!["period"].includes(cardinality)) {
-      scopeKey = window.prompt(`Identificador para ${cardinality} (ej. estudiante, carrera, actividad o segmento):`, "") || "";
+      scopeKey = await appPrompt(`Identificador para ${cardinality} (ej. estudiante, carrera, actividad o segmento):`, "", { required: true }) || "";
       if (!scopeKey && cardinality !== "period_population") return;
     }
     if (cardinality === "period_population" && !scopeKey) scopeKey = state.dossier.population || engine.population || "all";
@@ -1353,7 +1518,7 @@
 
     let overrideHuman = false;
     if (hasHumanEdits) {
-      if (!window.confirm("Esta sección tiene cambios manuales. ¿Deseas reemplazarlos con una nueva generación de IA?")) return;
+      if (!await appConfirm("Esta sección tiene cambios manuales. ¿Deseas reemplazarlos con una nueva generación de IA?", { title: "Reemplazar cambios manuales", confirmText: "Reemplazar" })) return;
       overrideHuman = true;
     }
 
@@ -1552,7 +1717,7 @@
         return toast(response && response.ok ? "Conexión de IA correcta." : response && response.error || "Falló la prueba.");
       }
       if (action === "delete-provider") {
-        if (!window.confirm("¿Quitar esta IA?")) return;
+        if (!await appConfirm("¿Quitar esta IA?", { title: "Quitar IA", confirmText: "Quitar", danger: true })) return;
         const response = await api.deleteAiProvider(button.dataset.id);
         if (!response || !response.ok) return toast(response && response.error || "No se pudo quitar.");
         return renderHome();
