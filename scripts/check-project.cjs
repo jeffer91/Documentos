@@ -227,6 +227,18 @@ function externalOnlyUiCheck() {
   };
 }
 
+function architectureDialogCheck() {
+  const rendererSource = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+  return {
+    hasInternalDialog:
+      rendererSource.includes("function appDialog(options)") &&
+      rendererSource.includes('className = "app-dialog-backdrop"') &&
+      rendererSource.includes('title: "Crear período"'),
+    noNativeDialogs:
+      !/window\.(prompt|confirm|alert)\s*\(/.test(rendererSource)
+  };
+}
+
 function legacyExternalOnlyCheck() {
   const legacySource = fs.readFileSync(path.join(ROOT, "src/main/legacy-migration-service.cjs"), "utf8");
   const templateSource = fs.readFileSync(path.join(ROOT, "src/main/template-service.cjs"), "utf8");
@@ -1458,6 +1470,15 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
+  }
+
+  try {
+    const dialogs = architectureDialogCheck();
+    if (!dialogs.hasInternalDialog || !dialogs.noNativeDialogs) {
+      errors.push("La interfaz de procesos aún depende de diálogos nativos no fiables de Electron.");
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el sistema de diálogos internos: ${error.message}`);
   }
 
   console.log("Documentos ITSQMET · diagnóstico v4.0.0");
