@@ -194,29 +194,33 @@
     }},
     section("METODOLOGIA", "Metodología y Enfoque", "semi_stable_ai", {
       contract: {
-        purpose: "Describir de forma reproducible cómo se levantó, organizó y analizó la información.",
-        sourcePolicy: "datos_maestros_instrumentos_y_metadatos_del_levantamiento",
+        purpose: "Describir de forma reproducible cómo la aplicación construye y analiza el escenario estimado de necesidades de formación a partir del período y las carreras seleccionadas.",
+        sourcePolicy: "periodo_carreras_y_calculos_deterministicos",
         evidenceRequired: true,
         visualPolicy: "recommended",
-        dataNeeds: [],
-        promptInstructions: ["La metodología debe corresponder con los datos realmente disponibles y no describir procedimientos que no hayan sido ejecutados."]
+        dataNeeds: ["FORMACION_CARRERAS", "FORMACION_DOCENTE_SINTETICA"],
+        promptInstructions: [
+          "Declarar que las cifras de población y nivel de formación son estimaciones de planificación generadas por reglas de la aplicación.",
+          "No afirmar que se aplicaron encuestas, entrevistas, censos, consultas a Talento Humano u otros levantamientos que no consten en los datos.",
+          "Explicar las reglas de generación sin presentar el escenario estimado como nómina oficial."
+        ]
       },
       children: [
         section("METODOLOGIA_OBJETIVO_GENERAL", "Objetivo General", "stable_ai"),
         section("METODOLOGIA_OBJETIVOS_ESPECIFICOS", "Objetivos Específicos", "stable_ai"),
-        section("METODOLOGIA_ESTRATEGIA_LEVANTAMIENTO", "Estrategia de levantamiento", "semi_stable_ai"),
-        section("METODOLOGIA_POBLACION_MUESTRA", "Población y muestra", "data_ai"),
-        section("METODOLOGIA_INSTRUMENTOS", "Instrumentos", "semi_stable_ai"),
-        section("METODOLOGIA_PROCEDIMIENTO", "Procedimiento", "semi_stable_ai"),
+        section("METODOLOGIA_ESTRATEGIA_LEVANTAMIENTO", "Estrategia de estimación", "semi_stable_ai"),
+        section("METODOLOGIA_POBLACION_MUESTRA", "Población docente estimada", "data_ai"),
+        section("METODOLOGIA_INSTRUMENTOS", "Reglas y parámetros de generación", "semi_stable_ai"),
+        section("METODOLOGIA_PROCEDIMIENTO", "Procedimiento de estimación y análisis", "semi_stable_ai"),
         section("METODOLOGIA_FLUJO", "Diagrama de flujo del proceso", "analysis_ai", {
           allowedVisuals: ["process_flow"],
           contract: {
-            purpose: "Representar visualmente las etapas reales del levantamiento y análisis.",
-            sourcePolicy: "metodologia_verificada",
+            purpose: "Representar el flujo período → carreras → población estimada → nivel de formación → necesidades → priorización → análisis.",
+            sourcePolicy: "reglas_deterministicas_del_motor",
             evidenceRequired: true,
             visualPolicy: "required",
-            dataNeeds: [],
-            promptInstructions: ["Generar un visual process_flow solo con pasos respaldados por el procedimiento descrito."]
+            dataNeeds: ["FORMACION_CARRERAS", "FORMACION_DOCENTE_SINTETICA"],
+            promptInstructions: ["Representar únicamente los pasos ejecutados por la aplicación; no agregar instrumentos o levantamientos inexistentes."]
           }
         }),
         section("METODOLOGIA_CRITERIOS_ANALISIS", "Criterios de análisis", "semi_stable_ai")
@@ -224,38 +228,39 @@
     }),
     section("CARACTERIZACION_CLAUSTRO", "Caracterización del Claustro Docente", "data_ai", {
       contract: {
-        purpose: "Describir el claustro utilizando únicamente dimensiones presentes en la base de datos.",
-        sourcePolicy: "datos_estructurados",
+        purpose: "Caracterizar el escenario docente estimado por carrera y nivel máximo de formación, respetando exactamente los totales calculados por la aplicación.",
+        sourcePolicy: "perfil_sintetico_deterministico",
         evidenceRequired: true,
         visualPolicy: "recommended",
-        dataNeeds: [],
-        promptInstructions: ["Omitir dimensiones sin datos suficientes."]
+        dataNeeds: ["FORMACION_DOCENTE_SINTETICA"],
+        promptInstructions: [
+          "No agregar experiencia, dedicación, tipo de contrato ni otras variables que la aplicación no haya generado.",
+          "Las cantidades por nivel deben sumar exactamente el total de docentes de cada carrera."
+        ]
       },
       children: [
-        section("CARACTERIZACION_COORDINACIONES", "Distribución por coordinación académica o carrera", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
+        section("CARACTERIZACION_COORDINACIONES", "Distribución por carrera", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
         section("CARACTERIZACION_FORMACION", "Perfil académico y nivel de formación", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
-        section("CARACTERIZACION_EXPERIENCIA", "Experiencia docente", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
-        section("CARACTERIZACION_VINCULACION", "Vinculación y dedicación docente", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } }),
-        section("CARACTERIZACION_AREAS", "Áreas o campos de conocimiento", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } })
+        section("CARACTERIZACION_AREAS", "Áreas y necesidades formativas por carrera", "data_ai", { required: false, allowedVisuals: ["bar", "cards"], layout: { optionalToggle: true, aiRecommendation: true } })
       ]
     }),
     section("ANALISIS_INTERPRETACION", "Análisis e Interpretación de Resultados", "analysis_ai", {
       contract: {
-        purpose: "Integrar el análisis cuantitativo y cualitativo del diagnóstico sin recalcular los agregados entregados por la aplicación.",
-        sourcePolicy: "datos_estructurados_y_fuentes_institucionales",
+        purpose: "Integrar el análisis cuantitativo y temático del escenario estimado sin recalcular los agregados entregados por la aplicación.",
+        sourcePolicy: "perfil_sintetico_deterministico_y_fuentes_institucionales",
         evidenceRequired: true,
         visualPolicy: "recommended",
-        dataNeeds: [],
-        promptInstructions: ["Cada interpretación debe señalar la evidencia que la sustenta."]
+        dataNeeds: ["FORMACION_DOCENTE_SINTETICA"],
+        promptInstructions: [
+          "Cada interpretación debe derivarse de las cantidades, porcentajes, necesidades y puntajes suministrados por la aplicación.",
+          "No crear resultados de encuestas, disponibilidad horaria, opiniones docentes ni respuestas cualitativas inexistentes."
+        ]
       },
       children: [
         section("ANALISIS_GLOBAL", "Análisis global", "data_ai", { allowedVisuals: ["bar", "cards"] }),
         section("ANALISIS_BRECHAS", "Análisis de brechas", "analysis_ai", { allowedVisuals: ["gap_analysis"] }),
-        section("ANALISIS_DISPONIBILIDAD", "Disponibilidad para formación", "data_ai", { allowedVisuals: ["bar", "cards"] }),
-        section("ANALISIS_INTERESES", "Intereses formativos", "data_ai", { allowedVisuals: ["bar", "cards"] }),
+        section("ANALISIS_INTERESES", "Necesidades e intereses formativos estimados", "data_ai", { allowedVisuals: ["bar", "cards"] }),
         section("ANALISIS_COMPARATIVO_CARRERA", "Comparativo por carrera", "data_ai", { allowedVisuals: ["bar", "cards"] }),
-        section("ANALISIS_CUALITATIVO", "Análisis cualitativo", "analysis_ai", { allowedVisuals: ["cards"] }),
-        section("ANALISIS_TRIANGULACION", "Triangulación de información", "analysis_ai"),
         section("ANALISIS_MATRIZ_PRIORIZACION", "Matriz de priorización", "analysis_ai", {
           allowedVisuals: ["impact_matrix"],
           contract: {
@@ -291,7 +296,7 @@
         }),
         section("ANALISIS_FODA", "Análisis estratégico FODA", "analysis_ai", { allowedVisuals: ["foda"] }),
         section("ANALISIS_SINTESIS", "Síntesis de hallazgos", "derived_ai", {
-          derivedFrom: ["ANALISIS_GLOBAL","ANALISIS_BRECHAS","ANALISIS_DISPONIBILIDAD","ANALISIS_INTERESES","ANALISIS_COMPARATIVO_CARRERA","ANALISIS_CUALITATIVO","ANALISIS_TRIANGULACION","ANALISIS_MATRIZ_PRIORIZACION","ANALISIS_ARBOL_PROBLEMAS","ANALISIS_MAPA_CALOR","ANALISIS_FODA"]
+          derivedFrom: ["ANALISIS_GLOBAL","ANALISIS_BRECHAS","ANALISIS_INTERESES","ANALISIS_COMPARATIVO_CARRERA","ANALISIS_MATRIZ_PRIORIZACION","ANALISIS_ARBOL_PROBLEMAS","ANALISIS_MAPA_CALOR","ANALISIS_FODA"]
         })
       ]
     }),
@@ -309,12 +314,12 @@
     section("COBERTURA_INSTITUCIONAL", "Cobertura Institucional", "data_ai", {
       allowedVisuals: ["bar", "cards"],
       contract: {
-        purpose: "Explicar el alcance y representatividad del levantamiento por las dimensiones disponibles.",
-        sourcePolicy: "datos_estructurados",
+        purpose: "Explicar el alcance del escenario estimado por las carreras seleccionadas y la población docente generada.",
+        sourcePolicy: "perfil_sintetico_deterministico",
         evidenceRequired: true,
         visualPolicy: "recommended",
-        dataNeeds: [],
-        promptInstructions: ["Identificar limitaciones de cobertura cuando existan."]
+        dataNeeds: ["FORMACION_CARRERAS", "FORMACION_DOCENTE_SINTETICA"],
+        promptInstructions: ["Aclarar que la cobertura corresponde al escenario de planificación y no equivale a representatividad estadística de una encuesta."]
       }
     }),
     section("PRIORIZACION_INSTITUCIONAL", "Propuesta de Priorización Institucional", "derived_ai", {
@@ -585,7 +590,7 @@
     scopeKeys: ["period"], dependencies: ["cap.plan", "cap.informe-final", "cap.impacto"]
   });
 
-  E("ugpa-necesidades-formacion", "form.deteccion", "Detección de Necesidades de Formación", "formacion", "detection", "period", { scopeKeys: ["period"], version: "4.1.0", outlineStatus: "confirmed", outlineVersion: 2, workflowMode: "sectional" });
+  E("ugpa-necesidades-formacion", "form.deteccion", "Detección de Necesidades de Formación", "formacion", "detection", "period", { scopeKeys: ["period"], version: "4.2.0", outlineStatus: "confirmed", outlineVersion: 3, workflowMode: "sectional", inputMode: "period_careers_synthetic" });
   E("ugpa-plan-formacion", "form.plan", "Plan Anual de Formación Docente", "formacion", "planning", "period", {
     scopeKeys: ["period"], dependencies: ["form.deteccion"]
   });
