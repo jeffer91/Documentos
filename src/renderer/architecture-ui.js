@@ -719,7 +719,9 @@
       key: scopeKey
     });
     if (!response || !response.ok) return toast(response && response.error || "No se pudo abrir el documento.");
-    state.instanceStage = "document";
+    state.instanceStage = engine.engineId === "form.deteccion" && !formationProfile()
+      ? "preparation"
+      : "document";
     state.currentSectionKey = "";
     state.sectionRecommendations = {};
     await renderInstance(response.instance.id);
