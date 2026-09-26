@@ -443,17 +443,32 @@ function createDossier(userDataPath, input) {
 function getDossier(userDataPath, dossierId) {
   const db = dbFor(userDataPath);
   const row = db.prepare(`
-    SELECT d.*, p.code AS period_code, p.label AS period_label
+    SELECT d.*,
+           p.code AS period_code,
+           p.label AS period_label,
+           p.start_date AS period_start_date,
+           p.end_date AS period_end_date,
+           p.metadata_json AS period_metadata_json
     FROM dossiers_v3 d
     JOIN periods_v3 p ON p.id = d.period_id
     WHERE d.id = ?
   `).get(dossierId);
   if (!row) return null;
+  const periodMetadata = json(row.period_metadata_json, {});
+  const periodStartParts = String(row.period_start_date || "").match(/^(\d{4})-(\d{2})/);
+  const periodEndParts = String(row.period_end_date || "").match(/^(\d{4})-(\d{2})/);
   return {
     id: row.id,
     periodId: row.period_id,
     periodCode: row.period_code,
     periodLabel: row.period_label,
+    periodStartDate: row.period_start_date || "",
+    periodEndDate: row.period_end_date || "",
+    periodStartMonth: Number(periodMetadata.startMonth || (periodStartParts && periodStartParts[2]) || 0) || null,
+    periodStartYear: Number(periodMetadata.startYear || (periodStartParts && periodStartParts[1]) || 0) || null,
+    periodEndMonth: Number(periodMetadata.endMonth || (periodEndParts && periodEndParts[2]) || 0) || null,
+    periodEndYear: Number(periodMetadata.endYear || (periodEndParts && periodEndParts[1]) || 0) || null,
+    periodMetadata,
     processKey: row.process_key,
     population: row.population,
     label: row.label,
