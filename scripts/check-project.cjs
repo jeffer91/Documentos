@@ -275,35 +275,74 @@ function processPeriodArchitectureCheck() {
   };
 }
 
-function formationProcessWorkspaceCheck() {
+function processWorkspaceCheck() {
   const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
-  const registry = fs.readFileSync(path.join(ROOT, "src/main/document-engine-registry.cjs"), "utf8");
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
   const styles = fs.readFileSync(path.join(ROOT, "src/renderer/styles.css"), "utf8");
-  const requiredEngines = ["form.deteccion", "form.plan", "form.informe", "form.seguimiento"];
+  const engines = registry.allEngines();
+  const requiredProcessKeys = [
+    "formacion",
+    "capacitacion",
+    "titulacion_regular",
+    "titulacion_pvc",
+    "construccion_curricular",
+    "plan_individual"
+  ];
+  const configuredEngineIds = [
+    "form.deteccion", "form.plan", "form.informe", "form.seguimiento",
+    "cap.deteccion", "cap.plan", "cap.informe-cumplimiento", "cap.planificacion-actividad",
+    "cap.patrocinio", "cap.informe-final", "cap.instrumento-impacto", "cap.impacto",
+    "tit.regular.plan-complexivo", "tit.regular.plan-trabajo", "tit.regular.cronograma-complexivo",
+    "tit.regular.comunicado-complexivo", "tit.regular.designacion-tutores", "tit.regular.ficha-temas",
+    "tit.regular.plagio-trabajo", "tit.regular.informe-final",
+    "tit.pvc.plan-articulo", "tit.pvc.cronograma-articulo", "tit.pvc.designacion-metodologicos",
+    "tit.pvc.plagio-articulo", "tit.pvc.informe-final",
+    "tit.requisitos.reporte-final", "tit.induccion.informe",
+    "ccc.acta-colectivos", "ccc.ficha-nivel", "ccc.guia-carrera", "ccc.comunicado-matriz",
+    "plan-individual.plan", "plan-individual.reporte"
+  ];
+  const registryIds = new Set(engines.map((item) => item.engineId));
+
   return {
-    fourDocuments:
-      requiredEngines.every((engineId) => renderer.includes(`"${engineId}"`)) &&
-      requiredEngines.every((engineId) => registry.includes(`"${engineId}"`)),
-    periodSelector:
-      renderer.includes("data-formation-period-select") &&
-      renderer.includes('data-arch-action="new-formation-period"') &&
-      renderer.includes("switchFormationPeriod"),
-    automaticFormationDossier:
-      renderer.includes("async function ensureFormationDossier") &&
-      renderer.includes('processKey: "formacion"') &&
-      renderer.includes('population: "all"'),
-    directDocumentEntry:
-      renderer.includes('if (engines.some((engine) => engine.family === "formacion"))') &&
-      renderer.includes("return openFormationProcess(documentId);"),
-    cards:
+    allProcessesConfigured:
+      requiredProcessKeys.every((key) => renderer.includes(`${key}:`)),
+    allEnginesCovered:
+      configuredEngineIds.every((engineId) => renderer.includes(`"${engineId}"`) && registryIds.has(engineId)),
+    fixedPeriodSelector:
+      renderer.includes("data-process-period-select") &&
+      renderer.includes('data-arch-action="new-process-period"') &&
+      renderer.includes("switchProcessPeriod"),
+    processScopedDossier:
+      renderer.includes("async function ensureProcessDossier") &&
+      renderer.includes("processKey,") &&
+      renderer.includes("population: config.population") &&
+      renderer.includes("documentos-process-period-"),
+    processCards:
+      renderer.includes("function processWorkspaceMarkup") &&
       renderer.includes("process-document-card") &&
       renderer.includes('data-arch-action="process-document"') &&
       styles.includes(".process-document-grid") &&
       styles.includes(".process-document-card.active"),
+    directManagedEntry:
+      renderer.includes("processCandidatesForEngines") &&
+      renderer.includes("openProcessWorkspace") &&
+      renderer.includes("renderProcessChoice"),
+    sharedTitulationChoice:
+      renderer.includes('if (engine.family === "titulacion")') &&
+      renderer.includes('"titulacion_regular"') &&
+      renderer.includes('"titulacion_pvc"') &&
+      styles.includes(".process-choice-grid"),
+    scopedMultiplicity:
+      renderer.includes("chooseExistingInstance") &&
+      renderer.includes("+ Crear nuevo") &&
+      renderer.includes("Identificador de"),
     editorAndDraft:
-      renderer.includes("formationProcessWorkspaceMarkup()") &&
+      renderer.includes("processWorkspaceMarkup()") &&
       renderer.includes('data-arch-action="export-draft"') &&
-      renderer.includes("sectionIndexMarkup()")
+      renderer.includes("sectionIndexMarkup()"),
+    noTechnicalCreationPrompt:
+      !renderer.includes('appPrompt("Nombre del expediente:"') &&
+      renderer.includes(">Abrir proceso<")
   };
 }
 
@@ -1548,19 +1587,23 @@ function main() {
   }
 
   try {
-    const formationWorkspace = formationProcessWorkspaceCheck();
+    const workspace = processWorkspaceCheck();
     if (
-      !formationWorkspace.fourDocuments ||
-      !formationWorkspace.periodSelector ||
-      !formationWorkspace.automaticFormationDossier ||
-      !formationWorkspace.directDocumentEntry ||
-      !formationWorkspace.cards ||
-      !formationWorkspace.editorAndDraft
+      !workspace.allProcessesConfigured ||
+      !workspace.allEnginesCovered ||
+      !workspace.fixedPeriodSelector ||
+      !workspace.processScopedDossier ||
+      !workspace.processCards ||
+      !workspace.directManagedEntry ||
+      !workspace.sharedTitulationChoice ||
+      !workspace.scopedMultiplicity ||
+      !workspace.editorAndDraft ||
+      !workspace.noTechnicalCreationPrompt
     ) {
-      errors.push("El espacio del proceso de Formación no superó la validación interna: " + JSON.stringify(formationWorkspace));
+      errors.push("El espacio de trabajo por proceso no superó la validación interna: " + JSON.stringify(workspace));
     }
   } catch (error) {
-    errors.push(`No se pudo validar el espacio del proceso de Formación: ${error.message}`);
+    errors.push(`No se pudo validar el espacio de trabajo por proceso: ${error.message}`);
   }
 
   try {
