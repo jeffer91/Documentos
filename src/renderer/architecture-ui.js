@@ -770,7 +770,7 @@
       <article class="arch-card">
         <div class="arch-card-head">
           <div><b>${escapeHtml(period.label)}</b><small>${escapeHtml(period.code)}</small></div>
-          <span class="status good">${escapeHtml(period.status)}</span>
+          <span class="status good">${escapeHtml(period.status === "active" ? "Activo" : period.status)}</span>
         </div>
         <div class="arch-create-row">
           <select id="arch-process-${escapeHtml(period.id)}">${processOptions()}</select>
@@ -848,7 +848,7 @@
       </div>
 
       <div class="section-head">
-        <div><h2>Períodos</h2><p>Cada período pertenece al proceso completo: todos sus documentos heredan el mismo contexto y los mismos datos compartidos.</p></div>
+        <div><h2>Períodos</h2><p>Cada proceso conserva el período seleccionado y lo aplica a todos sus documentos y datos compartidos.</p></div>
         <button class="primary" data-arch-action="new-period">+ Período</button>
       </div>
       <div class="arch-grid">
