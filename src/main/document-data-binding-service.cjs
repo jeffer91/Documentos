@@ -197,19 +197,16 @@ const ENGINE_DATA_PLANS = Object.freeze({
   "cap.plan": [fromProfile("schedule", "CRONOGRAMA")],
   "cap.informe-cumplimiento": [fromProfile("training", "RESULTADOS")],
   "form.deteccion": [
-    fromProfile("needs", "METODOLOGIA_POBLACION_MUESTRA", { requirement: "recommended" }),
+    // Este motor no exige Excel: ai-orchestrator resuelve estos bindings con
+    // FORMACION_DOCENTE_SINTETICA, generado a partir de período + carreras.
+    fromProfile("needs", "METODOLOGIA_POBLACION_MUESTRA", { requirement: "required" }),
     fromProfile("needs", "CARACTERIZACION_COORDINACIONES", { requirement: "recommended" }),
     fromProfile("needs", "CARACTERIZACION_FORMACION", { requirement: "recommended" }),
-    fromProfile("needs", "CARACTERIZACION_EXPERIENCIA", { requirement: "recommended" }),
-    fromProfile("needs", "CARACTERIZACION_VINCULACION", { requirement: "recommended" }),
     fromProfile("needs", "CARACTERIZACION_AREAS", { requirement: "recommended" }),
     fromProfile("needs", "ANALISIS_GLOBAL", { requirement: "required" }),
     fromProfile("needs", "ANALISIS_BRECHAS", { requirement: "recommended" }),
-    fromProfile("needs", "ANALISIS_DISPONIBILIDAD", { requirement: "recommended" }),
     fromProfile("needs", "ANALISIS_INTERESES", { requirement: "recommended" }),
     fromProfile("needs", "ANALISIS_COMPARATIVO_CARRERA", { requirement: "recommended" }),
-    fromProfile("needs", "ANALISIS_CUALITATIVO", { requirement: "recommended", includeSampleRows: true, sampleLimit: 30 }),
-    fromProfile("needs", "ANALISIS_TRIANGULACION", { requirement: "recommended" }),
     fromProfile("needs", "ANALISIS_MATRIZ_PRIORIZACION", { requirement: "recommended" }),
     fromProfile("needs", "ANALISIS_MAPA_CALOR", { requirement: "recommended" }),
     fromProfile("needs", "LINEAS_FORMACION_COORDINACION", { requirement: "recommended" }),
