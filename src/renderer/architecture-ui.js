@@ -1146,7 +1146,14 @@
               <tfoot><tr><th>Total</th><th>${Number(summary.totalTeachers || 0)}</th><th>${Number(summary.thirdLevel || 0)}</th><th>${Number(summary.masters || 0)}</th><th>${Number(summary.doctorate || 0)}</th></tr></tfoot>
             </table>
           </div>
-          <div class="notice-soft"><b>Listo para redactar</b><span>Las necesidades por carrera, prioridades y agregados ya están disponibles para el motor documental. Continúa a “Documento” y genera las secciones con IA.</span></div>
+          <div class="formation-generate-row">
+            <div>
+              <b>Diagnóstico listo para generar</b>
+              <span>La IA recibirá las mismas cifras guardadas para todas las secciones y construirá el documento completo sin volver a inventar cantidades.</span>
+            </div>
+            <button class="primary" type="button" data-arch-action="generate-document" ${activeProviders ? "" : "disabled"}>Generar diagnóstico completo</button>
+          </div>
+          ${activeProviders ? "" : '<div class="notice-warn"><b>Falta una IA activa</b><span>Configura un proveedor de IA para redactar el documento. La población estimada ya quedó guardada.</span></div>'}
         </section>
       ` : '<div class="notice-warn"><b>Falta seleccionar carreras</b><span>El documento no requiere Excel ni una plantilla Word. Selecciona las carreras para crear automáticamente el diagnóstico base.</span></div>'}
     </div>`;
