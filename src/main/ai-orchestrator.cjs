@@ -167,6 +167,28 @@ function compactMasterData(masterData) {
   }));
 }
 
+function syntheticFormationProfile(userDataPath, dossierId) {
+  const item = hub.getMasterData(userDataPath, dossierId, "FORMACION_DOCENTE_SINTETICA", "dossier", "");
+  const value = item && item.value;
+  if (!value || typeof value !== "object" || !Array.isArray(value.careers) || !value.careers.length) return null;
+  return value;
+}
+
+function syntheticFormationSlice(profile) {
+  if (!profile) return null;
+  return {
+    source: "synthetic_rule_engine",
+    synthetic: true,
+    deterministic: true,
+    calculationComplete: true,
+    querySignature: `synthetic:form.deteccion:${profile.periodCode || "period"}:v${profile.schemaVersion || 1}`,
+    note: profile.note || "",
+    rules: profile.rules || {},
+    summary: profile.summary || {},
+    careers: profile.careers || []
+  };
+}
+
 function dataReadinessForSection(userDataPath, instance, section) {
   const scopeOptions = {
     scopeType: instance.scopeType,
@@ -175,6 +197,30 @@ function dataReadinessForSection(userDataPath, instance, section) {
   };
   const availability = ingestion.inspectDataAvailability(userDataPath, instance.dossierId, scopeOptions);
   const configuredQuery = section && section.data && section.data.query;
+  const bindingConfig = section && section.data && section.data.binding
+    ? section.data.binding
+    : dataBindings.bindingFor(instance.engineId, section.key);
+
+  if (instance.engineId === "form.deteccion" && bindingConfig) {
+    const profile = syntheticFormationProfile(userDataPath, instance.dossierId);
+    return {
+      bindingId: "synthetic:form.deteccion:" + section.key,
+      requirement: bindingConfig.requirement || "recommended",
+      mode: "aggregate",
+      status: profile ? "ready" : "missing_setup",
+      ready: Boolean(profile),
+      query: null,
+      synthetic: true,
+      availableFields: profile
+        ? ["career", "totalTeachers", "thirdLevel", "masters", "doctorate", "fourthLevel", "needs", "priority", "priorityScore", "horizon"]
+        : [],
+      missingAll: profile ? [] : ["FORMACION_CARRERAS"],
+      missingAny: [],
+      warnings: profile ? [] : ["Selecciona las carreras del período para generar automáticamente la población docente estimada."],
+      availability
+    };
+  }
+
   if (configuredQuery) {
     return {
       bindingId: "custom-query:" + section.key,
@@ -194,9 +240,6 @@ function dataReadinessForSection(userDataPath, instance, section) {
     };
   }
 
-  const bindingConfig = section && section.data && section.data.binding
-    ? section.data.binding
-    : dataBindings.bindingFor(instance.engineId, section.key);
   if (!bindingConfig) {
     return {
       bindingId: "",
@@ -242,7 +285,9 @@ function sectionDataContext(userDataPath, instance, section) {
 
   const dataReadiness = dataReadinessForSection(userDataPath, instance, section);
   let filteredData = null;
-  if (dataReadiness.ready && dataReadiness.query) {
+  if (instance.engineId === "form.deteccion" && dataReadiness.ready) {
+    filteredData = syntheticFormationSlice(syntheticFormationProfile(userDataPath, instance.dossierId));
+  } else if (dataReadiness.ready && dataReadiness.query) {
     filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, dataReadiness.query);
   }
 
@@ -308,6 +353,9 @@ function writerPrompt(instance, engine, section, context) {
     "Respeta exactamente la jerarquía definida por la aplicación; no inventes títulos ni subniveles fuera de la sección solicitada.",
     "Mantén coherencia con las secciones previas y con las secciones de las que deriva.",
     "Si un dato es simulado o inferido, NO lo presentes como verificado: inclúyelo en alerts.",
+    engine.engineId === "form.deteccion" && context.filteredData && context.filteredData.synthetic
+      ? "Para este documento, la aplicación ya generó un escenario estimado y determinístico de población docente a partir del período y las carreras. Usa exactamente esas cifras, porcentajes, necesidades y prioridades; no las recalcules ni las sustituyas. En la metodología aclara una sola vez que son estimaciones para planificación generadas por reglas, y no las atribuyas a encuestas, Talento Humano ni levantamientos que no existen."
+      : "",
     section.type === "executive_summary"
       ? `El resumen ejecutivo debe ser muy concreto, priorizar los hallazgos críticos y no superar aproximadamente ${section.maxWords || 600} palabras.`
       : "",
@@ -371,6 +419,9 @@ function reviewerPrompt(engine, section, draft, context) {
   return [
     "Revisa el borrador de esta sección.",
     "Comprueba coherencia, trazabilidad, privacidad institucional, datos no sustentados, contradicciones y redacción.",
+    engine.engineId === "form.deteccion" && context.filteredData && context.filteredData.synthetic
+      ? "Comprueba además que ninguna cifra del escenario estimado haya sido alterada y que no se presente como resultado de una encuesta, nómina oficial o levantamiento real."
+      : "",
     "Verifica que cada tabla, figura, imagen o visual tenga contexto previo y análisis/interpretación posterior.",
     "Verifica que las herramientas visuales estén dentro de las permitidas para la sección.",
     "Si detectas problemas, corrige content y blocks.",
