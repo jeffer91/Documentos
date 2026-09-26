@@ -626,7 +626,6 @@
   async function chooseExistingInstance(engine) {
     const matches = instancesForEngine(engine.engineId);
     if (!matches.length) return null;
-    if (matches.length === 1) return matches[0];
 
     const values = await appDialog({
       title: engine.label,
@@ -684,6 +683,47 @@
     } finally {
       setBusy(false);
     }
+  }
+
+  function processCandidatesForEngines(engines) {
+    const candidates = new Set();
+    (engines || []).forEach((engine) => {
+      if (processConfig(engine.family)) candidates.add(engine.family);
+      if (engine.family === "titulacion") {
+        candidates.add("titulacion_regular");
+        candidates.add("titulacion_pvc");
+      }
+    });
+    return Array.from(candidates).filter((key) => processConfig(key));
+  }
+
+  function renderProcessChoice(documentId, processKeys, titleLabel) {
+    state.currentView = "launcher";
+    setHeader(titleLabel || "Seleccionar proceso", "Procesos / Seleccionar proceso", true);
+    view().innerHTML = `
+      <div class="document-launcher">
+        <div class="section-head">
+          <div>
+            <h2>¿En qué proceso vas a trabajar?</h2>
+            <p>El documento puede pertenecer a más de un proceso. Elige uno; después trabajarás con su período fijo y sus documentos anclados.</p>
+          </div>
+        </div>
+        <div class="process-choice-grid">
+          ${processKeys.map((processKey) => {
+            const config = processConfig(processKey);
+            return `
+              <button class="process-choice-card" type="button"
+                data-arch-action="open-process-workspace"
+                data-process-key="${escapeHtml(processKey)}"
+                data-document-id="${escapeHtml(documentId)}">
+                <b>${escapeHtml(config.label)}</b>
+                <span>Abrir proceso →</span>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
   }
 
   async function openProcessWorkspace(processKey, documentId, preferredPeriodId) {
@@ -796,7 +836,7 @@
     state.dossier = null;
     state.processFamily = "";
     state.processPeriodId = "";
-    setHeader("Procesos", "Períodos y expedientes", false);
+    setHeader("Procesos", "Períodos y procesos", false);
     await loadHome();
     const dashboard = state.dashboard || { periods: [], dossiers: [] };
     view().innerHTML = `
@@ -815,7 +855,7 @@
         ${(dashboard.periods || []).length ? dashboard.periods.map(periodCard).join("") : '<div class="empty"><b>Sin períodos</b>Crea el primer período para comenzar.</div>'}
       </div>
 
-      <div class="section-head"><div><h2>Procesos por período</h2><p>Cada proceso conserva su período, documentos y datos compartidos sin mezclar información con otros procesos.</p></div></div>
+      <div class="section-head"><div><h2>Procesos por período</h2><p>Abre un proceso para trabajar con su período, sus documentos anclados y sus datos compartidos.</p></div></div>
       <div class="arch-grid">
         ${(dashboard.dossiers || []).length ? dashboard.dossiers.map(dossierCard).join("") : '<div class="empty"><b>Sin procesos iniciados</b>Abre un proceso desde un período para comenzar.</div>'}
       </div>
@@ -856,7 +896,16 @@
     if (cardinality === "period_population") {
       scopeKey = state.dossier.population || engine.population || "all";
     } else if (cardinality !== "period") {
-      scopeKey = await appPrompt(`Identificador para ${cardinality}:`, "", { required: true }) || "";
+      const scopeLabel = {
+        activity: "actividad",
+        student: "estudiante",
+        person: "persona",
+        career: "carrera",
+        career_level: "carrera y nivel",
+        career_session: "carrera y sesión",
+        period_segment: "segmento"
+      }[cardinality] || cardinality;
+      scopeKey = await appPrompt(`Identificador de ${scopeLabel}:`, "", { required: true, title: engine.label }) || "";
       if (!scopeKey) return;
     }
     const response = await api.ensureDocumentInstance(state.dossier.id, engine.engineId, {
@@ -886,10 +935,13 @@
       return;
     }
 
-    const managedFamilies = Array.from(new Set(engines.map((engine) => engine.family)))
-      .filter((family) => processConfig(family));
-    if (managedFamilies.length === 1 && engines.every((engine) => engine.family === managedFamilies[0])) {
-      await openProcessWorkspace(managedFamilies[0], documentId);
+    const processCandidates = processCandidatesForEngines(engines);
+    if (processCandidates.length === 1) {
+      await openProcessWorkspace(processCandidates[0], documentId);
+      return;
+    }
+    if (processCandidates.length > 1) {
+      renderProcessChoice(documentId, processCandidates, engines[0].label);
       return;
     }
 
@@ -2398,6 +2450,9 @@
         const engine = (state.engines || []).find((item) => item.engineId === button.dataset.engineId);
         if (!engine) return;
         return ensureEngineInDossier(engine, button.dataset.dossierId);
+      }
+      if (action === "open-process-workspace") {
+        return openProcessWorkspace(button.dataset.processKey, button.dataset.documentId);
       }
       if (action === "process-document") {
         const engine = currentProcessEngines().find((item) => item.engineId === button.dataset.engineId);
