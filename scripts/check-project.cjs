@@ -239,6 +239,42 @@ function architectureDialogCheck() {
   };
 }
 
+function processPeriodArchitectureCheck() {
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+  const hub = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  const ai = fs.readFileSync(path.join(ROOT, "src/main/ai-orchestrator.cjs"), "utf8");
+  return {
+    monthSelectors:
+      renderer.includes('name: "startMonth"') &&
+      renderer.includes('name: "endMonth"') &&
+      renderer.includes('type: "select"') &&
+      renderer.includes('{ value: "12", label: "Diciembre", short: "DIC" }'),
+    yearIncrementals:
+      renderer.includes('name: "startYear"') &&
+      renderer.includes('name: "endYear"') &&
+      renderer.includes('type: "number"') &&
+      renderer.includes('step: 1'),
+    automaticPeriodIdentity:
+      renderer.includes('const code = sameYear') &&
+      renderer.includes('const label =') &&
+      hub.includes("function normalizePeriodInput(input)"),
+    chronologyGuard:
+      renderer.includes("El período final no puede ser anterior al período inicial.") &&
+      hub.includes("El período final no puede ser anterior al período inicial."),
+    processReuse:
+      hub.includes("WHERE period_id = ? AND process_key = ? AND population = ? AND status = 'active'") &&
+      hub.includes("if (existing) return getDossier(userDataPath, existing.id);"),
+    structuredPeriodInDossier:
+      hub.includes("p.start_date AS period_start_date") &&
+      hub.includes("periodStartMonth:") &&
+      hub.includes("periodEndYear:"),
+    aiPeriodInheritance:
+      ai.includes("const dossier = hub.getDossier(userDataPath, instance.dossierId);") &&
+      ai.includes("period: context.period") &&
+      ai.includes("Período institucional del proceso:")
+  };
+}
+
 function legacyExternalOnlyCheck() {
   const legacySource = fs.readFileSync(path.join(ROOT, "src/main/legacy-migration-service.cjs"), "utf8");
   const templateSource = fs.readFileSync(path.join(ROOT, "src/main/template-service.cjs"), "utf8");
@@ -1477,6 +1513,23 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
+  }
+
+  try {
+    const periodArchitecture = processPeriodArchitectureCheck();
+    if (
+      !periodArchitecture.monthSelectors ||
+      !periodArchitecture.yearIncrementals ||
+      !periodArchitecture.automaticPeriodIdentity ||
+      !periodArchitecture.chronologyGuard ||
+      !periodArchitecture.processReuse ||
+      !periodArchitecture.structuredPeriodInDossier ||
+      !periodArchitecture.aiPeriodInheritance
+    ) {
+      errors.push("La arquitectura período → proceso → documentos no superó la validación interna: " + JSON.stringify(periodArchitecture));
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la herencia del período por proceso: ${error.message}`);
   }
 
   try {
