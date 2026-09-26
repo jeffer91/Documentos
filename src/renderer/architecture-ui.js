@@ -48,12 +48,71 @@
     "Redes y Telecomunicaciones"
   ]);
 
-  const FORMATION_PROCESS_ENGINE_IDS = Object.freeze([
-    "form.deteccion",
-    "form.plan",
-    "form.informe",
-    "form.seguimiento"
-  ]);
+  const PROCESS_WORKSPACES = Object.freeze({
+    formacion: Object.freeze({
+      label: "Formación docente",
+      population: "all",
+      engineIds: Object.freeze(["form.deteccion", "form.plan", "form.informe", "form.seguimiento"])
+    }),
+    capacitacion: Object.freeze({
+      label: "Capacitación docente",
+      population: "all",
+      engineIds: Object.freeze([
+        "cap.deteccion",
+        "cap.plan",
+        "cap.informe-cumplimiento",
+        "cap.planificacion-actividad",
+        "cap.patrocinio",
+        "cap.informe-final",
+        "cap.instrumento-impacto",
+        "cap.impacto"
+      ])
+    }),
+    titulacion_regular: Object.freeze({
+      label: "Titulación · Regulares",
+      population: "regular",
+      engineIds: Object.freeze([
+        "tit.regular.plan-complexivo",
+        "tit.regular.plan-trabajo",
+        "tit.regular.cronograma-complexivo",
+        "tit.regular.comunicado-complexivo",
+        "tit.regular.designacion-tutores",
+        "tit.regular.ficha-temas",
+        "tit.regular.plagio-trabajo",
+        "tit.requisitos.reporte-final",
+        "tit.induccion.informe",
+        "tit.regular.informe-final"
+      ])
+    }),
+    titulacion_pvc: Object.freeze({
+      label: "Titulación · PVC",
+      population: "pvc",
+      engineIds: Object.freeze([
+        "tit.pvc.plan-articulo",
+        "tit.pvc.cronograma-articulo",
+        "tit.pvc.designacion-metodologicos",
+        "tit.pvc.plagio-articulo",
+        "tit.requisitos.reporte-final",
+        "tit.induccion.informe",
+        "tit.pvc.informe-final"
+      ])
+    }),
+    construccion_curricular: Object.freeze({
+      label: "Construcción Curricular Continua",
+      population: "all",
+      engineIds: Object.freeze([
+        "ccc.acta-colectivos",
+        "ccc.ficha-nivel",
+        "ccc.guia-carrera",
+        "ccc.comunicado-matriz"
+      ])
+    }),
+    plan_individual: Object.freeze({
+      label: "Plan individual",
+      population: "all",
+      engineIds: Object.freeze(["plan-individual.plan", "plan-individual.reporte"])
+    })
+  });
 
   const FORMATION_TRANSVERSAL_NEEDS = Object.freeze([
     "Metodologías activas y aprendizaje basado en proyectos",
@@ -421,26 +480,35 @@
   }
 
   function processOptions() {
-    return [
-      ["formacion|all", "Formación docente"],
-      ["capacitacion|all", "Capacitación docente"],
-      ["titulacion_regular|regular", "Titulación · Regulares"],
-      ["titulacion_pvc|pvc", "Titulación · PVC"],
-      ["construccion_curricular|all", "Construcción Curricular Continua"],
-      ["plan_individual|all", "Plan individual"]
-    ].map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+    return Object.entries(PROCESS_WORKSPACES)
+      .map(([processKey, config]) => `<option value="${escapeHtml(processKey)}|${escapeHtml(config.population)}">${escapeHtml(config.label)}</option>`)
+      .join("");
   }
 
-  function isFormationProcess() {
-    return Boolean(state.dossier && state.dossier.processKey === "formacion");
+  function processConfig(processKey) {
+    return PROCESS_WORKSPACES[String(processKey || "")] || null;
   }
 
-  function formationProcessEngines() {
+  function currentProcessConfig() {
+    return state.dossier ? processConfig(state.dossier.processKey) : null;
+  }
+
+  function isManagedProcess() {
+    return Boolean(currentProcessConfig());
+  }
+
+  function processEnginesForKey(processKey) {
+    const config = processConfig(processKey);
+    if (!config) return [];
     const byId = new Map((state.engines || []).map((engine) => [engine.engineId, engine]));
-    return FORMATION_PROCESS_ENGINE_IDS.map((engineId) => byId.get(engineId)).filter(Boolean);
+    return config.engineIds.map((engineId) => byId.get(engineId)).filter(Boolean);
   }
 
-  function formationPeriodOptionsMarkup() {
+  function currentProcessEngines() {
+    return state.dossier ? processEnginesForKey(state.dossier.processKey) : [];
+  }
+
+  function processPeriodOptionsMarkup() {
     const periods = state.dashboard && state.dashboard.periods || [];
     const selectedId = state.dossier && state.dossier.periodId || state.processPeriodId || "";
     return periods.map((period) =>
@@ -448,137 +516,213 @@
     ).join("");
   }
 
-  function formationDocumentCardMarkup(engine, index) {
-    const instance = instanceForEngine(engine.engineId);
+  function instancesForEngine(engineId) {
+    return (state.instances || []).filter((item) => item.engineId === engineId);
+  }
+
+  function processDocumentCardMarkup(engine, index) {
+    const matches = instancesForEngine(engine.engineId);
+    const instance = state.instance && state.instance.engineId === engine.engineId
+      ? state.instance
+      : matches[0] || null;
     const active = Boolean(state.instance && state.instance.engineId === engine.engineId);
-    const required = instance && Array.isArray(instance.sections) ? instance.sections.filter((item) => item.required !== false) : [];
+    const required = instance && Array.isArray(instance.sections)
+      ? instance.sections.filter((item) => item.required !== false)
+      : [];
     const approved = required.filter((item) => item.status === "approved").length;
     let stateLabel = "Sin iniciar";
     let stateClass = "";
-    if (instance && instance.finalFrozenAt) {
-      stateLabel = "Final";
+    if (matches.length > 1) {
+      stateLabel = `${matches.length} registros en este período`;
+    } else if (instance && instance.finalFrozenAt) {
+      stateLabel = "Versión final disponible";
       stateClass = "good";
     } else if (instance) {
       stateLabel = required.length ? `${approved}/${required.length} secciones aprobadas` : "En edición";
       stateClass = approved && approved === required.length ? "good" : "";
     }
+    const cardinalityLabel = {
+      activity: "por actividad",
+      student: "por estudiante",
+      person: "por persona",
+      career: "por carrera",
+      career_level: "por carrera y nivel",
+      career_session: "por carrera y sesión",
+      period_segment: "por segmento"
+    }[engine.cardinality] || "";
     return `
       <button class="process-document-card ${active ? "active" : ""}" type="button"
         data-arch-action="process-document" data-engine-id="${escapeHtml(engine.engineId)}">
         <span class="process-document-step">${index + 1}</span>
         <span class="process-document-copy">
           <b>${escapeHtml(engine.label)}</b>
-          <small>${active ? "Documento abierto" : stateLabel}</small>
+          <small>${active ? "Documento abierto" : stateLabel}${cardinalityLabel ? " · " + cardinalityLabel : ""}</small>
         </span>
-        <span class="status ${stateClass}">${instance ? (instance.finalFrozenAt ? "Final" : "Activo") : "Pendiente"}</span>
+        <span class="status ${stateClass}">${matches.length ? (instance && instance.finalFrozenAt ? "Final" : "Activo") : "Pendiente"}</span>
       </button>
     `;
   }
 
-  function formationProcessWorkspaceMarkup() {
-    if (!isFormationProcess()) return "";
-    const engines = formationProcessEngines();
+  function processWorkspaceMarkup() {
+    const config = currentProcessConfig();
+    if (!config) return "";
+    const engines = currentProcessEngines();
     return `
       <section class="process-workspace-overview">
         <div class="process-workspace-top">
           <div>
             <span class="process-workspace-kicker">Proceso</span>
-            <h2>Formación docente</h2>
-            <p>El período y los datos se comparten entre todos los documentos de este proceso.</p>
+            <h2>${escapeHtml(config.label)}</h2>
+            <p>El período y los datos compartidos se mantienen fijos mientras trabajas en los documentos de este proceso.</p>
           </div>
           <div class="process-period-control">
-            <label for="formationProcessPeriod">Período de trabajo</label>
+            <label for="managedProcessPeriod">Período de trabajo</label>
             <div class="process-period-row">
-              <select id="formationProcessPeriod" data-formation-period-select>
-                ${formationPeriodOptionsMarkup()}
+              <select id="managedProcessPeriod" data-process-period-select>
+                ${processPeriodOptionsMarkup()}
               </select>
-              <button class="secondary" type="button" data-arch-action="new-formation-period">+ Nuevo período</button>
+              <button class="secondary" type="button" data-arch-action="new-process-period">+ Nuevo período</button>
             </div>
           </div>
         </div>
         <div class="process-document-grid">
-          ${engines.map(formationDocumentCardMarkup).join("")}
+          ${engines.map(processDocumentCardMarkup).join("")}
         </div>
       </section>
     `;
   }
 
-  async function ensureFormationDossier(periodId) {
+  async function ensureProcessDossier(processKey, periodId) {
+    const config = processConfig(processKey);
+    if (!config) throw new Error("Proceso no válido.");
     if (!state.dashboard) await loadHome();
     const period = (state.dashboard.periods || []).find((item) => item.id === periodId);
     if (!period) throw new Error("Período no válido.");
+
     let dossier = (state.dashboard.dossiers || []).find((item) =>
       item.periodId === periodId &&
-      item.processKey === "formacion" &&
-      (!item.population || item.population === "all")
+      item.processKey === processKey &&
+      (config.population === "all" || item.population === config.population)
     );
     if (!dossier) {
       const response = await api.createDossier({
         periodId,
-        processKey: "formacion",
-        population: "all",
-        label: `Formación docente · ${period.label}`
+        processKey,
+        population: config.population,
+        label: `${config.label} · ${period.label}`
       });
-      if (!response || !response.ok) throw new Error(response && response.error || "No se pudo abrir el proceso de Formación.");
+      if (!response || !response.ok) throw new Error(response && response.error || "No se pudo abrir el proceso.");
       dossier = response.dossier;
       await loadHome();
     }
-    state.processFamily = "formacion";
+
+    state.processFamily = processKey;
     state.processPeriodId = periodId;
-    try { localStorage.setItem("documentos-process-period-formacion", periodId); } catch (_error) { /* opcional */ }
+    try { localStorage.setItem(`documentos-process-period-${processKey}`, periodId); } catch (_error) { /* opcional */ }
     await loadDossier(dossier.id);
     return state.dossier;
   }
 
-  async function switchFormationPeriod(periodId) {
-    if (!periodId || state.busy) return;
+  async function chooseExistingInstance(engine) {
+    const matches = instancesForEngine(engine.engineId);
+    if (!matches.length) return null;
+    if (matches.length === 1) return matches[0];
+
+    const values = await appDialog({
+      title: engine.label,
+      message: "Selecciona un registro existente o crea uno nuevo dentro del período activo.",
+      fields: [{
+        name: "instanceId",
+        label: "Registro",
+        type: "select",
+        value: matches[0].id,
+        options: matches
+          .map((item) => ({ value: item.id, label: item.scopeKey ? `${item.scopeKey} · ${item.status === "final" ? "Final" : "Borrador"}` : item.label }))
+          .concat([{ value: "__new__", label: "+ Crear nuevo" }]),
+        required: true
+      }],
+      confirmText: "Continuar"
+    });
+    if (!values) return false;
+    if (values.instanceId === "__new__") return null;
+    return matches.find((item) => item.id === values.instanceId) || null;
+  }
+
+  async function openProcessEngine(engine, dossierId) {
+    if (!engine) return;
+    const cardinality = engine.cardinality || "period";
+    if (!["period", "period_population"].includes(cardinality)) {
+      const existing = await chooseExistingInstance(engine);
+      if (existing === false) return;
+      if (existing) {
+        state.instanceStage = "document";
+        state.currentSectionKey = "";
+        state.sectionRecommendations = {};
+        return renderInstance(existing.id);
+      }
+    }
+    return ensureEngineInDossier(engine, dossierId);
+  }
+
+  async function switchProcessPeriod(periodId) {
+    if (!periodId || state.busy || !state.dossier) return;
+    const processKey = state.dossier.processKey;
+    const currentEngineId = state.instance && state.instance.engineId;
     clearTimeout(sectionSaveTimer);
     if (state.instance && state.currentView === "instance" && state.instanceStage === "document") {
       const saved = await persistCurrentEditor();
       if (!saved) return;
     }
-    const currentEngineId = state.instance && FORMATION_PROCESS_ENGINE_IDS.includes(state.instance.engineId)
-      ? state.instance.engineId
-      : "form.deteccion";
+
     setBusy(true);
     try {
-      const dossier = await ensureFormationDossier(periodId);
-      const engine = formationProcessEngines().find((item) => item.engineId === currentEngineId) ||
-        formationProcessEngines()[0];
-      if (!engine) throw new Error("No se encontró el motor de Formación.");
-      await ensureEngineInDossier(engine, dossier.id);
+      const dossier = await ensureProcessDossier(processKey, periodId);
+      const engines = processEnginesForKey(processKey);
+      const engine = engines.find((item) => item.engineId === currentEngineId) || engines[0];
+      if (!engine) throw new Error("No se encontraron documentos para este proceso.");
+      await openProcessEngine(engine, dossier.id);
     } finally {
       setBusy(false);
     }
   }
 
-  async function openFormationProcess(documentId, preferredPeriodId) {
-    state.processFamily = "formacion";
+  async function openProcessWorkspace(processKey, documentId, preferredPeriodId) {
+    const config = processConfig(processKey);
+    if (!config) return false;
+    state.processFamily = processKey;
     if (!state.dashboard) await loadHome();
+
     let periods = state.dashboard && state.dashboard.periods || [];
     if (!periods.length) {
       const created = await newPeriod({ renderHome: false });
-      if (!created) return renderHome();
+      if (!created) {
+        await renderHome();
+        return true;
+      }
       await loadHome();
       periods = state.dashboard && state.dashboard.periods || [];
       preferredPeriodId = created.id;
     }
 
     let remembered = "";
-    try { remembered = localStorage.getItem("documentos-process-period-formacion") || ""; } catch (_error) { /* opcional */ }
+    try { remembered = localStorage.getItem(`documentos-process-period-${processKey}`) || ""; } catch (_error) { /* opcional */ }
     const directDossier = (state.dashboard.dossiers || []).find((dossier) =>
-      dossier.processKey === "formacion" &&
-      formationProcessEngines().some((engine) => engine.documentId === documentId && dossierMatchesEngine(dossier, engine))
+      dossier.processKey === processKey &&
+      (config.population === "all" || dossier.population === config.population)
     );
     const periodId = [preferredPeriodId, remembered, directDossier && directDossier.periodId, periods[0] && periods[0].id]
       .find((candidate) => candidate && periods.some((period) => period.id === candidate));
-    if (!periodId) return renderHome();
+    if (!periodId) {
+      await renderHome();
+      return true;
+    }
 
-    const dossier = await ensureFormationDossier(periodId);
-    const engine = formationProcessEngines().find((item) => item.documentId === documentId) ||
-      formationProcessEngines()[0];
-    if (!engine) return toast("No se encontraron los documentos del proceso de Formación.");
-    await ensureEngineInDossier(engine, dossier.id);
+    const dossier = await ensureProcessDossier(processKey, periodId);
+    const engines = processEnginesForKey(processKey);
+    const engine = engines.find((item) => item.documentId === documentId) || engines[0];
+    if (!engine) throw new Error("No se encontraron documentos para este proceso.");
+    await openProcessEngine(engine, dossier.id);
+    return true;
   }
 
   function periodCard(period) {
@@ -590,22 +734,23 @@
         </div>
         <div class="arch-create-row">
           <select id="arch-process-${escapeHtml(period.id)}">${processOptions()}</select>
-          <button class="secondary small-inline" data-arch-action="create-dossier" data-period-id="${escapeHtml(period.id)}">+ Expediente</button>
+          <button class="secondary small-inline" data-arch-action="create-dossier" data-period-id="${escapeHtml(period.id)}">Abrir proceso</button>
         </div>
       </article>
     `;
   }
 
   function dossierCard(dossier) {
+    const config = processConfig(dossier.processKey);
     const population = dossier.population && dossier.population !== "all" ? ` · ${dossier.population.toUpperCase()}` : "";
     return `
       <button class="arch-card arch-card-button" data-arch-action="open-dossier" data-id="${escapeHtml(dossier.id)}">
         <div class="arch-card-head">
           <div>
-            <b>${escapeHtml(dossier.label)}</b>
-            <small>${escapeHtml(dossier.periodLabel || dossier.periodCode)} · ${escapeHtml(dossier.processKey)}${escapeHtml(population)}</small>
+            <b>${escapeHtml(config ? config.label : dossier.label)}</b>
+            <small>${escapeHtml(dossier.periodLabel || dossier.periodCode)}${config ? "" : " · " + escapeHtml(dossier.processKey)}${escapeHtml(population)}</small>
           </div>
-          <span>→</span>
+          <span>Abrir →</span>
         </div>
       </button>
     `;
@@ -670,9 +815,9 @@
         ${(dashboard.periods || []).length ? dashboard.periods.map(periodCard).join("") : '<div class="empty"><b>Sin períodos</b>Crea el primer período para comenzar.</div>'}
       </div>
 
-      <div class="section-head"><div><h2>Procesos por período</h2><p>Cada combinación período + proceso usa un único expediente compartido para evitar duplicar datos entre documentos.</p></div></div>
+      <div class="section-head"><div><h2>Procesos por período</h2><p>Cada proceso conserva su período, documentos y datos compartidos sin mezclar información con otros procesos.</p></div></div>
       <div class="arch-grid">
-        ${(dashboard.dossiers || []).length ? dashboard.dossiers.map(dossierCard).join("") : '<div class="empty"><b>Sin expedientes</b>Crea uno desde un período.</div>'}
+        ${(dashboard.dossiers || []).length ? dashboard.dossiers.map(dossierCard).join("") : '<div class="empty"><b>Sin procesos iniciados</b>Abre un proceso desde un período para comenzar.</div>'}
       </div>
 
       <div class="section-head"><div><h2>Configuración de IA</h2></div></div>
@@ -741,8 +886,11 @@
       return;
     }
 
-    if (engines.some((engine) => engine.family === "formacion")) {
-      return openFormationProcess(documentId);
+    const managedFamilies = Array.from(new Set(engines.map((engine) => engine.family)))
+      .filter((family) => processConfig(family));
+    if (managedFamilies.length === 1 && engines.every((engine) => engine.family === managedFamilies[0])) {
+      await openProcessWorkspace(managedFamilies[0], documentId);
+      return;
     }
 
     const directMatches = [];
@@ -977,28 +1125,28 @@
     state.currentView = "dossier";
     state.instance = null;
     await loadDossier(dossierId || state.dossier && state.dossier.id);
-    if (isFormationProcess()) {
+    if (isManagedProcess()) {
       await loadHome();
-      state.processFamily = "formacion";
+      state.processFamily = state.dossier.processKey;
       state.processPeriodId = state.dossier.periodId;
     }
     setHeader(
-      isFormationProcess() ? "Formación docente" : state.dossier.label,
-      isFormationProcess() ? `Procesos / Formación docente / ${state.dossier.periodLabel}` : `Procesos / ${state.dossier.periodLabel}`,
+      isManagedProcess() ? currentProcessConfig().label : state.dossier.label,
+      isManagedProcess() ? `Procesos / ${currentProcessConfig().label} / ${state.dossier.periodLabel}` : `Procesos / ${state.dossier.periodLabel}`,
       true
     );
     const engines = state.engines.filter(engineMatchesDossier);
     view().innerHTML = `
-      ${formationProcessWorkspaceMarkup()}
+      ${processWorkspaceMarkup()}
       <div class="arch-dossier-head">
         <div>
           <span class="process-code">${escapeHtml(state.dossier.processKey)}</span>
-          <h2>${isFormationProcess() ? "Datos compartidos de Formación docente" : escapeHtml(state.dossier.label)}</h2>
-          <p>${escapeHtml(state.dossier.periodLabel)}${isFormationProcess() ? " · disponibles para los cuatro documentos" : " · población: " + escapeHtml(state.dossier.population)}</p>
+          <h2>${isManagedProcess() ? "Datos compartidos de " + escapeHtml(currentProcessConfig().label) : escapeHtml(state.dossier.label)}</h2>
+          <p>${escapeHtml(state.dossier.periodLabel)}${isManagedProcess() ? " · disponibles para los documentos del proceso" : " · población: " + escapeHtml(state.dossier.population)}</p>
         </div>
         <div class="button-row">
           <button class="ghost small-inline" data-arch-action="clone-dossier">Copiar a otro período</button>
-          <span class="status good">${isFormationProcess() ? "Datos del proceso" : "Expediente maestro"}</span>
+          <span class="status good">${isManagedProcess() ? "Datos del proceso" : "Expediente maestro"}</span>
         </div>
       </div>
 
@@ -1027,7 +1175,7 @@
         ${knowledgeHtml()}
       </section>
 
-      ${isFormationProcess() ? "" : `
+      ${isManagedProcess() ? "" : `
         <div class="section-head">
           <div><h2>Motores documentales</h2><p>Cada documento tiene reglas propias aunque comparta datos con otros.</p></div>
         </div>
@@ -1420,15 +1568,15 @@
   async function renderInstance(instanceId) {
     state.currentView = "instance";
     await loadInstance(instanceId || state.instance && state.instance.id);
-    if (isFormationProcess()) {
+    if (isManagedProcess()) {
       await loadHome();
-      state.processFamily = "formacion";
+      state.processFamily = state.dossier.processKey;
       state.processPeriodId = state.dossier.periodId;
     }
     setHeader(
-      isFormationProcess() ? "Formación docente" : state.instance.label,
-      isFormationProcess()
-        ? `Procesos / Formación docente / ${state.dossier.periodLabel}`
+      isManagedProcess() ? currentProcessConfig().label : state.instance.label,
+      isManagedProcess()
+        ? `Procesos / ${currentProcessConfig().label} / ${state.dossier.periodLabel}`
         : `Procesos / ${state.dossier ? state.dossier.label : "Documento"}`,
       true
     );
@@ -1444,7 +1592,7 @@
     ];
   
     view().innerHTML = `
-      ${formationProcessWorkspaceMarkup()}
+      ${processWorkspaceMarkup()}
       ${state.generationRun && state.generationRun.status === "partial" ? `<div class="notice-warn"><b>Generación parcial</b><span>${escapeHtml(generationMessage(state.generationRun))}</span><button class="ghost small-inline" type="button" data-arch-action="resume-document">Reanudar pendientes</button></div>` : ""}
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Revisa las secciones afectadas.</span></div>` : ""}
       <div class="arch-dossier-head compact-document-head">
@@ -1600,13 +1748,17 @@
   async function createDossier(button) {
     const select = document.getElementById(`arch-process-${button.dataset.periodId}`);
     if (!select) return;
-    const [processKey, population] = String(select.value || "").split("|");
-    const label = await appPrompt("Nombre del expediente:", `${select.options[select.selectedIndex].text} · ${button.dataset.periodId}`, { required: true });
-    if (!label) return;
-    const response = await api.createDossier({ periodId: button.dataset.periodId, processKey, population, label });
-    if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el expediente.");
-    toast("Expediente creado.");
-    await renderDossier(response.dossier.id);
+    const [processKey] = String(select.value || "").split("|");
+    const config = processConfig(processKey);
+    if (!config) return toast("Proceso no válido.");
+    try {
+      const dossier = await ensureProcessDossier(processKey, button.dataset.periodId);
+      const engine = processEnginesForKey(processKey)[0];
+      if (!engine) return renderDossier(dossier.id);
+      await openProcessEngine(engine, dossier.id);
+    } catch (error) {
+      toast(error.message || String(error));
+    }
   }
 
   async function saveFormationSetup() {
@@ -2207,9 +2359,9 @@
   });
 
   document.addEventListener("change", (event) => {
-    const select = event.target.closest("[data-formation-period-select]");
+    const select = event.target.closest("[data-process-period-select]");
     if (!select) return;
-    switchFormationPeriod(select.value).catch((error) => {
+    switchProcessPeriod(select.value).catch((error) => {
       setBusy(false);
       toast(error.message || String(error));
     });
@@ -2248,7 +2400,7 @@
         return ensureEngineInDossier(engine, button.dataset.dossierId);
       }
       if (action === "process-document") {
-        const engine = formationProcessEngines().find((item) => item.engineId === button.dataset.engineId);
+        const engine = currentProcessEngines().find((item) => item.engineId === button.dataset.engineId);
         if (!engine || !state.dossier) return;
         clearTimeout(sectionSaveTimer);
         if (state.instance && state.instanceStage === "document") {
@@ -2256,18 +2408,29 @@
           if (!saved) return;
         }
         state.instanceStage = "document";
-        return ensureEngineInDossier(engine, state.dossier.id);
+        return openProcessEngine(engine, state.dossier.id);
       }
-      if (action === "new-formation-period") {
+      if (action === "new-process-period") {
         const created = await newPeriod({ renderHome: false });
         if (!created) return;
         await loadHome();
-        return switchFormationPeriod(created.id);
+        return switchProcessPeriod(created.id);
       }
       if (action === "launch-period") return launchPeriod(button.dataset.engineId, button.dataset.periodId);
       if (action === "new-period") return newPeriod();
       if (action === "create-dossier") return createDossier(button);
-      if (action === "open-dossier") { state.instance = null; return renderDossier(button.dataset.id); }
+      if (action === "open-dossier") {
+        state.instance = null;
+        await loadDossier(button.dataset.id);
+        const config = currentProcessConfig();
+        if (config) {
+          await loadHome();
+          await loadDossier(button.dataset.id);
+          const engine = currentProcessEngines()[0];
+          return engine ? openProcessEngine(engine, state.dossier.id) : renderDossier(state.dossier.id);
+        }
+        return renderDossier(button.dataset.id);
+      }
       if (action === "add-master") return addMaster();
       if (action === "add-data-import") return addDataImport();
       if (action === "suggest-mapping") return suggestMapping(button.dataset.id);
@@ -2325,7 +2488,7 @@
   });
 
   async function goBack() {
-    if (state.currentView === "instance" && isFormationProcess()) {
+    if (state.currentView === "instance" && isManagedProcess()) {
       await renderHome();
       return true;
     }
