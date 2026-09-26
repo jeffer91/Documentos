@@ -975,18 +975,28 @@
     state.currentView = "dossier";
     state.instance = null;
     await loadDossier(dossierId || state.dossier && state.dossier.id);
-    setHeader(state.dossier.label, `Procesos / ${state.dossier.periodLabel}`, true);
+    if (isFormationProcess()) {
+      await loadHome();
+      state.processFamily = "formacion";
+      state.processPeriodId = state.dossier.periodId;
+    }
+    setHeader(
+      isFormationProcess() ? "Formación docente" : state.dossier.label,
+      isFormationProcess() ? `Procesos / Formación docente / ${state.dossier.periodLabel}` : `Procesos / ${state.dossier.periodLabel}`,
+      true
+    );
     const engines = state.engines.filter(engineMatchesDossier);
     view().innerHTML = `
+      ${formationProcessWorkspaceMarkup()}
       <div class="arch-dossier-head">
         <div>
           <span class="process-code">${escapeHtml(state.dossier.processKey)}</span>
-          <h2>${escapeHtml(state.dossier.label)}</h2>
-          <p>${escapeHtml(state.dossier.periodLabel)} · población: ${escapeHtml(state.dossier.population)}</p>
+          <h2>${isFormationProcess() ? "Datos compartidos de Formación docente" : escapeHtml(state.dossier.label)}</h2>
+          <p>${escapeHtml(state.dossier.periodLabel)}${isFormationProcess() ? " · disponibles para los cuatro documentos" : " · población: " + escapeHtml(state.dossier.population)}</p>
         </div>
         <div class="button-row">
           <button class="ghost small-inline" data-arch-action="clone-dossier">Copiar a otro período</button>
-          <span class="status good">Expediente maestro</span>
+          <span class="status good">${isFormationProcess() ? "Datos del proceso" : "Expediente maestro"}</span>
         </div>
       </div>
 
@@ -1015,10 +1025,12 @@
         ${knowledgeHtml()}
       </section>
 
-      <div class="section-head">
-        <div><h2>Motores documentales</h2><p>Cada documento tiene reglas propias aunque comparta datos con otros.</p></div>
-      </div>
-      <div class="arch-engine-grid">${engines.map(engineCard).join("")}</div>
+      ${isFormationProcess() ? "" : `
+        <div class="section-head">
+          <div><h2>Motores documentales</h2><p>Cada documento tiene reglas propias aunque comparta datos con otros.</p></div>
+        </div>
+        <div class="arch-engine-grid">${engines.map(engineCard).join("")}</div>
+      `}
     `;
   }
 
