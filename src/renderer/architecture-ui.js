@@ -34,6 +34,158 @@
   let sectionSaveTimer = null;
   let recommendingSections = false;
 
+  const FORMATION_CAREER_OPTIONS = Object.freeze([
+    "Enfermería",
+    "Mecánica Automotriz",
+    "Mecánica de Motos",
+    "Diseño Multimedia",
+    "Marketing",
+    "Ventas",
+    "Desarrollo de Software",
+    "Ciberseguridad",
+    "Redes y Telecomunicaciones"
+  ]);
+
+  const FORMATION_TRANSVERSAL_NEEDS = Object.freeze([
+    "Metodologías activas y aprendizaje basado en proyectos",
+    "Evaluación por resultados de aprendizaje y uso de rúbricas",
+    "Inteligencia artificial aplicada a la docencia",
+    "Investigación aplicada y producción académica",
+    "Herramientas digitales para la enseñanza"
+  ]);
+
+  const FORMATION_CAREER_NEEDS = Object.freeze([
+    { match: ["enfermer"], items: ["Simulación clínica y escenarios de alta fidelidad", "Actualización en procedimientos y seguridad del paciente", "Práctica basada en evidencia"] },
+    { match: ["mecanica automotriz", "automotriz"], items: ["Diagnóstico electrónico automotriz", "Vehículos híbridos y eléctricos", "Sistemas de inyección y gestión electrónica"] },
+    { match: ["motos", "motoc"], items: ["Diagnóstico electrónico de motocicletas", "Sistemas de inyección y encendido", "Mantenimiento de nuevas tecnologías de movilidad"] },
+    { match: ["multimedia", "diseno"], items: ["Diseño de experiencias digitales", "Producción audiovisual con herramientas de IA", "Prototipado y contenidos interactivos"] },
+    { match: ["marketing"], items: ["Analítica de marketing y visualización de datos", "IA generativa aplicada al marketing", "Comercio electrónico y automatización"] },
+    { match: ["ventas"], items: ["Venta consultiva y negociación", "CRM y analítica comercial", "Social selling y canales digitales"] },
+    { match: ["software", "desarrollo"], items: ["Arquitecturas cloud y despliegue", "Inteligencia artificial aplicada al desarrollo", "DevOps, pruebas y calidad de software"] },
+    { match: ["ciberseguridad"], items: ["Seguridad ofensiva y defensiva", "Gestión de incidentes y respuesta", "Seguridad en nube y hardening"] },
+    { match: ["redes", "telecom"], items: ["Redes definidas por software", "Ciberseguridad de redes", "Infraestructura cloud y virtualización"] }
+  ]);
+
+  function normalizeFormationText(value) {
+    return String(value == null ? "" : value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function stableFormationHash(value) {
+    const text = String(value || "");
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function masterValue(key) {
+    const item = (state.masterData || []).find((entry) => entry.key === key && entry.scopeType === "dossier" && !entry.scopeKey);
+    return item ? item.value : null;
+  }
+
+  function formationNeedsForCareer(career, seed) {
+    const normalized = normalizeFormationText(career);
+    const specific = FORMATION_CAREER_NEEDS.find((group) => group.match.some((token) => normalized.includes(token)));
+    const pool = (specific ? specific.items : [])
+      .concat(FORMATION_TRANSVERSAL_NEEDS)
+      .filter((item, index, items) => items.indexOf(item) === index);
+    return pool.slice(0, 5).map((need, index) => {
+      const score = 76 + (stableFormationHash(`${seed}|${need}|${index}`) % 20);
+      return {
+        need,
+        priorityScore: score,
+        priority: score >= 88 ? "Alta" : "Media",
+        horizon: score >= 88 ? "Corto plazo" : "Mediano plazo"
+      };
+    });
+  }
+
+  function buildFormationSyntheticProfile(careers) {
+    const cleanCareers = Array.from(new Set((careers || []).map((item) => String(item || "").trim()).filter(Boolean)));
+    const periodCode = String(state.dossier && (state.dossier.periodCode || state.dossier.periodLabel) || "PERIODO");
+    const doctorateCareerIndex = cleanCareers.length
+      ? stableFormationHash(`${periodCode}|doctorado`) % cleanCareers.length
+      : -1;
+
+    const rows = cleanCareers.map((career, index) => {
+      const seed = `${periodCode}|${normalizeFormationText(career)}`;
+      const totalTeachers = 8 + (stableFormationHash(seed) % 8);
+      const targetThirdPercent = 60 + (stableFormationHash(seed + "|tercer") % 11);
+      let thirdLevel = Math.round(totalTeachers * targetThirdPercent / 100);
+      thirdLevel = Math.max(1, Math.min(totalTeachers - 1, thirdLevel));
+      const fourthLevel = totalTeachers - thirdLevel;
+      const doctorate = index === doctorateCareerIndex && fourthLevel > 0 ? 1 : 0;
+      const masters = fourthLevel - doctorate;
+      return {
+        career,
+        totalTeachers,
+        thirdLevel,
+        masters,
+        doctorate,
+        fourthLevel,
+        thirdLevelPercent: Number((thirdLevel * 100 / totalTeachers).toFixed(1)),
+        fourthLevelPercent: Number((fourthLevel * 100 / totalTeachers).toFixed(1)),
+        needs: formationNeedsForCareer(career, seed)
+      };
+    });
+
+    const summary = rows.reduce((acc, row) => {
+      acc.totalTeachers += row.totalTeachers;
+      acc.thirdLevel += row.thirdLevel;
+      acc.masters += row.masters;
+      acc.doctorate += row.doctorate;
+      acc.fourthLevel += row.fourthLevel;
+      return acc;
+    }, { totalTeachers: 0, thirdLevel: 0, masters: 0, doctorate: 0, fourthLevel: 0 });
+
+    if (summary.totalTeachers) {
+      summary.thirdLevelPercent = Number((summary.thirdLevel * 100 / summary.totalTeachers).toFixed(1));
+      summary.fourthLevelPercent = Number((summary.fourthLevel * 100 / summary.totalTeachers).toFixed(1));
+    } else {
+      summary.thirdLevelPercent = 0;
+      summary.fourthLevelPercent = 0;
+    }
+
+    return {
+      schemaVersion: 1,
+      kind: "synthetic_planning_profile",
+      periodCode,
+      periodLabel: String(state.dossier && state.dossier.periodLabel || periodCode),
+      careers: rows,
+      summary,
+      rules: {
+        teachersPerCareer: "8-15",
+        thirdLevelTargetPercent: "60-70",
+        fourthLevelTargetPercent: "30-40",
+        doctorateInstitutionalMaximum: 1,
+        doctoratePolicy: "preferentemente_uno_en_todo_el_instituto",
+        deterministic: true
+      },
+      note: "Escenario estimado generado por reglas para planificación. No representa un levantamiento individual ni una encuesta.",
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  function formationProfile() {
+    const value = masterValue("FORMACION_DOCENTE_SINTETICA");
+    return value && typeof value === "object" ? value : null;
+  }
+
+  function formationSelectedCareers() {
+    const stored = masterValue("FORMACION_CARRERAS");
+    if (Array.isArray(stored)) return stored.map(String).filter(Boolean);
+    const profile = formationProfile();
+    return profile && Array.isArray(profile.careers) ? profile.careers.map((item) => item.career).filter(Boolean) : [];
+  }
+
   const escapeHtml = (value) => String(value == null ? "" : value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -926,7 +1078,82 @@
     `;
   }
 
+  function formationPreparationMarkup() {
+    const selected = formationSelectedCareers();
+    const selectedSet = new Set(selected);
+    const standardSet = new Set(FORMATION_CAREER_OPTIONS);
+    const custom = selected.filter((item) => !standardSet.has(item));
+    const profile = formationProfile();
+    const activeProviders = (state.providers || []).filter((item) => item.enabled).length;
+    const rows = profile && Array.isArray(profile.careers) ? profile.careers : [];
+    const summary = profile && profile.summary || {};
+
+    return `<div class="instance-preparation formation-preparation">
+      <div class="prep-grid">
+        <div class="prep-card"><span>Período</span><b>${escapeHtml(state.dossier && state.dossier.periodLabel || "Sin período")}</b><small>Dato obligatorio ya definido por el expediente</small></div>
+        <div class="prep-card"><span>Carreras</span><b>${selected.length}</b><small>${selected.length ? "Seleccionadas para este período" : "Selecciona al menos una carrera"}</small></div>
+        <div class="prep-card"><span>Población estimada</span><b>${Number(summary.totalTeachers || 0)}</b><small>${profile ? "Generada y guardada de forma determinística" : "Se generará automáticamente"}</small></div>
+        <div class="prep-card"><span>IA automática</span><b>${activeProviders}</b><small>Proveedor(es) habilitado(s)</small></div>
+      </div>
+
+      <section class="panel compact formation-setup-panel">
+        <div class="panel-title">
+          <div>
+            <h3>Carreras que participan en el período</h3>
+            <small>Para este documento solo necesitas definir el período y las carreras. La población y la distribución académica se generan automáticamente.</small>
+          </div>
+          <span class="status ${profile ? "good" : "warn"}">${profile ? "Datos generados" : "Pendiente"}</span>
+        </div>
+        <div class="formation-career-grid">
+          ${FORMATION_CAREER_OPTIONS.map((career) => `
+            <label class="formation-career-option">
+              <input type="checkbox" data-formation-career value="${escapeHtml(career)}" ${selectedSet.has(career) ? "checked" : ""}>
+              <span>${escapeHtml(career)}</span>
+            </label>
+          `).join("")}
+        </div>
+        <label class="app-dialog-field formation-custom-field">
+          <span>Otras carreras <small>(opcional, una por línea)</small></span>
+          <textarea id="formationCustomCareers" placeholder="Escribe únicamente las carreras que no aparecen arriba">${escapeHtml(custom.join("\n"))}</textarea>
+        </label>
+        <div class="notice-soft">
+          <b>Reglas automáticas</b>
+          <span>8–15 docentes por carrera · 60–70% con tercer nivel · 30–40% con cuarto nivel · preferentemente 1 doctorado en todo el instituto. Las cifras se conservan al volver a abrir el documento.</span>
+        </div>
+        <div class="button-row end">
+          <button class="primary" type="button" data-arch-action="save-formation-setup">${profile ? "Actualizar carreras y recalcular" : "Guardar carreras y generar datos"}</button>
+        </div>
+      </section>
+
+      ${rows.length ? `
+        <section class="panel compact formation-profile-panel">
+          <div class="panel-title">
+            <div><h3>Población docente estimada</h3><small>La app mantiene la coherencia matemática; la IA solo interpreta y redacta.</small></div>
+            <span class="status good">${Number(summary.totalTeachers || 0)} docentes</span>
+          </div>
+          <div class="formation-profile-table-wrap">
+            <table class="formation-profile-table">
+              <thead><tr><th>Carrera</th><th>Total</th><th>Tercer nivel</th><th>Maestría</th><th>Doctorado</th></tr></thead>
+              <tbody>
+                ${rows.map((row) => `<tr>
+                  <td>${escapeHtml(row.career)}</td>
+                  <td>${Number(row.totalTeachers || 0)}</td>
+                  <td>${Number(row.thirdLevel || 0)} <small>(${Number(row.thirdLevelPercent || 0)}%)</small></td>
+                  <td>${Number(row.masters || 0)}</td>
+                  <td>${Number(row.doctorate || 0)}</td>
+                </tr>`).join("")}
+              </tbody>
+              <tfoot><tr><th>Total</th><th>${Number(summary.totalTeachers || 0)}</th><th>${Number(summary.thirdLevel || 0)}</th><th>${Number(summary.masters || 0)}</th><th>${Number(summary.doctorate || 0)}</th></tr></tfoot>
+            </table>
+          </div>
+          <div class="notice-soft"><b>Listo para redactar</b><span>Las necesidades por carrera, prioridades y agregados ya están disponibles para el motor documental. Continúa a “Documento” y genera las secciones con IA.</span></div>
+        </section>
+      ` : '<div class="notice-warn"><b>Falta seleccionar carreras</b><span>El documento no requiere Excel ni una plantilla Word. Selecciona las carreras para crear automáticamente el diagnóstico base.</span></div>'}
+    </div>`;
+  }
+
   function preparationStageMarkup() {
+    if (state.instance && state.instance.engineId === "form.deteccion") return formationPreparationMarkup();
     const readiness = state.dataReadiness && state.dataReadiness.sections || [];
     const requiredPending = readiness.filter((item) => item.requirement === "required" && !item.ready);
     const activeProviders = (state.providers || []).filter((item) => item.enabled).length;
@@ -1086,6 +1313,54 @@
     if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el expediente.");
     toast("Expediente creado.");
     await renderDossier(response.dossier.id);
+  }
+
+  async function saveFormationSetup() {
+    if (!state.dossier || !state.instance || state.instance.engineId !== "form.deteccion") return;
+    const checked = Array.from(document.querySelectorAll("[data-formation-career]:checked"))
+      .map((input) => String(input.value || "").trim())
+      .filter(Boolean);
+    const customInput = document.getElementById("formationCustomCareers");
+    const custom = String(customInput && customInput.value || "")
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const careers = Array.from(new Set(checked.concat(custom)));
+    if (!careers.length) return toast("Selecciona al menos una carrera.");
+
+    const profile = buildFormationSyntheticProfile(careers);
+    setBusy(true);
+    const careersResponse = await api.setMasterData(state.dossier.id, {
+      key: "FORMACION_CARRERAS",
+      value: careers,
+      provenance: {
+        source: "manual",
+        verified: true,
+        purpose: "scope_formacion_docente"
+      },
+      reason: "Actualización de carreras participantes del período"
+    });
+    if (!careersResponse || !careersResponse.ok) {
+      setBusy(false);
+      return toast(careersResponse && careersResponse.error || "No se pudieron guardar las carreras.");
+    }
+    const profileResponse = await api.setMasterData(state.dossier.id, {
+      key: "FORMACION_DOCENTE_SINTETICA",
+      value: profile,
+      provenance: {
+        source: "synthetic_rule_engine",
+        verified: false,
+        synthetic: true,
+        deterministic: true,
+        rules: profile.rules
+      },
+      reason: "Regeneración del escenario estimado de formación docente"
+    });
+    setBusy(false);
+    if (!profileResponse || !profileResponse.ok) return toast(profileResponse && profileResponse.error || "No se pudo generar el perfil docente.");
+    await loadDossier(state.dossier.id);
+    toast("Carreras guardadas y diagnóstico base generado.");
+    await renderInstance(state.instance.id);
   }
 
   async function addMaster() {
@@ -1662,6 +1937,7 @@
         await ensureSectionRecommendations(true);
         return toast("Recomendación de subsecciones actualizada.");
       }
+      if (action === "save-formation-setup") return saveFormationSetup();
       if (action === "open-current-dossier") return renderDossier(state.dossier.id);
       if (action === "launch-existing") {
         const engine = (state.engines || []).find((item) => item.engineId === button.dataset.engineId);
