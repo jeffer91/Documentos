@@ -286,26 +286,96 @@ function audit(db, event) {
   );
 }
 
+const PERIOD_MONTHS = Object.freeze([
+  { name: "Enero", short: "ENE" },
+  { name: "Febrero", short: "FEB" },
+  { name: "Marzo", short: "MAR" },
+  { name: "Abril", short: "ABR" },
+  { name: "Mayo", short: "MAY" },
+  { name: "Junio", short: "JUN" },
+  { name: "Julio", short: "JUL" },
+  { name: "Agosto", short: "AGO" },
+  { name: "Septiembre", short: "SEP" },
+  { name: "Octubre", short: "OCT" },
+  { name: "Noviembre", short: "NOV" },
+  { name: "Diciembre", short: "DIC" }
+]);
+
+function normalizePeriodInput(input) {
+  const source = input || {};
+  const startMonth = Number(source.startMonth || (source.metadata && source.metadata.startMonth));
+  const startYear = Number(source.startYear || (source.metadata && source.metadata.startYear));
+  const endMonth = Number(source.endMonth || (source.metadata && source.metadata.endMonth));
+  const endYear = Number(source.endYear || (source.metadata && source.metadata.endYear));
+
+  if ([startMonth, endMonth].every((value) => Number.isInteger(value) && value >= 1 && value <= 12) &&
+      [startYear, endYear].every((value) => Number.isInteger(value) && value >= 2000 && value <= 2100)) {
+    if ((endYear * 12 + endMonth) < (startYear * 12 + startMonth)) {
+      throw new Error("El período final no puede ser anterior al período inicial.");
+    }
+    const start = PERIOD_MONTHS[startMonth - 1];
+    const end = PERIOD_MONTHS[endMonth - 1];
+    const code = startYear === endYear
+      ? `${start.short}-${end.short}-${startYear}`
+      : `${start.short}-${startYear}-${end.short}-${endYear}`;
+    const label = `${start.name} ${startYear} – ${end.name} ${endYear}`;
+    const startDate = `${startYear}-${String(startMonth).padStart(2, "0")}-01`;
+    const lastDay = new Date(endYear, endMonth, 0).getDate();
+    const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    return {
+      code,
+      label,
+      startDate,
+      endDate,
+      metadata: Object.assign({}, source.metadata || {}, {
+        startMonth,
+        startYear,
+        endMonth,
+        endYear,
+        periodScope: "process"
+      })
+    };
+  }
+
+  // Compatibilidad con períodos creados por versiones anteriores.
+  const code = String(source.code || "").trim();
+  const label = String(source.label || code).trim();
+  if (!code) throw new Error("Selecciona el mes y año de inicio y finalización del período.");
+  return {
+    code,
+    label,
+    startDate: String(source.startDate || ""),
+    endDate: String(source.endDate || ""),
+    metadata: Object.assign({}, source.metadata || {}, { periodScope: "process" })
+  };
+}
+
 function createPeriod(userDataPath, input) {
   const db = dbFor(userDataPath);
   const ts = now();
-  const code = String(input && input.code || "").trim();
-  const label = String(input && input.label || code).trim();
-  if (!code) throw new Error("El período necesita un código.");
+  const normalized = normalizePeriodInput(input);
+  const { code, label, startDate, endDate, metadata } = normalized;
+
+  const existing = db.prepare(`
+    SELECT id FROM periods_v3
+    WHERE code = ? OR (start_date = ? AND end_date = ? AND start_date <> '' AND end_date <> '')
+    ORDER BY created_at ASC
+    LIMIT 1
+  `).get(code, startDate, endDate);
+  if (existing) return getPeriod(userDataPath, existing.id);
+
   const periodId = id("period");
   db.prepare(`
     INSERT INTO periods_v3
       (id, code, label, start_date, end_date, status, metadata_json, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
   `).run(
-    periodId, code, label,
-    String(input && input.startDate || ""),
-    String(input && input.endDate || ""),
-    JSON.stringify(input && input.metadata || {}),
+    periodId, code, label, startDate, endDate,
+    JSON.stringify(metadata),
     ts, ts
   );
-  audit(db, { entityType: "period", entityId: periodId, action: "create", detail: { code, label } });
-  queueSync(db, "period_v3", periodId, "create", { code, label });
+  audit(db, { entityType: "period", entityId: periodId, action: "create", detail: { code, label, startDate, endDate, metadata } });
+  queueSync(db, "period_v3", periodId, "create", { code, label, startDate, endDate, metadata });
   return getPeriod(userDataPath, periodId);
 }
 
@@ -313,14 +383,21 @@ function getPeriod(userDataPath, periodId) {
   const db = dbFor(userDataPath);
   const row = db.prepare("SELECT * FROM periods_v3 WHERE id = ?").get(periodId);
   if (!row) return null;
+  const metadata = json(row.metadata_json, {});
+  const startParts = String(row.start_date || "").match(/^(\d{4})-(\d{2})/);
+  const endParts = String(row.end_date || "").match(/^(\d{4})-(\d{2})/);
   return {
     id: row.id,
     code: row.code,
     label: row.label,
     startDate: row.start_date || "",
     endDate: row.end_date || "",
+    startMonth: Number(metadata.startMonth || (startParts && startParts[2]) || 0) || null,
+    startYear: Number(metadata.startYear || (startParts && startParts[1]) || 0) || null,
+    endMonth: Number(metadata.endMonth || (endParts && endParts[2]) || 0) || null,
+    endYear: Number(metadata.endYear || (endParts && endParts[1]) || 0) || null,
     status: row.status,
-    metadata: json(row.metadata_json, {}),
+    metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -340,6 +417,17 @@ function createDossier(userDataPath, input) {
   const period = getPeriod(userDataPath, periodId);
   if (!period) throw new Error("Período no válido.");
   if (!processKey) throw new Error("Selecciona un proceso.");
+
+  // El expediente representa al proceso dentro del período. Reutilizarlo evita
+  // que cada documento cree su propio contexto aislado.
+  const existing = db.prepare(`
+    SELECT id FROM dossiers_v3
+    WHERE period_id = ? AND process_key = ? AND population = ? AND status = 'active'
+    ORDER BY created_at ASC
+    LIMIT 1
+  `).get(periodId, processKey, population);
+  if (existing) return getDossier(userDataPath, existing.id);
+
   const ts = now();
   const dossierId = id("dossier");
   const label = String(input && input.label || `${processKey} · ${period.label}`).trim();
