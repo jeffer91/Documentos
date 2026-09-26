@@ -234,10 +234,27 @@
                       </label>
                     `;
                   }
+                  if (field.type === "select") {
+                    const options = (field.options || []).map((option) => {
+                      const optionValue = typeof option === "object" ? option.value : option;
+                      const optionLabel = typeof option === "object" ? option.label : option;
+                      const selected = String(optionValue) === String(field.value == null ? "" : field.value) ? "selected" : "";
+                      return `<option value="${escapeHtml(optionValue)}" ${selected}>${escapeHtml(optionLabel)}</option>`;
+                    }).join("");
+                    return `
+                      <label class="app-dialog-field" for="${id}">
+                        <span>${label}</span>
+                        <select id="${id}" name="${escapeHtml(field.name)}" ${required}>${options}</select>
+                      </label>
+                    `;
+                  }
+                  const min = field.min == null ? "" : `min="${escapeHtml(field.min)}"`;
+                  const max = field.max == null ? "" : `max="${escapeHtml(field.max)}"`;
+                  const step = field.step == null ? "" : `step="${escapeHtml(field.step)}"`;
                   return `
                     <label class="app-dialog-field" for="${id}">
                       <span>${label}</span>
-                      <input id="${id}" name="${escapeHtml(field.name)}" type="${escapeHtml(field.type || "text")}" value="${value}" placeholder="${placeholder}" ${required}>
+                      <input id="${id}" name="${escapeHtml(field.name)}" type="${escapeHtml(field.type || "text")}" value="${value}" placeholder="${placeholder}" ${min} ${max} ${step} ${required}>
                     </label>
                   `;
                 }).join("")}
@@ -485,14 +502,14 @@
       </div>
 
       <div class="section-head">
-        <div><h2>Períodos</h2><p>Los datos quedan separados por período y se reutilizan entre documentos del mismo proceso.</p></div>
+        <div><h2>Períodos</h2><p>Cada período pertenece al proceso completo: todos sus documentos heredan el mismo contexto y los mismos datos compartidos.</p></div>
         <button class="primary" data-arch-action="new-period">+ Período</button>
       </div>
       <div class="arch-grid">
         ${(dashboard.periods || []).length ? dashboard.periods.map(periodCard).join("") : '<div class="empty"><b>Sin períodos</b>Crea el primer período para comenzar.</div>'}
       </div>
 
-      <div class="section-head"><div><h2>Expedientes</h2><p>Formación, Capacitación, Regulares y PVC se mantienen separados.</p></div></div>
+      <div class="section-head"><div><h2>Procesos por período</h2><p>Cada combinación período + proceso usa un único expediente compartido para evitar duplicar datos entre documentos.</p></div></div>
       <div class="arch-grid">
         ${(dashboard.dossiers || []).length ? dashboard.dossiers.map(dossierCard).join("") : '<div class="empty"><b>Sin expedientes</b>Crea uno desde un período.</div>'}
       </div>
@@ -578,7 +595,7 @@
         <div class="section-head">
           <div>
             <h2>¿En qué período vas a trabajar?</h2>
-            <p>El motor documental reemplaza la plantilla Word. Selecciona un expediente existente o crea el del período.</p>
+            <p>Selecciona el período del proceso. Si ya existe un expediente para ese proceso, este documento reutilizará automáticamente su contexto y sus datos.</p>
           </div>
         </div>
         ${engines.map((engine) => {
@@ -1264,49 +1281,123 @@
     return renderHome();
   }
 
+  const PERIOD_MONTHS = Object.freeze([
+    { value: "1", label: "Enero", short: "ENE" },
+    { value: "2", label: "Febrero", short: "FEB" },
+    { value: "3", label: "Marzo", short: "MAR" },
+    { value: "4", label: "Abril", short: "ABR" },
+    { value: "5", label: "Mayo", short: "MAY" },
+    { value: "6", label: "Junio", short: "JUN" },
+    { value: "7", label: "Julio", short: "JUL" },
+    { value: "8", label: "Agosto", short: "AGO" },
+    { value: "9", label: "Septiembre", short: "SEP" },
+    { value: "10", label: "Octubre", short: "OCT" },
+    { value: "11", label: "Noviembre", short: "NOV" },
+    { value: "12", label: "Diciembre", short: "DIC" }
+  ]);
+
+  function periodParts(values) {
+    const startMonth = Number(values && values.startMonth);
+    const startYear = Number(values && values.startYear);
+    const endMonth = Number(values && values.endMonth);
+    const endYear = Number(values && values.endYear);
+    const startIndex = startYear * 12 + startMonth;
+    const endIndex = endYear * 12 + endMonth;
+    if (!Number.isInteger(startMonth) || startMonth < 1 || startMonth > 12 ||
+        !Number.isInteger(endMonth) || endMonth < 1 || endMonth > 12 ||
+        !Number.isInteger(startYear) || startYear < 2000 || startYear > 2100 ||
+        !Number.isInteger(endYear) || endYear < 2000 || endYear > 2100) {
+      return { error: "Selecciona meses y años válidos." };
+    }
+    if (endIndex < startIndex) return { error: "El período final no puede ser anterior al período inicial." };
+
+    const start = PERIOD_MONTHS[startMonth - 1];
+    const end = PERIOD_MONTHS[endMonth - 1];
+    const sameYear = startYear === endYear;
+    const code = sameYear
+      ? `${start.short}-${end.short}-${startYear}`
+      : `${start.short}-${startYear}-${end.short}-${endYear}`;
+    const label = `${start.label} ${startYear} – ${end.label} ${endYear}`;
+    const startDate = `${startYear}-${String(startMonth).padStart(2, "0")}-01`;
+    const lastDay = new Date(endYear, endMonth, 0).getDate();
+    const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    return { startMonth, startYear, endMonth, endYear, code, label, startDate, endDate };
+  }
+
   async function newPeriod() {
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
+    const monthOptions = PERIOD_MONTHS.map((item) => ({ value: item.value, label: item.label }));
     const values = await appDialog({
       title: "Crear período",
-      message: "Define el período de trabajo. Las fechas son opcionales.",
+      message: "El período se aplica al proceso completo y será heredado por todos sus documentos.",
       fields: [
         {
-          name: "code",
-          label: "Código del período",
-          placeholder: "Ej. FEB-AGO-2026",
+          name: "startMonth",
+          label: "Mes de inicio",
+          type: "select",
+          options: monthOptions,
+          value: String(currentMonth),
           required: true
         },
         {
-          name: "label",
-          label: "Nombre visible",
-          placeholder: "Si lo dejas vacío, se usará el código"
+          name: "startYear",
+          label: "Año de inicio",
+          type: "number",
+          value: String(currentYear),
+          min: 2000,
+          max: 2100,
+          step: 1,
+          required: true
         },
         {
-          name: "startDate",
-          label: "Fecha de inicio",
-          type: "date"
+          name: "endMonth",
+          label: "Mes de finalización",
+          type: "select",
+          options: monthOptions,
+          value: String(currentMonth),
+          required: true
         },
         {
-          name: "endDate",
-          label: "Fecha de fin",
-          type: "date"
+          name: "endYear",
+          label: "Año de finalización",
+          type: "number",
+          value: String(currentYear),
+          min: 2000,
+          max: 2100,
+          step: 1,
+          required: true
         }
       ],
       confirmText: "Crear período"
     });
     if (!values) return;
 
-    const code = String(values.code || "").trim();
-    const label = String(values.label || "").trim() || code;
-    const startDate = String(values.startDate || "").trim();
-    const endDate = String(values.endDate || "").trim();
-    if (!code) return toast("El código del período es obligatorio.");
-    if (startDate && endDate && startDate > endDate) return toast("La fecha de fin no puede ser anterior a la fecha de inicio.");
+    const period = periodParts(values);
+    if (period.error) return toast(period.error);
 
     setBusy(true);
-    const response = await api.createPeriod({ code, label, startDate, endDate });
+    const response = await api.createPeriod({
+      startMonth: period.startMonth,
+      startYear: period.startYear,
+      endMonth: period.endMonth,
+      endYear: period.endYear,
+      code: period.code,
+      label: period.label,
+      startDate: period.startDate,
+      endDate: period.endDate,
+      metadata: {
+        startMonth: period.startMonth,
+        startYear: period.startYear,
+        endMonth: period.endMonth,
+        endYear: period.endYear,
+        periodScope: "process"
+      }
+    });
     setBusy(false);
     if (!response || !response.ok) return toast(response && response.error || "No se pudo crear el período.");
-    toast("Período creado.");
+    toast("Período creado. Se reutilizará en todo el proceso.");
     await renderHome();
   }
 
