@@ -1691,3 +1691,200 @@ button.home-result-row.home-result-process { grid-template-columns: 45px minmax(
   .app-dialog-fields { grid-template-columns: 1fr; }
   .app-dialog-field { grid-column: 1 / -1; }
 }
+
+
+/* Espacio de proceso: período fijo + documentos anclados */
+.process-workspace-overview {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15,23,42,.045);
+}
+
+.process-workspace-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
+  gap: 18px;
+  align-items: end;
+}
+
+.process-workspace-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--brand);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.process-workspace-top h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -.025em;
+}
+
+.process-workspace-top p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.process-period-control {
+  display: grid;
+  gap: 6px;
+}
+
+.process-period-control label {
+  color: #475569;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.process-period-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.process-period-row select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--text);
+  padding: 8px 34px 8px 11px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  outline: none;
+}
+
+.process-period-row select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15,118,110,.08);
+}
+
+.process-document-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.process-document-card {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-areas:
+    "step copy"
+    "step status";
+  gap: 4px 9px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fbfcfd;
+  color: var(--text);
+  text-align: left;
+}
+
+.process-document-card:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+.process-document-card.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px rgba(15,118,110,.07);
+}
+
+.process-document-step {
+  grid-area: step;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #eef2f7;
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.process-document-card.active .process-document-step {
+  background: var(--brand);
+  color: #fff;
+}
+
+.process-document-copy {
+  grid-area: copy;
+  min-width: 0;
+}
+
+.process-document-copy b {
+  display: block;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.process-document-copy small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-document-card > .status {
+  grid-area: status;
+  justify-self: start;
+  padding: 3px 6px;
+  font-size: 7px;
+}
+
+.document-head-actions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Selectores consistentes dentro de diálogos */
+.app-dialog-field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  padding: 11px 12px;
+  outline: none;
+  font: inherit;
+}
+
+.app-dialog-field select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15,118,110,.08);
+}
+
+@media (max-width: 1180px) {
+  .process-document-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .process-workspace-top { grid-template-columns: 1fr; align-items: stretch; }
+}
+
+@media (max-width: 620px) {
+  .process-document-grid { grid-template-columns: 1fr; }
+  .process-period-row { grid-template-columns: 1fr; }
+  .process-period-row button { width: 100%; }
+}
