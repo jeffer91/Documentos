@@ -451,7 +451,10 @@ function documentOutlineCheck() {
         formRows.some((item) => item.key === "ANALISIS_MAPA_CALOR" && (item.allowedVisuals || []).includes("heatmap")) &&
         formRows.some((item) => item.key === "LINEAS_FORMACION_COORDINACION") &&
         methodology && (methodology.children || []).length === 8 &&
-        analysis && (analysis.children || []).length === 12 &&
+        analysis && (analysis.children || []).length === 9 &&
+        !formRows.some((item) => ["CARACTERIZACION_EXPERIENCIA","CARACTERIZACION_VINCULACION","ANALISIS_DISPONIBILIDAD","ANALISIS_CUALITATIVO","ANALISIS_TRIANGULACION"].includes(item.key)) &&
+        formDetection.inputMode === "period_careers_synthetic" &&
+        formDetection.version === "4.2.0" &&
         prioritization && (prioritization.children || []).length === 5 &&
         bibliography && bibliography.title === "Bibliografía"
       );
@@ -672,14 +675,18 @@ function documentDataBindingCheck() {
       aiSource.includes("function dataReadinessForSection") &&
       aiSource.includes("instanceDataReadiness") &&
       aiSource.includes('requirement === "required"') &&
-      aiSource.includes("requiere datos antes de generar"),
+      aiSource.includes("requiere datos antes de generar") &&
+      aiSource.includes("syntheticFormationProfile") &&
+      aiSource.includes("FORMACION_DOCENTE_SINTETICA"),
     backendReadiness:
       mainSource.includes("dataReadiness: instance ? aiOrchestrator.instanceDataReadiness"),
     uiReadiness:
       renderer.includes("Datos listos") &&
       renderer.includes("Datos por revisar") &&
       renderer.includes("Gestionar datos, fuentes y mapeos") &&
-      renderer.includes("Mapeo canónico")
+      renderer.includes("Mapeo canónico") &&
+      renderer.includes("Guardar carreras y generar datos") &&
+      renderer.includes("Generar diagnóstico completo")
   };
 }
 
