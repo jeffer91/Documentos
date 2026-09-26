@@ -267,6 +267,7 @@ function dataReadinessForSection(userDataPath, instance, section) {
 }
 
 function sectionDataContext(userDataPath, instance, section) {
+  const dossier = hub.getDossier(userDataPath, instance.dossierId);
   const masterData = hub.listMasterData(userDataPath, instance.dossierId);
   const imports = ingestion.listImports(userDataPath, instance.dossierId).map((item) => ({
     id: item.id,
@@ -294,6 +295,23 @@ function sectionDataContext(userDataPath, instance, section) {
   const sourceQuery = `${section && section.title || ""} ${section && section.key || ""} ${instance.label || ""}`;
   const institutionalSources = knowledge.searchKnowledge(userDataPath, instance.dossierId, sourceQuery, 5);
   return {
+    period: dossier ? {
+      id: dossier.periodId,
+      code: dossier.periodCode,
+      label: dossier.periodLabel,
+      startDate: dossier.periodStartDate || "",
+      endDate: dossier.periodEndDate || "",
+      startMonth: dossier.periodStartMonth || null,
+      startYear: dossier.periodStartYear || null,
+      endMonth: dossier.periodEndMonth || null,
+      endYear: dossier.periodEndYear || null
+    } : null,
+    process: dossier ? {
+      key: dossier.processKey,
+      population: dossier.population,
+      dossierId: dossier.id,
+      dossierLabel: dossier.label
+    } : null,
     masterData: compactMasterData(masterData),
     imports,
     filteredData,
@@ -352,6 +370,7 @@ function writerPrompt(instance, engine, section, context) {
     "Redacta la sección solicitada.",
     "Respeta exactamente la jerarquía definida por la aplicación; no inventes títulos ni subniveles fuera de la sección solicitada.",
     "Mantén coherencia con las secciones previas y con las secciones de las que deriva.",
+    context.period ? `Período institucional del proceso: ${context.period.label} (${context.period.code}). Todos los contenidos de este documento deben corresponder a ese período; no inventes ni cambies el período.` : "",
     "Si un dato es simulado o inferido, NO lo presentes como verificado: inclúyelo en alerts.",
     engine.engineId === "form.deteccion" && context.filteredData && context.filteredData.synthetic
       ? "Para este documento, la aplicación ya generó un escenario estimado y determinístico de población docente a partir del período y las carreras. Usa exactamente esas cifras, porcentajes, necesidades y prioridades; no las recalcules ni las sustituyas. En la metodología aclara una sola vez que son estimaciones para planificación generadas por reglas, y no las atribuyas a encuestas, Talento Humano ni levantamientos que no existen."
@@ -385,6 +404,8 @@ function writerPrompt(instance, engine, section, context) {
       : "",
     "Contexto estructurado:",
     JSON.stringify({
+      period: context.period,
+      process: context.process,
       engine: { id: engine.engineId, version: engine.version, family: engine.family, population: engine.population },
       instance: { scopeType: instance.scopeType, scopeKey: instance.scopeKey },
       section: {
@@ -427,6 +448,8 @@ function reviewerPrompt(engine, section, draft, context) {
     "Si detectas problemas, corrige content y blocks.",
     "Devuelve SOLO JSON válido con: approved, issues, correctedContent, correctedBlocks, alerts.",
     JSON.stringify({
+      period: context.period,
+      process: context.process,
       engine: engine.engineId,
       section: {
         key: section.key,
