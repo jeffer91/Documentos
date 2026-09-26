@@ -1192,7 +1192,7 @@
       ${processWorkspaceMarkup()}
       <div class="arch-dossier-head">
         <div>
-          <span class="process-code">${escapeHtml(state.dossier.processKey)}</span>
+          <span class="process-code">${isManagedProcess() ? "Datos compartidos" : escapeHtml(state.dossier.processKey)}</span>
           <h2>${isManagedProcess() ? "Datos compartidos de " + escapeHtml(currentProcessConfig().label) : escapeHtml(state.dossier.label)}</h2>
           <p>${escapeHtml(state.dossier.periodLabel)}${isManagedProcess() ? " · disponibles para los documentos del proceso" : " · población: " + escapeHtml(state.dossier.population)}</p>
         </div>
@@ -1205,7 +1205,7 @@
       <div class="arch-two-col">
         <section class="panel compact">
           <div class="panel-title">
-            <div><h3>Datos maestros</h3><small>Se ingresan una vez y los consumen los motores autorizados.</small></div>
+            <div><h3>Datos compartidos</h3><small>Se ingresan una vez y los reutilizan los documentos del proceso.</small></div>
             <button class="secondary small-inline" data-arch-action="add-master">+ Dato</button>
           </div>
           ${masterDataHtml()}
@@ -1562,7 +1562,7 @@
     const activeProviders = (state.providers || []).filter((item) => item.enabled).length;
     return `<div class="instance-preparation">
       <div class="prep-grid">
-        <div class="prep-card"><span>Período</span><b>${escapeHtml(state.dossier && state.dossier.periodLabel || "Sin período")}</b><small>Expediente: ${escapeHtml(state.dossier && state.dossier.label || "")}</small></div>
+        <div class="prep-card"><span>Período</span><b>${escapeHtml(state.dossier && state.dossier.periodLabel || "Sin período")}</b><small>${isManagedProcess() ? "Proceso: " + escapeHtml(currentProcessConfig().label) : "Expediente: " + escapeHtml(state.dossier && state.dossier.label || "")}</small></div>
         <div class="prep-card"><span>Excel / CSV</span><b>${(state.imports || []).length}</b><small>${requiredPending.length ? requiredPending.length + " requisito(s) de datos pendientes" : "Datos obligatorios listos o no requeridos"}</small></div>
         <div class="prep-card"><span>Fuentes institucionales</span><b>${(state.knowledgeSources || []).length}</b><small>Normativa, políticas y documentos citables</small></div>
         <div class="prep-card"><span>IA automática</span><b>${activeProviders}</b><small>Proveedor(es) habilitado(s)</small></div>
@@ -1649,7 +1649,7 @@
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Revisa las secciones afectadas.</span></div>` : ""}
       <div class="arch-dossier-head compact-document-head">
         <div>
-          <span class="process-code">${escapeHtml(state.instance.engineId)} · v${escapeHtml(state.instance.engineVersion)}</span>
+          <span class="process-code">${isManagedProcess() ? "Documento del proceso" : escapeHtml(state.instance.engineId) + " · v" + escapeHtml(state.instance.engineVersion)}</span>
           <h2>${escapeHtml(state.instance.label)}</h2>
           <p>${escapeHtml(state.dossier && state.dossier.periodLabel || "")} · ${approved}/${required.length} secciones obligatorias aprobadas${alerts ? " · " + alerts + " alerta(s)" : ""}</p>
         </div>
