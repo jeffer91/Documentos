@@ -275,6 +275,38 @@ function processPeriodArchitectureCheck() {
   };
 }
 
+function formationProcessWorkspaceCheck() {
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+  const registry = fs.readFileSync(path.join(ROOT, "src/main/document-engine-registry.cjs"), "utf8");
+  const styles = fs.readFileSync(path.join(ROOT, "src/renderer/styles.css"), "utf8");
+  const requiredEngines = ["form.deteccion", "form.plan", "form.informe", "form.seguimiento"];
+  return {
+    fourDocuments:
+      requiredEngines.every((engineId) => renderer.includes(`"${engineId}"`)) &&
+      requiredEngines.every((engineId) => registry.includes(`"${engineId}"`)),
+    periodSelector:
+      renderer.includes("data-formation-period-select") &&
+      renderer.includes('data-arch-action="new-formation-period"') &&
+      renderer.includes("switchFormationPeriod"),
+    automaticFormationDossier:
+      renderer.includes("async function ensureFormationDossier") &&
+      renderer.includes('processKey: "formacion"') &&
+      renderer.includes('population: "all"'),
+    directDocumentEntry:
+      renderer.includes('if (engines.some((engine) => engine.family === "formacion"))') &&
+      renderer.includes("return openFormationProcess(documentId);"),
+    cards:
+      renderer.includes("process-document-card") &&
+      renderer.includes('data-arch-action="process-document"') &&
+      styles.includes(".process-document-grid") &&
+      styles.includes(".process-document-card.active"),
+    editorAndDraft:
+      renderer.includes("formationProcessWorkspaceMarkup()") &&
+      renderer.includes('data-arch-action="export-draft"') &&
+      renderer.includes("sectionIndexMarkup()")
+  };
+}
+
 function legacyExternalOnlyCheck() {
   const legacySource = fs.readFileSync(path.join(ROOT, "src/main/legacy-migration-service.cjs"), "utf8");
   const templateSource = fs.readFileSync(path.join(ROOT, "src/main/template-service.cjs"), "utf8");
@@ -1513,6 +1545,22 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
+  }
+
+  try {
+    const formationWorkspace = formationProcessWorkspaceCheck();
+    if (
+      !formationWorkspace.fourDocuments ||
+      !formationWorkspace.periodSelector ||
+      !formationWorkspace.automaticFormationDossier ||
+      !formationWorkspace.directDocumentEntry ||
+      !formationWorkspace.cards ||
+      !formationWorkspace.editorAndDraft
+    ) {
+      errors.push("El espacio del proceso de Formación no superó la validación interna: " + JSON.stringify(formationWorkspace));
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar el espacio del proceso de Formación: ${error.message}`);
   }
 
   try {
