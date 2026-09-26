@@ -60,12 +60,12 @@
       engineIds: Object.freeze([
         "cap.deteccion",
         "cap.plan",
-        "cap.informe-cumplimiento",
         "cap.planificacion-actividad",
         "cap.patrocinio",
         "cap.informe-final",
         "cap.instrumento-impacto",
-        "cap.impacto"
+        "cap.impacto",
+        "cap.informe-cumplimiento"
       ])
     }),
     titulacion_regular: Object.freeze({
