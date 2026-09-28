@@ -737,6 +737,7 @@ function allRows(userDataPath, dossierId, options) {
           __mappingHash: hashObject(mapping),
           __scopeType: importRow.scope_type,
           __scopeKey: importRow.scope_key,
+          __datasetKey: importRow.dataset_key || "",
           __sheet: sheet.sheet_name,
           __row: index + 2
         }));
@@ -911,6 +912,7 @@ function sourceTrace(rows, includeMatchedCounts) {
         mappingHash: row.__mappingHash || "",
         scopeType: row.__scopeType || "",
         scopeKey: row.__scopeKey || "",
+        datasetKey: row.__datasetKey || "",
         sheets: new Map(),
         matchedRows: 0
       });
@@ -1196,6 +1198,7 @@ function aiSlice(userDataPath, dossierId, query) {
     sourceTrace: (summary.inputSourceTrace || []).map((item) => ({
       importId: item.importId,
       sourceName: item.sourceName,
+      datasetKey: item.datasetKey || "",
       sha256: item.sha256,
       mappingHash: item.mappingHash,
       scopeType: item.scopeType,
