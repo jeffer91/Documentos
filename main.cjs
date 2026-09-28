@@ -19,6 +19,8 @@ const templateRequirements = require("./src/main/template-requirements.cjs");
 const engineRegistry = require("./src/main/document-engine-registry.cjs");
 const processHub = require("./src/main/process-hub-service.cjs");
 const dataIngestion = require("./src/main/data-ingestion-service.cjs");
+const dataTemplateRegistry = require("./src/main/data-template-registry.cjs");
+const dataTemplateService = require("./src/main/data-template-service.cjs");
 const aiProviders = require("./src/main/ai-provider-service.cjs");
 const aiOrchestrator = require("./src/main/ai-orchestrator.cjs");
 const draftExport = require("./src/main/draft-export-service.cjs");
@@ -113,6 +115,11 @@ function registerIpc() {
   ));
 
   ipcMain.handle("engines:list", () => ({ ok: true, engines: engineRegistry.allEngines() }));
+  ipcMain.handle("data-slots:list", (_event, engineId, processKey) => safeResponse(
+    () => ({ ok: true, slots: dataTemplateRegistry.slotsForEngine(engineId, processKey || "") }),
+    "data-slots",
+    "list"
+  ));
   ipcMain.handle("editorial:capabilities", () => ({
     ok: true,
     apaProfile: apa7.PROFILE,
@@ -187,6 +194,38 @@ function registerIpc() {
     "data-imports",
     "list"
   ));
+  ipcMain.handle("data-imports:confirm", (_event, importId) => safeResponse(
+    () => ({ ok: true, dataImport: dataIngestion.confirmImport(userData(), importId) }),
+    "data-imports",
+    "confirm"
+  ));
+  ipcMain.handle("data-imports:discard", (_event, importId) => safeResponse(
+    () => ({ ok: true, result: dataIngestion.discardImport(userData(), importId) }),
+    "data-imports",
+    "discard"
+  ));
+  ipcMain.handle("data-template:download", async (_event, dossierId, engineId, datasetKey) => {
+    try {
+      const dossier = processHub.getDossier(userData(), dossierId);
+      if (!dossier) throw new Error("Proceso no válido.");
+      const slot = dataTemplateRegistry.slotForEngine(engineId, dossier.processKey, datasetKey);
+      if (!slot) throw new Error("Plantilla de datos no válida para este documento.");
+      const suggested = dataTemplateService.templateFileName(slot, dossier.periodLabel);
+      const selected = await dialog.showSaveDialog(mainWindow, {
+        title: "Descargar plantilla Excel",
+        defaultPath: suggested,
+        filters: [{ name: "Excel", extensions: ["xlsx"] }]
+      });
+      if (selected.canceled || !selected.filePath) return { ok: false, canceled: true };
+      const result = dataTemplateService.writeTemplate(selected.filePath, slot, {
+        processLabel: dossier.label,
+        periodLabel: dossier.periodLabel
+      });
+      return { ok: true, result };
+    } catch (error) {
+      return failure("data-template", "download", error);
+    }
+  });
   ipcMain.handle("knowledge:add", async (_event, dossierId, options) => {
     const selected = await dialog.showOpenDialog(mainWindow, {
       title: "Agregar fuente institucional",
