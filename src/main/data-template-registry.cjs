@@ -1,4 +1,5 @@
 const dataBindings = require("./document-data-binding-service.cjs");
+const engineRegistry = require("./document-engine-registry.cjs");
 
 const PROCESS_ENGINES = Object.freeze({
   formacion: Object.freeze(["form.deteccion", "form.plan", "form.informe", "form.seguimiento"]),
@@ -219,11 +220,12 @@ function bindingRequiredAny(engineId) {
 function genericSlot(processKey, engineId) {
   const fields = bindingFields(engineId);
   if (!fields.length) return null;
+  const engine = engineRegistry.getEngine(engineId);
   return {
     key: `${processKey}.${engineId}.datos`,
     processKey,
     introducedBy: engineId,
-    label: "Datos requeridos",
+    label: engine ? `Datos · ${engine.label}` : "Datos requeridos",
     description: "Plantilla estructurada para los datos requeridos por este documento.",
     requiredAny: bindingRequiredAny(engineId),
     fields
