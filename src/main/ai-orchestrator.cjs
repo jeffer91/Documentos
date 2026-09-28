@@ -1,6 +1,7 @@
 const hub = require("./process-hub-service.cjs");
 const ingestion = require("./data-ingestion-service.cjs");
 const dataBindings = require("./document-data-binding-service.cjs");
+const dataTemplates = require("./data-template-registry.cjs");
 const providers = require("./ai-provider-service.cjs");
 const registry = require("./document-engine-registry.cjs");
 const knowledge = require("./knowledge-source-service.cjs");
@@ -190,11 +191,17 @@ function syntheticFormationSlice(profile) {
 }
 
 function dataReadinessForSection(userDataPath, instance, section) {
+  const dossier = hub.getDossier(userDataPath, instance.dossierId);
+  const ownSlots = dataTemplates.ownSlots(instance.engineId, dossier && dossier.processKey || "");
+  const readyImports = ingestion.listImports(userDataPath, instance.dossierId)
+    .filter((item) => item.status === "ready" && (!ownSlots.length || ownSlots.some((slot) => slot.key === item.datasetKey)));
   const scopeOptions = {
     scopeType: instance.scopeType,
     scopeKey: instance.scopeKey,
     scopePolicy: "inclusive"
   };
+  if (readyImports.length) scopeOptions.importIds = readyImports.map((item) => item.id);
+
   const availability = ingestion.inspectDataAvailability(userDataPath, instance.dossierId, scopeOptions);
   const configuredQuery = section && section.data && section.data.query;
   const bindingConfig = section && section.data && section.data.binding
@@ -202,21 +209,38 @@ function dataReadinessForSection(userDataPath, instance, section) {
     : dataBindings.bindingFor(instance.engineId, section.key);
 
   if (instance.engineId === "form.deteccion" && bindingConfig) {
+    const real = dataBindings.resolveBinding(bindingConfig, instance, availability);
+    if (real.ready) {
+      real.availability = availability;
+      real.synthetic = false;
+      if (real.query) {
+        real.query = Object.assign({
+          scopeType: instance.scopeType,
+          scopeKey: instance.scopeKey,
+          scopePolicy: "inclusive",
+          importIds: readyImports.map((item) => item.id)
+        }, real.query);
+      }
+      return real;
+    }
+
     const profile = syntheticFormationProfile(userDataPath, instance.dossierId);
     return {
       bindingId: "synthetic:form.deteccion:" + section.key,
       requirement: bindingConfig.requirement || "recommended",
       mode: "aggregate",
-      status: profile ? "ready" : "missing_setup",
+      status: profile ? "ready" : (real.status || "missing_setup"),
       ready: Boolean(profile),
       query: null,
-      synthetic: true,
+      synthetic: Boolean(profile),
       availableFields: profile
         ? ["career", "totalTeachers", "thirdLevel", "masters", "doctorate", "fourthLevel", "needs", "priority", "priorityScore", "horizon"]
-        : [],
-      missingAll: profile ? [] : ["FORMACION_CARRERAS"],
-      missingAny: [],
-      warnings: profile ? [] : ["Selecciona las carreras del período para generar automáticamente la población docente estimada."],
+        : (real.availableFields || []),
+      missingAll: profile ? [] : (real.missingAll || ["FORMACION_CARRERAS"]),
+      missingAny: profile ? [] : (real.missingAny || []),
+      warnings: profile
+        ? ["Se usa el escenario estimado porque no hay un dataset real compatible para esta sección."]
+        : (real.warnings || ["Selecciona las carreras del período o carga datos compatibles."]),
       availability
     };
   }
@@ -232,7 +256,8 @@ function dataReadinessForSection(userDataPath, instance, section) {
         scopeType: instance.scopeType,
         scopeKey: instance.scopeKey,
         scopePolicy: "inclusive",
-        privacyMode: instance.scopeType === "student" ? "student_specific" : "aggregate"
+        privacyMode: instance.scopeType === "student" ? "student_specific" : "aggregate",
+        importIds: readyImports.map((item) => item.id)
       }, configuredQuery),
       availableFields: availability.availableFields,
       warnings: availability.hasImports ? [] : ["No hay Excel/CSV disponible para la consulta configurada."],
@@ -256,11 +281,13 @@ function dataReadinessForSection(userDataPath, instance, section) {
 
   const resolved = dataBindings.resolveBinding(bindingConfig, instance, availability);
   resolved.availability = availability;
+  resolved.synthetic = false;
   if (resolved.query) {
     resolved.query = Object.assign({
       scopeType: instance.scopeType,
       scopeKey: instance.scopeKey,
-      scopePolicy: "inclusive"
+      scopePolicy: "inclusive",
+      importIds: readyImports.map((item) => item.id)
     }, resolved.query);
   }
   return resolved;
@@ -286,7 +313,7 @@ function sectionDataContext(userDataPath, instance, section) {
 
   const dataReadiness = dataReadinessForSection(userDataPath, instance, section);
   let filteredData = null;
-  if (instance.engineId === "form.deteccion" && dataReadiness.ready) {
+  if (instance.engineId === "form.deteccion" && dataReadiness.ready && dataReadiness.synthetic) {
     filteredData = syntheticFormationSlice(syntheticFormationProfile(userDataPath, instance.dossierId));
   } else if (dataReadiness.ready && dataReadiness.query) {
     filteredData = ingestion.aiSlice(userDataPath, instance.dossierId, dataReadiness.query);
@@ -373,7 +400,7 @@ function writerPrompt(instance, engine, section, context) {
     context.period ? `Período institucional del proceso: ${context.period.label} (${context.period.code}). Todos los contenidos de este documento deben corresponder a ese período; no inventes ni cambies el período.` : "",
     "Si un dato es simulado o inferido, NO lo presentes como verificado: inclúyelo en alerts.",
     engine.engineId === "form.deteccion" && context.filteredData && context.filteredData.synthetic
-      ? "Para este documento, la aplicación ya generó un escenario estimado y determinístico de población docente a partir del período y las carreras. Usa exactamente esas cifras, porcentajes, necesidades y prioridades; no las recalcules ni las sustituyas. En la metodología aclara una sola vez que son estimaciones para planificación generadas por reglas, y no las atribuyas a encuestas, Talento Humano ni levantamientos que no existen."
+      ? "No existe un dataset real compatible para esta sección. La aplicación usa un escenario estimado y determinístico; identifícalo expresamente como estimación y no lo atribuyas a encuestas, Talento Humano ni levantamientos reales."
       : "",
     section.type === "executive_summary"
       ? `El resumen ejecutivo debe ser muy concreto, priorizar los hallazgos críticos y no superar aproximadamente ${section.maxWords || 600} palabras.`
