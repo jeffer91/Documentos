@@ -295,7 +295,10 @@ function importDataFile(userDataPath, dossierId, sourcePath, scope) {
   const workbook = XLSX.readFile(target, { cellDates: true });
   const profiles = [];
   const sheets = [];
-  workbook.SheetNames.forEach((sheetName) => {
+  const selectedSheetNames = slot
+    ? (workbook.SheetNames.includes("DATOS") ? ["DATOS"] : [workbook.SheetNames[0]].filter(Boolean))
+    : workbook.SheetNames;
+  selectedSheetNames.forEach((sheetName) => {
     const parsed = sheetRows(workbook, sheetName);
     const profile = profileSheet(parsed.headers, parsed.rows);
     profiles.push(Object.assign({ name: sheetName }, profile));
