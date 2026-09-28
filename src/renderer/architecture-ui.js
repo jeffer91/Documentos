@@ -2704,6 +2704,40 @@
         state.instanceStage = button.dataset.stage || "document";
         return renderInstance(state.instance.id);
       }
+      if (action === "download-data-template") return downloadDatasetTemplate(button.dataset.datasetKey);
+      if (action === "upload-data-slot") return uploadDataset(button.dataset.datasetKey);
+      if (action === "view-data-slot") {
+        await loadDatasetAnalyzer(button.dataset.datasetKey, { reset: true });
+        return renderInstance(state.instance.id);
+      }
+      if (action === "review-pending-data") {
+        const item = (state.imports || []).find((entry) => entry.id === button.dataset.id);
+        if (!item) return;
+        await confirmPendingDataset(item);
+        return renderInstance(state.instance.id);
+      }
+      if (action === "apply-data-analyzer") {
+        state.dataAnalyzer.search = String(document.getElementById("datasetSearch") && document.getElementById("datasetSearch").value || "").trim();
+        state.dataAnalyzer.filterField = String(document.getElementById("datasetFilterField") && document.getElementById("datasetFilterField").value || "");
+        state.dataAnalyzer.filterValue = String(document.getElementById("datasetFilterValue") && document.getElementById("datasetFilterValue").value || "").trim();
+        state.dataAnalyzer.sortBy = String(document.getElementById("datasetSortBy") && document.getElementById("datasetSortBy").value || "");
+        state.dataAnalyzer.sortDirection = String(document.getElementById("datasetSortDirection") && document.getElementById("datasetSortDirection").value || "asc");
+        state.dataAnalyzer.page = 0;
+        await loadDatasetAnalyzer(state.dataAnalyzer.datasetKey);
+        return renderInstance(state.instance.id);
+      }
+      if (action === "data-analyzer-prev" || action === "data-analyzer-next") {
+        const delta = action === "data-analyzer-next" ? 1 : -1;
+        state.dataAnalyzer.page = Math.max(0, Number(state.dataAnalyzer.page || 0) + delta);
+        await loadDatasetAnalyzer(state.dataAnalyzer.datasetKey);
+        return renderInstance(state.instance.id);
+      }
+      if (action === "close-data-analyzer") {
+        state.dataAnalyzer.datasetKey = "";
+        state.dataAnalyzer.result = null;
+        state.dataAnalyzer.summary = null;
+        return renderInstance(state.instance.id);
+      }
       if (action === "select-section") {
         clearTimeout(sectionSaveTimer);
         const saved = await persistCurrentEditor();
