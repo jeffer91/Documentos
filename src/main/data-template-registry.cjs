@@ -201,6 +201,21 @@ function bindingFields(engineId) {
   ];
 }
 
+function bindingRequiredAny(engineId) {
+  const groups = [];
+  (dataBindings.bindingsForEngine(engineId) || []).forEach((item) => {
+    (item.requiredAny || []).forEach((group) => {
+      const normalized = Array.from(new Set((group || []).map(String).filter(Boolean)));
+      if (!normalized.length) return;
+      const signature = normalized.slice().sort().join("|");
+      if (!groups.some((entry) => entry.signature === signature)) {
+        groups.push({ signature, fields: normalized });
+      }
+    });
+  });
+  return groups.map((entry) => entry.fields);
+}
+
 function genericSlot(processKey, engineId) {
   const fields = bindingFields(engineId);
   if (!fields.length) return null;
@@ -210,6 +225,7 @@ function genericSlot(processKey, engineId) {
     introducedBy: engineId,
     label: "Datos requeridos",
     description: "Plantilla estructurada para los datos requeridos por este documento.",
+    requiredAny: bindingRequiredAny(engineId),
     fields
   };
 }
@@ -265,6 +281,7 @@ module.exports = {
   EXPLICIT_SLOTS,
   labelForField,
   bindingFields,
+  bindingRequiredAny,
   processForEngine,
   ownSlots,
   slotsForEngine,
