@@ -208,6 +208,18 @@ function validationForSlot(slot, sheets) {
     if (!found) missingRequiredColumns.push(field.label);
   });
 
+  (slot.requiredAny || []).forEach((group) => {
+    const candidates = (group || []).flatMap((fieldKey) =>
+      [fieldKey, dataTemplates.labelForField(fieldKey)].concat(CANONICAL_FIELD_ALIASES[fieldKey] || [])
+    ).map(normalizeText).filter(Boolean);
+    const found = normalizedSheets.some((sheet) =>
+      sheet.headers.some((header) => candidates.includes(header.normalized))
+    );
+    if (!found) {
+      errors.push("Debe existir al menos una de estas columnas: " + (group || []).map(dataTemplates.labelForField).join(" / ") + ".");
+    }
+  });
+
   normalizedSheets.forEach((sheet) => {
     required.forEach((field) => {
       const candidates = [field.label, field.key]
