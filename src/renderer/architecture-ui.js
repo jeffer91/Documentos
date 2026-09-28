@@ -683,7 +683,7 @@
       const existing = await chooseExistingInstance(engine);
       if (existing === false) return;
       if (existing) {
-        state.instanceStage = "document";
+        state.instanceStage = "data";
         state.currentSectionKey = "";
         state.sectionRecommendations = {};
         return renderInstance(existing.id);
@@ -942,9 +942,7 @@
       key: scopeKey
     });
     if (!response || !response.ok) return toast(response && response.error || "No se pudo abrir el documento.");
-    state.instanceStage = engine.engineId === "form.deteccion" && !formationProfile()
-      ? "preparation"
-      : "document";
+    state.instanceStage = "data";
     state.currentSectionKey = "";
     state.sectionRecommendations = {};
     await renderInstance(response.instance.id);
@@ -1580,7 +1578,7 @@
           </div>
           ${activeProviders ? "" : '<div class="notice-warn"><b>Falta una IA activa</b><span>Configura un proveedor de IA para redactar el documento. La población estimada ya quedó guardada.</span></div>'}
         </section>
-      ` : '<div class="notice-warn"><b>Falta seleccionar carreras</b><span>El documento no requiere Excel ni una plantilla Word. Selecciona las carreras para crear automáticamente el diagnóstico base.</span></div>'}
+      ` : '<div class="notice-warn"><b>Sin escenario estimado</b><span>Si no cargas datos reales desde la pestaña Datos, puedes seleccionar las carreras aquí para generar un escenario estimado de planificación.</span></div>'}
     </div>`;
   }
 
@@ -2770,7 +2768,7 @@
           const saved = await persistCurrentEditor();
           if (!saved) return;
         }
-        state.instanceStage = "document";
+        state.instanceStage = "data";
         return openProcessEngine(engine, state.dossier.id);
       }
       if (action === "new-process-period") {
