@@ -1123,12 +1123,14 @@
         <div class="arch-data-row">
           <div>
             <b>${escapeHtml(item.sourceName)}</b>
-            <small>${Number(profile.totalRows || 0)} filas · ${sheets.length} hoja(s) · alcance: ${escapeHtml(item.scopeType || "dossier")}${item.scopeKey ? " / " + escapeHtml(item.scopeKey) : ""}</small>
-            <small class="${mapped ? "arch-ok-text" : "arch-warn-text"}">Mapeo canónico: ${mapped ? mapped + " campo(s)" : "pendiente"} · SHA-256 ${escapeHtml(String(item.sha256 || "").slice(0, 12))}…</small>
+            <small>${Number(profile.totalRows || 0)} filas · ${sheets.length} hoja(s)${item.datasetKey ? " · dataset del proceso" : " · alcance: " + escapeHtml(item.scopeType || "dossier") + (item.scopeKey ? " / " + escapeHtml(item.scopeKey) : "")}</small>
+            <small class="${mapped ? "arch-ok-text" : "arch-warn-text"}">${item.datasetKey ? "Estructura validada" : "Mapeo canónico: " + (mapped ? mapped + " campo(s)" : "pendiente")} · SHA-256 ${escapeHtml(String(item.sha256 || "").slice(0, 12))}…</small>
           </div>
           <div class="button-row">
-            <button class="ghost small-inline" data-arch-action="suggest-mapping" data-id="${escapeHtml(item.id)}">Sugerir</button>
-            <button class="secondary small-inline" data-arch-action="edit-mapping" data-id="${escapeHtml(item.id)}">Mapeo</button>
+            ${item.datasetKey
+              ? `<span class="status ${item.status === "ready" ? "good" : "warn"}">${item.status === "ready" ? "Confirmado" : "Pendiente"}</span>`
+              : `<button class="ghost small-inline" data-arch-action="suggest-mapping" data-id="${escapeHtml(item.id)}">Sugerir</button>
+                 <button class="secondary small-inline" data-arch-action="edit-mapping" data-id="${escapeHtml(item.id)}">Mapeo</button>`}
           </div>
         </div>
       `;
@@ -1239,8 +1241,8 @@
         </section>
         <section class="panel compact">
           <div class="panel-title">
-            <div><h3>Excel / CSV</h3><small>Se conserva el original y una copia normalizada.</small></div>
-            <button class="secondary small-inline" data-arch-action="add-data-import">+ Archivo</button>
+            <div><h3>Excel / CSV</h3><small>${isManagedProcess() ? "Los archivos se administran desde la pestaña Datos de cada documento para evitar mezclar datasets." : "Se conserva el original y una copia normalizada."}</small></div>
+            ${isManagedProcess() ? "" : '<button class="secondary small-inline" data-arch-action="add-data-import">+ Archivo</button>'}
           </div>
           ${importsHtml()}
         </section>
