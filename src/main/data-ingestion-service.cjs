@@ -5,6 +5,7 @@ const XLSX = require("xlsx");
 const { workspaceRoot } = require("./database-service.cjs");
 const { sha256 } = require("./file-integrity-service.cjs");
 const hub = require("./process-hub-service.cjs");
+const dataTemplates = require("./data-template-registry.cjs");
 
 const MAX_UI_ROWS = 5000;
 const DEFAULT_UI_ROWS = 500;
@@ -171,6 +172,86 @@ function profileSheet(headers, rows) {
   return { rowCount: rows.length, columnCount: headers.length, columns };
 }
 
+function validationForSlot(slot, sheets) {
+  if (!slot) {
+    return {
+      ok: true,
+      errors: [],
+      warnings: ["El archivo no está vinculado a una plantilla de datos específica."],
+      totalRows: (sheets || []).reduce((sum, item) => sum + Number(item.rows && item.rows.length || 0), 0),
+      sheetCount: (sheets || []).length,
+      missingRequiredColumns: [],
+      emptyRequiredCells: 0
+    };
+  }
+
+  const required = (slot.fields || []).filter((field) => field.required);
+  const errors = [];
+  const warnings = [];
+  const missingRequiredColumns = [];
+  let emptyRequiredCells = 0;
+
+  const normalizedSheets = (sheets || []).map((sheet) => ({
+    name: sheet.name,
+    headers: (sheet.headers || []).map((header) => ({ raw: header, normalized: normalizeText(header) })),
+    rows: sheet.rows || []
+  }));
+
+  required.forEach((field) => {
+    const candidates = [field.label, field.key]
+      .concat(CANONICAL_FIELD_ALIASES[field.key] || [])
+      .map(normalizeText)
+      .filter(Boolean);
+    const found = normalizedSheets.some((sheet) =>
+      sheet.headers.some((header) => candidates.includes(header.normalized))
+    );
+    if (!found) missingRequiredColumns.push(field.label);
+  });
+
+  normalizedSheets.forEach((sheet) => {
+    required.forEach((field) => {
+      const candidates = [field.label, field.key]
+        .concat(CANONICAL_FIELD_ALIASES[field.key] || [])
+        .map(normalizeText)
+        .filter(Boolean);
+      const header = sheet.headers.find((item) => candidates.includes(item.normalized));
+      if (!header) return;
+      sheet.rows.forEach((row) => {
+        const value = row[header.raw];
+        if (value == null || String(value).trim() === "") emptyRequiredCells += 1;
+      });
+    });
+  });
+
+  if (missingRequiredColumns.length) {
+    errors.push("Faltan columnas obligatorias: " + missingRequiredColumns.join(", ") + ".");
+  }
+  if (emptyRequiredCells) {
+    warnings.push(`${emptyRequiredCells} celda(s) obligatoria(s) están vacías.`);
+  }
+
+  const totalRows = normalizedSheets.reduce((sum, item) => sum + item.rows.length, 0);
+  if (!totalRows) errors.push("La plantilla no contiene registros de datos.");
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    totalRows,
+    sheetCount: normalizedSheets.length,
+    missingRequiredColumns,
+    emptyRequiredCells
+  };
+}
+
+function removeImportFiles(localPath) {
+  if (!localPath) return;
+  try {
+    const dir = path.dirname(localPath);
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  } catch (_error) { /* limpieza de archivos: no bloquear la confirmación */ }
+}
+
 function importDataFile(userDataPath, dossierId, sourcePath, scope) {
   const db = hub.dbFor(userDataPath);
   const dossier = hub.getDossier(userDataPath, dossierId);
@@ -181,19 +262,27 @@ function importDataFile(userDataPath, dossierId, sourcePath, scope) {
 
   const scopeType = String(scope && scope.type || "dossier");
   const scopeKey = String(scope && scope.key || "");
+  const datasetKey = String(scope && scope.datasetKey || "");
+  const engineId = String(scope && scope.engineId || "");
+  const slot = datasetKey && engineId
+    ? dataTemplates.slotForEngine(engineId, dossier.processKey, datasetKey)
+    : null;
+  if (datasetKey && !slot) throw new Error("La entrada de datos no pertenece a este documento o proceso.");
+
   const sourceHash = sha256(sourcePath);
   const duplicate = db.prepare(`
     SELECT id FROM data_imports_v3
-    WHERE dossier_id = ? AND sha256 = ? AND scope_type = ? AND scope_key = ? AND status = 'ready'
+    WHERE dossier_id = ? AND sha256 = ? AND scope_type = ? AND scope_key = ?
+      AND dataset_key = ? AND status = 'ready'
     ORDER BY created_at DESC LIMIT 1
-  `).get(dossierId, sourceHash, scopeType, scopeKey);
+  `).get(dossierId, sourceHash, scopeType, scopeKey, datasetKey);
   if (duplicate) {
     hub.audit(db, {
       dossierId,
       entityType: "data_import",
       entityId: duplicate.id,
       action: "duplicate_ignored",
-      detail: { sourceName: path.basename(sourcePath), sha256: sourceHash, scopeType, scopeKey }
+      detail: { sourceName: path.basename(sourcePath), sha256: sourceHash, scopeType, scopeKey, datasetKey }
     });
     return Object.assign({}, getImport(userDataPath, duplicate.id), { duplicateIgnored: true });
   }
@@ -213,20 +302,30 @@ function importDataFile(userDataPath, dossierId, sourcePath, scope) {
     sheets.push({ name: sheetName, headers: parsed.headers, rows: parsed.rows });
   });
 
+  const validation = validationForSlot(slot, sheets);
   const ts = now();
+  const pending = Boolean(datasetKey);
+  const mapping = slot ? dataTemplates.templateMapping(slot) : {};
   db.prepare(`
     INSERT INTO data_imports_v3
-      (id, dossier_id, scope_type, scope_key, source_name, local_path, sha256, status, profile_json, mapping_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, '{}', ?, ?)
+      (id, dossier_id, scope_type, scope_key, dataset_key, engine_id, source_name, local_path, sha256,
+       status, profile_json, mapping_json, validation_json, confirmed_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     importId,
     dossierId,
     scopeType,
     scopeKey,
+    datasetKey,
+    engineId,
     path.basename(sourcePath),
     target,
     sourceHash,
+    pending ? "pending_review" : "ready",
     JSON.stringify({ sheets: profiles, totalRows: profiles.reduce((sum, item) => sum + item.rowCount, 0) }),
+    JSON.stringify(mapping),
+    JSON.stringify(validation),
+    pending ? null : ts,
     ts,
     ts
   );
@@ -252,17 +351,87 @@ function importDataFile(userDataPath, dossierId, sourcePath, scope) {
     dossierId,
     entityType: "data_import",
     entityId: importId,
-    action: "import",
+    action: pending ? "pending_review" : "import",
     detail: {
       sourceName: path.basename(sourcePath),
       sha256: sourceHash,
       scopeType,
       scopeKey,
-      sheets: profiles
+      datasetKey,
+      engineId,
+      validation
     }
   });
-  hub.markDossierStale(userDataPath, dossierId, `Se importaron datos nuevos: ${path.basename(sourcePath)}`);
+
+  if (!pending) hub.markDossierStale(userDataPath, dossierId, `Se importaron datos nuevos: ${path.basename(sourcePath)}`);
   return getImport(userDataPath, importId);
+}
+
+function confirmImport(userDataPath, importId) {
+  const db = hub.dbFor(userDataPath);
+  const pending = db.prepare("SELECT * FROM data_imports_v3 WHERE id = ?").get(importId);
+  if (!pending) throw new Error("Importación no encontrada.");
+  if (pending.status === "ready") return getImport(userDataPath, importId);
+  if (pending.status !== "pending_review") throw new Error("La importación no está pendiente de confirmación.");
+
+  let validation = {};
+  try { validation = JSON.parse(pending.validation_json || "{}"); } catch (_error) { validation = {}; }
+  if (validation.ok === false) {
+    throw new Error((validation.errors || []).join(" | ") || "El archivo no supera la validación.");
+  }
+
+  const oldRows = pending.dataset_key
+    ? db.prepare(`
+        SELECT id, local_path FROM data_imports_v3
+        WHERE dossier_id = ? AND dataset_key = ? AND status = 'ready' AND id <> ?
+      `).all(pending.dossier_id, pending.dataset_key, importId)
+    : [];
+
+  const ts = now();
+  const transaction = db.transaction(() => {
+    oldRows.forEach((row) => {
+      db.prepare("DELETE FROM data_imports_v3 WHERE id = ?").run(row.id);
+    });
+    db.prepare(`
+      UPDATE data_imports_v3
+      SET status = 'ready', confirmed_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(ts, ts, importId);
+  });
+  transaction();
+  oldRows.forEach((row) => removeImportFiles(row.local_path));
+
+  hub.audit(db, {
+    dossierId: pending.dossier_id,
+    entityType: "data_import",
+    entityId: importId,
+    action: oldRows.length ? "confirm_replace" : "confirm",
+    detail: {
+      datasetKey: pending.dataset_key || "",
+      sourceName: pending.source_name,
+      replacedImportCount: oldRows.length,
+      validation
+    }
+  });
+  hub.markDossierStale(userDataPath, pending.dossier_id, `Se actualizaron los datos ${pending.dataset_key || pending.source_name}`);
+  return getImport(userDataPath, importId);
+}
+
+function discardImport(userDataPath, importId) {
+  const db = hub.dbFor(userDataPath);
+  const row = db.prepare("SELECT * FROM data_imports_v3 WHERE id = ?").get(importId);
+  if (!row) return { discarded: false };
+  if (row.status === "ready") throw new Error("Los datos confirmados no se descartan desde la revisión de carga.");
+  db.prepare("DELETE FROM data_imports_v3 WHERE id = ?").run(importId);
+  removeImportFiles(row.local_path);
+  hub.audit(db, {
+    dossierId: row.dossier_id,
+    entityType: "data_import",
+    entityId: importId,
+    action: "discard",
+    detail: { datasetKey: row.dataset_key || "", sourceName: row.source_name }
+  });
+  return { discarded: true, importId };
 }
 
 function getImport(userDataPath, importId) {
@@ -274,12 +443,16 @@ function getImport(userDataPath, importId) {
     dossierId: row.dossier_id,
     scopeType: row.scope_type,
     scopeKey: row.scope_key,
+    datasetKey: row.dataset_key || "",
+    engineId: row.engine_id || "",
     sourceName: row.source_name,
     localPath: row.local_path,
     sha256: row.sha256,
     status: row.status,
     profile: JSON.parse(row.profile_json || "{}"),
     mapping: JSON.parse(row.mapping_json || "{}"),
+    validation: (() => { try { return JSON.parse(row.validation_json || "{}"); } catch (_error) { return {}; } })(),
+    confirmedAt: row.confirmed_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -468,7 +641,12 @@ function selectedImports(db, dossierId, options) {
   const ids = options && Array.isArray(options.importIds) && options.importIds.length
     ? new Set(options.importIds.map(String))
     : null;
-  return all.filter((row) => (!ids || ids.has(String(row.id))) && importMatchesScope(row, options || {}));
+  const datasetKey = String(options && options.datasetKey || "");
+  return all.filter((row) =>
+    (!ids || ids.has(String(row.id))) &&
+    (!datasetKey || String(row.dataset_key || "") === datasetKey) &&
+    importMatchesScope(row, options || {})
+  );
 }
 
 function canonicalFieldsForSheet(mapping, sheetName, headers) {
@@ -514,6 +692,7 @@ function inspectDataAvailability(userDataPath, dossierId, options) {
     importDetails.push({
       importId: importRow.id,
       sourceName: importRow.source_name,
+      datasetKey: importRow.dataset_key || "",
       sha256: importRow.sha256,
       scopeType: importRow.scope_type,
       scopeKey: importRow.scope_key,
@@ -659,16 +838,43 @@ function validateQueryFields(rows, input) {
   return { ok: true, missing: [], available: Array.from(available) };
 }
 
+function rowMatchesSearch(row, search) {
+  const needle = normalizeText(search);
+  if (!needle) return true;
+  return Object.entries(row || {}).some(([key, value]) =>
+    !String(key).startsWith("__") && normalizeText(value).includes(needle)
+  );
+}
+
+function sortRows(rows, sortBy, sortDirection) {
+  const field = String(sortBy || "");
+  if (!field) return rows;
+  const direction = String(sortDirection || "asc").toLowerCase() === "desc" ? -1 : 1;
+  return rows.slice().sort((a, b) => {
+    const leftNumber = numericValue(a[field]);
+    const rightNumber = numericValue(b[field]);
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+      return (leftNumber - rightNumber) * direction;
+    }
+    return String(a[field] == null ? "" : a[field]).localeCompare(
+      String(b[field] == null ? "" : b[field]),
+      "es",
+      { numeric: true, sensitivity: "base" }
+    ) * direction;
+  });
+}
+
 function filteredRows(userDataPath, dossierId, query) {
   const input = query || {};
   const sourceRows = allRows(userDataPath, dossierId, input);
   validateQueryFields(sourceRows, input);
-  const filtered = sourceRows.filter((row) => rowMatches(row, input));
-  const rows = distinctRows(filtered, input.distinctBy);
+  const filtered = sourceRows.filter((row) => rowMatches(row, input) && rowMatchesSearch(row, input.search));
+  const distinct = distinctRows(filtered, input.distinctBy);
+  const rows = sortRows(distinct, input.sortBy, input.sortDirection);
   return {
     sourceRows: sourceRows.length,
     beforeDistinct: filtered.length,
-    duplicateRowsRemoved: filtered.length - rows.length,
+    duplicateRowsRemoved: filtered.length - distinct.length,
     inputSourceTrace: sourceTrace(sourceRows, false),
     rows
   };
@@ -724,6 +930,7 @@ function sourceTrace(rows, includeMatchedCounts) {
     const trace = {
       importId: item.importId,
       sourceName: item.sourceName,
+      datasetKey: item.datasetKey || "",
       sha256: item.sha256,
       mappingHash: item.mappingHash,
       scopeType: item.scopeType,
@@ -744,12 +951,20 @@ function queryData(userDataPath, dossierId, query) {
   const filtered = filteredRows(userDataPath, dossierId, input);
   const total = filtered.rows.length;
   const limit = Math.max(1, Math.min(Number(input.limit || DEFAULT_UI_ROWS), MAX_UI_ROWS));
-  const pageRows = filtered.rows.slice(0, limit).map((row) => projectRow(row, input.select, input.includeProvenance === true));
+  const offset = Math.max(0, Number(input.offset || 0));
+  const pageRows = filtered.rows.slice(offset, offset + limit)
+    .map((row) => projectRow(row, input.select, input.includeProvenance === true));
+  const fields = filtered.rows.length
+    ? Object.keys(filtered.rows[0]).filter((key) => !key.startsWith("__"))
+    : [];
   return {
     total,
+    offset,
+    limit,
     returnedRows: pageRows.length,
     rows: pageRows,
-    truncated: total > limit,
+    fields,
+    truncated: offset + pageRows.length < total,
     sourceRows: filtered.sourceRows,
     duplicateRowsRemoved: filtered.duplicateRowsRemoved,
     inputSourceTrace: filtered.inputSourceTrace,
@@ -866,6 +1081,10 @@ function summarize(userDataPath, dossierId, query) {
     })),
     requestedImportIds: input.importIds || [],
     requestedSheets: input.sheet || [],
+    datasetKey: input.datasetKey || "",
+    search: input.search || "",
+    sortBy: input.sortBy || "",
+    sortDirection: input.sortDirection || "asc",
     scopeType: input.scopeType || "",
     scopeKey: input.scopeKey || "",
     scopePolicy: input.scopePolicy || "inclusive",
@@ -995,6 +1214,8 @@ module.exports = {
   normalizeText,
   numericValue,
   importDataFile,
+  confirmImport,
+  discardImport,
   getImport,
   listImports,
   validateMapping,
