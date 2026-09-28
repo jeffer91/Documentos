@@ -346,6 +346,78 @@ function processWorkspaceCheck() {
   };
 }
 
+function datasetArchitectureCheck() {
+  const ingestion = fs.readFileSync(path.join(ROOT, "src/main/data-ingestion-service.cjs"), "utf8");
+  const hub = fs.readFileSync(path.join(ROOT, "src/main/process-hub-service.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "main.cjs"), "utf8");
+  const preload = fs.readFileSync(path.join(ROOT, "preload.cjs"), "utf8");
+  const renderer = fs.readFileSync(path.join(ROOT, "src/renderer/architecture-ui.js"), "utf8");
+  const templateService = fs.readFileSync(path.join(ROOT, "src/main/data-template-service.cjs"), "utf8");
+  const templates = require(path.join(ROOT, "src/main/data-template-registry.cjs"));
+  const registry = require(path.join(ROOT, "src/main/document-engine-registry.cjs"));
+  const bindings = require(path.join(ROOT, "src/main/document-data-binding-service.cjs"));
+
+  const enginesWithStructuredData = registry.allEngines()
+    .filter((engine) => (bindings.bindingsForEngine(engine.engineId) || []).length > 0);
+
+  return {
+    slotsCoverStructuredEngines: enginesWithStructuredData.every((engine) => {
+      const processKey = templates.processForEngine(engine.engineId, "");
+      return Boolean(processKey && templates.ownSlots(engine.engineId, processKey).length);
+    }),
+    formationAccumulates:
+      templates.slotsForEngine("form.deteccion", "formacion").length === 2 &&
+      templates.slotsForEngine("form.plan", "formacion").length >= 3 &&
+      templates.slotsForEngine("form.informe", "formacion").length >= 4 &&
+      templates.slotsForEngine("form.seguimiento", "formacion").length >= 5,
+    excelTemplates:
+      templateService.includes('XLSX.writeFile') &&
+      templateService.includes('"DATOS"') &&
+      templateService.includes('"INSTRUCCIONES"'),
+    reviewBeforeReady:
+      ingestion.includes('"pending_review"') &&
+      ingestion.includes("function confirmImport") &&
+      ingestion.includes("function discardImport") &&
+      ingestion.includes("validationForSlot"),
+    replaceNotVersion:
+      ingestion.includes("DELETE FROM data_imports_v3 WHERE id = ?") &&
+      ingestion.includes('"confirm_replace"') &&
+      ingestion.includes("removeImportFiles"),
+    datasetIsolation:
+      ingestion.includes("datasetKey") &&
+      ingestion.includes("datasetKeys") &&
+      hub.includes('"dataset_key"') &&
+      hub.includes("idx_data_imports_v3_dataset"),
+    preAnalyzerBackend:
+      ingestion.includes("function queryData") &&
+      ingestion.includes("function summarize") &&
+      ingestion.includes("input.offset") &&
+      ingestion.includes("input.sortBy") &&
+      ingestion.includes("input.search"),
+    preAnalyzerUi:
+      renderer.includes("function dataStageMarkup") &&
+      renderer.includes("function datasetAnalyzerMarkup") &&
+      renderer.includes('data-arch-action="download-data-template"') &&
+      renderer.includes('data-arch-action="upload-data-slot"') &&
+      renderer.includes('data-arch-action="view-data-slot"') &&
+      renderer.includes('["data", "Datos"]'),
+    ipcComplete:
+      main.includes('"data-slots:list"') &&
+      main.includes('"data-template:download"') &&
+      main.includes('"data-imports:confirm"') &&
+      main.includes('"data-imports:discard"') &&
+      preload.includes("listDataSlots:") &&
+      preload.includes("downloadDataTemplate:") &&
+      preload.includes("confirmDataImport:") &&
+      preload.includes("discardDataImport:"),
+    finalDataManifest:
+      hub.includes("function dataSourceManifest") &&
+      hub.includes("dataSources: dataSourceManifest"),
+    noPromptExchange:
+      !renderer.toLowerCase().includes("copiar prompt")
+  };
+}
+
 function legacyExternalOnlyCheck() {
   const legacySource = fs.readFileSync(path.join(ROOT, "src/main/legacy-migration-service.cjs"), "utf8");
   const templateSource = fs.readFileSync(path.join(ROOT, "src/main/template-service.cjs"), "utf8");
@@ -1584,6 +1656,27 @@ function main() {
     }
   } catch (error) {
     errors.push(`No se pudo validar el flujo exclusivo de IA externa: ${error.message}`);
+  }
+
+  try {
+    const datasets = datasetArchitectureCheck();
+    if (
+      !datasets.slotsCoverStructuredEngines ||
+      !datasets.formationAccumulates ||
+      !datasets.excelTemplates ||
+      !datasets.reviewBeforeReady ||
+      !datasets.replaceNotVersion ||
+      !datasets.datasetIsolation ||
+      !datasets.preAnalyzerBackend ||
+      !datasets.preAnalyzerUi ||
+      !datasets.ipcComplete ||
+      !datasets.finalDataManifest ||
+      !datasets.noPromptExchange
+    ) {
+      errors.push("La arquitectura de datasets/Excel no superó la validación interna: " + JSON.stringify(datasets));
+    }
+  } catch (error) {
+    errors.push(`No se pudo validar la arquitectura de datasets/Excel: ${error.message}`);
   }
 
   try {
