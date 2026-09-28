@@ -917,7 +917,7 @@ function draftFinalAlertCheck() {
     finalHidesAlerts:
       apaSource.includes("opts.includeAlerts !== false && !opts.final") &&
       renderer.includes("finalFrozenAt") &&
-      renderer.includes("no forman parte de la versión final visible"),
+      renderer.includes("Sin alertas visibles."),
     workingCopy:
       hubSource.includes("copiedAlertCount") &&
       hubSource.includes("alerts: sectionItem.alerts")

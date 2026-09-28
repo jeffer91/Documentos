@@ -2121,3 +2121,29 @@ button.home-result-row.home-result-process { grid-template-columns: 45px minmax(
   .dataset-analyzer-head,
   .dataset-pagination { align-items: stretch; flex-direction: column; }
 }
+
+/* Compact process workspace: keep all five stages on one row. */
+.process-workspace-overview { gap: 9px; margin-bottom: 10px; padding: 12px; border-radius: 12px; box-shadow: none; }
+.process-workspace-top { gap: 12px; align-items: center; }
+.process-workspace-top h2 { font-size: 18px; }
+.process-period-control { gap: 3px; }
+.process-period-row select { min-height: 34px; padding-top: 5px; padding-bottom: 5px; }
+.process-document-grid { gap: 6px; }
+.process-document-card { grid-template-columns: 24px minmax(0, 1fr); gap: 3px 7px; padding: 8px; border-radius: 9px; }
+.process-document-step { width: 24px; height: 24px; }
+.compact-document-head { padding: 10px 12px; gap: 12px; margin-bottom: 8px; align-items: center; border-radius: 12px; }
+.compact-document-head h2 { font-size: 17px; margin: 0 0 3px; }
+.document-head-actions { flex-wrap: wrap; }
+.instance-stage-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 3px; margin-bottom: 10px; }
+.instance-stage-tabs button { min-height: 32px; }
+.instance-stage-tabs button span { width: 19px; height: 19px; }
+.instance-data-stage { gap: 8px; }
+.instance-data-stage .section-head { margin-bottom: 0; }
+.instance-data-stage .section-head h2 { font-size: 16px; margin: 0; }
+.instance-data-stage .section-head p { margin: 3px 0 0; }
+.dataset-slot-card { padding: 10px; gap: 7px; border-radius: 10px; }
+@media (max-width: 760px) {
+  .compact-document-head { flex-direction: column; align-items: stretch; }
+  .document-head-actions { justify-content: flex-start; }
+  .instance-stage-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

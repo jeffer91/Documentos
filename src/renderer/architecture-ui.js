@@ -581,11 +581,10 @@
     }[engine.cardinality] || "";
     return `
       <button class="process-document-card ${active ? "active" : ""}" type="button"
-        data-arch-action="process-document" data-engine-id="${escapeHtml(engine.engineId)}">
+        title="${escapeHtml(engine.label)}" data-arch-action="process-document" data-engine-id="${escapeHtml(engine.engineId)}">
         <span class="process-document-step">${index + 1}</span>
         <span class="process-document-copy">
-          <b>${escapeHtml(engine.label)}</b>
-          <small>${active ? "Documento abierto" : stateLabel}${cardinalityLabel ? " · " + cardinalityLabel : ""}</small>
+          <b>${escapeHtml(({ "form.deteccion": "Detección de necesidades", "form.plan": "Plan de formación", "form.informe": "Informe de cumplimiento", "form.seguimiento": "Seguimiento" })[engine.engineId] || engine.label)}</b>
         </span>
         <span class="status ${stateClass}">${matches.length ? (instance && instance.finalFrozenAt ? "Final" : "Activo") : "Pendiente"}</span>
       </button>
@@ -600,12 +599,10 @@
       <section class="process-workspace-overview">
         <div class="process-workspace-top">
           <div>
-            <span class="process-workspace-kicker">Proceso</span>
             <h2>${escapeHtml(config.label)}</h2>
-            <p>El período y los datos compartidos se mantienen fijos mientras trabajas en los documentos de este proceso.</p>
           </div>
           <div class="process-period-control">
-            <label for="managedProcessPeriod">Período de trabajo</label>
+            <label for="managedProcessPeriod">Período</label>
             <div class="process-period-row">
               <select id="managedProcessPeriod" data-process-period-select>
                 ${processPeriodOptionsMarkup()}
@@ -1792,7 +1789,7 @@
 
     return `<div class="instance-data-stage">
       <div class="section-head">
-        <div><h2>Datos del proceso</h2><p>Descarga la plantilla correspondiente, cárgala y confírmala. Los datos confirmados se reutilizan durante todo el mismo período y proceso.</p></div>
+        <div><h2>Datos del proceso</h2><p>Carga y confirma tus Excel. Se comparten en este período.</p></div>
       </div>
       <div class="dataset-slot-grid">
         ${slots.map((slot) => {
@@ -1801,16 +1798,15 @@
           const status = ready ? "Guardado" : pending ? "Pendiente" : "Sin cargar";
           const statusClass = ready ? "good" : pending ? "warn" : "";
           return `
-            <article class="dataset-slot-card">
+            <article class="dataset-slot-card" title="${escapeHtml(slot.description || "")}">
               <div class="arch-card-head">
                 <div>
                   <b>${escapeHtml(slot.label)}</b>
-                  <small>${escapeHtml(slot.description || "")}</small>
                 </div>
                 <span class="status ${statusClass}">${status}</span>
               </div>
               <div class="dataset-slot-meta">
-                <span>${slot.inherited ? "Heredado del proceso" : "Datos de este documento"}</span>
+                <span>${slot.inherited ? "Compartido" : "Propio"}</span>
                 ${ready ? `<span>${Number(ready.profile && ready.profile.totalRows || 0)} registros · ${escapeHtml(ready.sourceName)}</span>` : ""}
               </div>
               <div class="button-row">
@@ -1870,11 +1866,11 @@
   function outputStageMarkup() {
     return `<div class="instance-output">
       <div class="output-choice">
-        <div><h3>Borrador</h3><p>Puedes generar Word/PDF en cualquier momento. Incluye alertas de revisión cuando existan.</p></div>
-        <button class="ghost" type="button" data-arch-action="export-draft">Generar borrador Word + PDF</button>
+        <div><h3>Borrador</h3><p>Word y PDF, sin aprobar secciones. Incluye alertas.</p></div>
+        <button class="ghost" type="button" data-arch-action="export-draft">Descargar Word + PDF</button>
       </div>
       <div class="output-choice">
-        <div><h3>Versión final</h3><p>Solo puede cerrarse cuando todas las secciones obligatorias estén aprobadas y los controles finales sean válidos. Las alertas quedan en la trazabilidad interna y no forman parte de la versión final visible.</p></div>
+        <div><h3>Versión final</h3><p>Requiere secciones aprobadas y controles completos. Sin alertas visibles.</p></div>
         ${state.instance.finalFrozenAt
           ? '<div class="button-row"><button class="secondary" type="button" data-arch-action="export-final">Exportar final Word + PDF</button><button class="ghost" type="button" data-arch-action="working-copy">Nueva versión de trabajo</button></div>'
           : '<button class="secondary" type="button" data-arch-action="freeze-final">Aprobar y congelar versión final</button>'}
@@ -1923,12 +1919,12 @@
       ${state.instance.stale ? `<div class="notice-warn"><b>Datos actualizados</b><span>${escapeHtml(state.instance.staleReason)}. Revisa las secciones afectadas.</span></div>` : ""}
       <div class="arch-dossier-head compact-document-head">
         <div>
-          <span class="process-code">${isManagedProcess() ? "Documento del proceso" : escapeHtml(state.instance.engineId) + " · v" + escapeHtml(state.instance.engineVersion)}</span>
           <h2>${escapeHtml(state.instance.label)}</h2>
-          <p>${escapeHtml(state.dossier && state.dossier.periodLabel || "")} · ${approved}/${required.length} secciones obligatorias aprobadas${alerts ? " · " + alerts + " alerta(s)" : ""}</p>
+          <p>${approved}/${required.length} aprobadas${alerts ? " · " + alerts + " alerta(s)" : ""}</p>
         </div>
         <div class="button-row document-head-actions">
-          <button class="ghost small-inline" type="button" data-arch-action="export-draft">Descargar borrador</button>
+          ${state.instance.finalFrozenAt ? "" : '<button class="primary small-inline" type="button" data-arch-action="generate-document">Generar borrador</button>'}
+          <button class="ghost small-inline" type="button" data-arch-action="export-draft" title="Descargar el contenido actual en Word y PDF">Descargar</button>
           <span class="status ${state.instance.status === "final" ? "good" : ""}">${state.instance.status === "final" ? "Final congelada" : "Borrador"}</span>
         </div>
       </div>
@@ -2598,14 +2594,27 @@
   }
 
   async function generateDocument() {
+    clearTimeout(sectionSaveTimer);
+    if (!await persistCurrentEditor()) return;
+    if (!(state.providers || []).some((provider) => provider.enabled)) {
+      return toast("Configura un proveedor en IA automática para generar el borrador.");
+    }
     setBusy(true);
-    const response = state.instance.stale
-      ? await api.regenerateStaleDocument(state.instance.id, { reviewers: 2, continueOnError: true })
-      : await api.generateEngineDocument(state.instance.id, { reviewers: 2, continueOnError: true });
-    setBusy(false);
-    if (!response || !response.ok) return toast(response && response.error || "No se pudo generar el documento.");
+    const trigger = document.querySelector('[data-arch-action="generate-document"]');
+    if (trigger) trigger.textContent = "Generando…";
+    let response;
+    try {
+      response = state.instance.stale
+        ? await api.regenerateStaleDocument(state.instance.id, { reviewers: 2, continueOnError: true })
+        : await api.generateEngineDocument(state.instance.id, { reviewers: 2, continueOnError: true });
+    } finally {
+      setBusy(false);
+      if (trigger) trigger.textContent = "Generar borrador";
+    }
+    if (!response || !response.ok) return toast(response && response.error || "No se pudo generar el borrador.");
     state.instance = response.instance;
     state.generationRun = response.generationRun || state.instance.generationRun || null;
+    state.instanceStage = "document";
     toast(generationMessage(state.generationRun));
     await renderInstance(state.instance.id);
   }
@@ -2629,9 +2638,15 @@
   }
 
   async function exportDocument(options) {
+    clearTimeout(sectionSaveTimer);
+    if (!await persistCurrentEditor()) return;
     setBusy(true);
-    const response = await api.exportEngineDocument(state.instance.id, options || {});
-    setBusy(false);
+    let response;
+    try {
+      response = await api.exportEngineDocument(state.instance.id, options || {});
+    } finally {
+      setBusy(false);
+    }
     if (!response) return toast("No se pudo exportar.");
     if (!response.ok) {
       const result = response.result || {};
