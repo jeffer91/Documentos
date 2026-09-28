@@ -143,12 +143,16 @@ function ensureSchema(db) {
       dossier_id TEXT NOT NULL,
       scope_type TEXT NOT NULL DEFAULT 'dossier',
       scope_key TEXT NOT NULL DEFAULT '',
+      dataset_key TEXT NOT NULL DEFAULT '',
+      engine_id TEXT NOT NULL DEFAULT '',
       source_name TEXT NOT NULL,
       local_path TEXT NOT NULL,
       sha256 TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'ready',
       profile_json TEXT NOT NULL DEFAULT '{}',
       mapping_json TEXT NOT NULL DEFAULT '{}',
+      validation_json TEXT NOT NULL DEFAULT '{}',
+      confirmed_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(dossier_id) REFERENCES dossiers_v3(id) ON DELETE CASCADE
@@ -260,6 +264,15 @@ function ensureSchema(db) {
   ensureColumn(db, "document_instances_v3", "migration_revision", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "document_instances_v3", "last_migrated_at", "TEXT");
   ensureColumn(db, "document_instances_v3", "migration_pending", "INTEGER NOT NULL DEFAULT 0");
+
+  ensureColumn(db, "data_imports_v3", "dataset_key", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "data_imports_v3", "engine_id", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "data_imports_v3", "validation_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, "data_imports_v3", "confirmed_at", "TEXT");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_data_imports_v3_dataset
+      ON data_imports_v3(dossier_id, dataset_key, status, updated_at);
+  `);
 }
 
 function dbFor(userDataPath) {
@@ -1218,6 +1231,34 @@ function setSectionIncluded(userDataPath, instanceId, sectionKey, included) {
   return getDocumentInstance(userDataPath, instanceId);
 }
 
+function dataSourceManifest(db, dossierId) {
+  return db.prepare(`
+    SELECT id, dataset_key, engine_id, source_name, sha256, scope_type, scope_key,
+           profile_json, confirmed_at, updated_at
+    FROM data_imports_v3
+    WHERE dossier_id = ? AND status = 'ready'
+    ORDER BY dataset_key, updated_at
+  `).all(dossierId).map((row) => {
+    let profile = {};
+    try { profile = JSON.parse(row.profile_json || "{}"); } catch (_error) { profile = {}; }
+    return {
+      importId: row.id,
+      datasetKey: row.dataset_key || "",
+      engineId: row.engine_id || "",
+      sourceName: row.source_name,
+      sha256: row.sha256,
+      scopeType: row.scope_type,
+      scopeKey: row.scope_key,
+      totalRows: Number(profile.totalRows || 0),
+      sheets: Array.isArray(profile.sheets)
+        ? profile.sheets.map((sheet) => ({ name: sheet.name, rowCount: Number(sheet.rowCount || 0) }))
+        : [],
+      confirmedAt: row.confirmed_at || null,
+      updatedAt: row.updated_at
+    };
+  });
+}
+
 function freezeFinal(userDataPath, instanceId) {
   const db = dbFor(userDataPath);
   const instance = getDocumentInstance(userDataPath, instanceId);
@@ -1257,6 +1298,7 @@ function freezeFinal(userDataPath, instanceId) {
     scopeType: instance.scopeType,
     scopeKey: instance.scopeKey,
     masterData: listMasterData(userDataPath, instance.dossierId),
+    dataSources: dataSourceManifest(db, instance.dossierId),
     sections: instance.sections,
     citationSnapshot: {
       keys: citationResolution.keys,
