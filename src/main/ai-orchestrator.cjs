@@ -193,14 +193,20 @@ function syntheticFormationSlice(profile) {
 function dataReadinessForSection(userDataPath, instance, section) {
   const dossier = hub.getDossier(userDataPath, instance.dossierId);
   const ownSlots = dataTemplates.ownSlots(instance.engineId, dossier && dossier.processKey || "");
-  const readyImports = ingestion.listImports(userDataPath, instance.dossierId)
-    .filter((item) => item.status === "ready" && (!ownSlots.length || ownSlots.some((slot) => slot.key === item.datasetKey)));
+  const allReadyImports = ingestion.listImports(userDataPath, instance.dossierId)
+    .filter((item) => item.status === "ready");
+  const slotImports = allReadyImports
+    .filter((item) => ownSlots.some((slot) => slot.key === item.datasetKey));
+  const legacyImports = allReadyImports.filter((item) => !item.datasetKey);
+  // Compatibilidad: un expediente antiguo puede seguir usando imports sin dataset.
+  // En cuanto existe un dataset estructurado del motor, este siempre tiene prioridad.
+  const readyImports = slotImports.length ? slotImports : legacyImports;
   const scopeOptions = {
     scopeType: instance.scopeType,
     scopeKey: instance.scopeKey,
     scopePolicy: "inclusive"
   };
-  if (ownSlots.length) scopeOptions.datasetKeys = ownSlots.map((slot) => slot.key);
+  if (slotImports.length) scopeOptions.datasetKeys = ownSlots.map((slot) => slot.key);
   if (readyImports.length) scopeOptions.importIds = readyImports.map((item) => item.id);
 
   const availability = ingestion.inspectDataAvailability(userDataPath, instance.dossierId, scopeOptions);
