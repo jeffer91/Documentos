@@ -1584,6 +1584,249 @@
     </div>`;
   }
 
+  function importForDataset(datasetKey, status) {
+    return (state.imports || [])
+      .filter((item) => item.datasetKey === datasetKey && (!status || item.status === status))
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
+  }
+
+  function datasetFieldLabel(slot, key) {
+    const field = slot && (slot.fields || []).find((item) => item.key === key);
+    return field ? field.label : key;
+  }
+
+  function validationSummaryText(dataImport) {
+    const validation = dataImport && dataImport.validation || {};
+    const pieces = [
+      `Archivo: ${dataImport && dataImport.sourceName || ""}`,
+      `Registros: ${Number(validation.totalRows || dataImport && dataImport.profile && dataImport.profile.totalRows || 0)}`,
+      `Hojas: ${Number(validation.sheetCount || dataImport && dataImport.profile && dataImport.profile.sheets && dataImport.profile.sheets.length || 0)}`
+    ];
+    if (Number(validation.emptyRequiredCells || 0)) pieces.push(`Celdas obligatorias vacías: ${Number(validation.emptyRequiredCells)}`);
+    if ((validation.warnings || []).length) pieces.push(`Advertencias: ${validation.warnings.join(" ")}`);
+    return pieces.join(" · ");
+  }
+
+  async function downloadDatasetTemplate(datasetKey) {
+    if (!state.instance || !state.dossier) return;
+    const response = await api.downloadDataTemplate(state.dossier.id, state.instance.engineId, datasetKey);
+    if (!response || response.canceled) return;
+    if (!response.ok) return toast(response.error || "No se pudo descargar la plantilla.");
+    toast("Plantilla Excel guardada.");
+  }
+
+  async function confirmPendingDataset(dataImport) {
+    const validation = dataImport && dataImport.validation || {};
+    if (validation.ok === false) {
+      await appAlert(
+        (validation.errors || ["El archivo no supera la validación."]).join(" · "),
+        { title: "Archivo con errores" }
+      );
+      await api.discardDataImport(dataImport.id);
+      await loadDossier(state.dossier.id);
+      return false;
+    }
+
+    const confirmed = await appConfirm(
+      validationSummaryText(dataImport) + " · ¿Confirmar y guardar estos datos?",
+      { title: "Validación de Excel", confirmText: "Confirmar y guardar" }
+    );
+    if (!confirmed) {
+      await api.discardDataImport(dataImport.id);
+      await loadDossier(state.dossier.id);
+      return false;
+    }
+
+    const response = await api.confirmDataImport(dataImport.id);
+    if (!response || !response.ok) {
+      toast(response && response.error || "No se pudo confirmar el archivo.");
+      return false;
+    }
+    await loadDossier(state.dossier.id);
+    toast("Datos guardados. Este dataset queda vigente para todo el período y proceso.");
+    return true;
+  }
+
+  async function uploadDataset(datasetKey) {
+    if (!state.instance || !state.dossier) return;
+    const response = await api.addDataImport(state.dossier.id, {
+      type: "dossier",
+      key: "",
+      datasetKey,
+      engineId: state.instance.engineId
+    });
+    if (!response || response.canceled) return;
+    if (!response.ok) return toast(response.error || "No se pudo cargar el Excel.");
+    if (response.dataImport && response.dataImport.duplicateIgnored) {
+      toast("Ese mismo archivo ya está guardado como vigente.");
+      return renderInstance(state.instance.id);
+    }
+    if (!response.dataImport) return toast("No se recibió la importación.");
+    await confirmPendingDataset(response.dataImport);
+    return renderInstance(state.instance.id);
+  }
+
+  function analyzerQuery(slot) {
+    const analyzer = state.dataAnalyzer || {};
+    const fields = (slot && slot.fields || []).map((field) => field.key);
+    const where = [];
+    if (analyzer.filterField && analyzer.filterValue) {
+      where.push({ field: analyzer.filterField, op: "contains", value: analyzer.filterValue });
+    }
+    return {
+      datasetKey: slot.key,
+      select: fields,
+      search: analyzer.search || "",
+      where,
+      sortBy: analyzer.sortBy || "",
+      sortDirection: analyzer.sortDirection || "asc",
+      limit: Number(analyzer.pageSize || 50),
+      offset: Number(analyzer.page || 0) * Number(analyzer.pageSize || 50),
+      dimensions: (slot.fields || []).filter((field) => field.type !== "number").slice(0, 3).map((field) => field.key),
+      measures: (slot.fields || []).filter((field) => field.type === "number").map((field) => field.key)
+    };
+  }
+
+  async function loadDatasetAnalyzer(datasetKey, options) {
+    const slot = (state.dataSlots || []).find((item) => item.key === datasetKey);
+    if (!slot || !state.dossier) return;
+    const config = options || {};
+    if (config.reset) {
+      state.dataAnalyzer = {
+        datasetKey,
+        page: 0,
+        pageSize: 50,
+        search: "",
+        filterField: "",
+        filterValue: "",
+        sortBy: "",
+        sortDirection: "asc",
+        result: null,
+        summary: null
+      };
+    } else {
+      state.dataAnalyzer.datasetKey = datasetKey;
+    }
+
+    const query = analyzerQuery(slot);
+    const [resultResponse, summaryResponse] = await Promise.all([
+      api.queryData(state.dossier.id, query),
+      api.summarizeData(state.dossier.id, query)
+    ]);
+    if (!resultResponse || !resultResponse.ok) throw new Error(resultResponse && resultResponse.error || "No se pudieron consultar los datos.");
+    if (!summaryResponse || !summaryResponse.ok) throw new Error(summaryResponse && summaryResponse.error || "No se pudo resumir el dataset.");
+    state.dataAnalyzer.result = resultResponse.result || null;
+    state.dataAnalyzer.summary = summaryResponse.result || null;
+  }
+
+  function datasetAnalyzerMarkup() {
+    const analyzer = state.dataAnalyzer || {};
+    if (!analyzer.datasetKey) return "";
+    const slot = (state.dataSlots || []).find((item) => item.key === analyzer.datasetKey);
+    if (!slot) return "";
+    const result = analyzer.result || { rows: [], total: 0, sourceRows: 0, duplicateRowsRemoved: 0, offset: 0, limit: 50 };
+    const summary = analyzer.summary || {};
+    const fields = (slot.fields || []).map((field) => field.key);
+    const pageSize = Number(analyzer.pageSize || 50);
+    const page = Number(analyzer.page || 0);
+    const pages = Math.max(1, Math.ceil(Number(result.total || 0) / pageSize));
+    const filterOptions = ['<option value="">Sin filtro de columna</option>']
+      .concat((slot.fields || []).map((field) =>
+        `<option value="${escapeHtml(field.key)}" ${analyzer.filterField === field.key ? "selected" : ""}>${escapeHtml(field.label)}</option>`
+      )).join("");
+    const sortOptions = ['<option value="">Sin orden específico</option>']
+      .concat((slot.fields || []).map((field) =>
+        `<option value="${escapeHtml(field.key)}" ${analyzer.sortBy === field.key ? "selected" : ""}>${escapeHtml(field.label)}</option>`
+      )).join("");
+
+    return `
+      <section class="dataset-analyzer">
+        <div class="dataset-analyzer-head">
+          <div>
+            <span class="process-workspace-kicker">Pre-analizador</span>
+            <h3>${escapeHtml(slot.label)}</h3>
+            <p>Consulta de solo lectura. Los cálculos se realizan sobre todos los registros filtrados, no solo sobre la página visible.</p>
+          </div>
+          <button class="ghost small-inline" type="button" data-arch-action="close-data-analyzer">Cerrar</button>
+        </div>
+        <div class="dataset-stats">
+          <div><span>Originales</span><b>${Number(result.sourceRows || 0)}</b></div>
+          <div><span>Filtrados</span><b>${Number(result.total || 0)}</b></div>
+          <div><span>Duplicados excluidos</span><b>${Number(result.duplicateRowsRemoved || 0)}</b></div>
+          <div><span>Analizados</span><b>${Number(summary.analyzedRows || result.total || 0)}</b></div>
+        </div>
+        <div class="dataset-filters">
+          <label><span>Buscar</span><input id="datasetSearch" type="search" value="${escapeHtml(analyzer.search || "")}" placeholder="Buscar en todos los campos"></label>
+          <label><span>Filtrar por</span><select id="datasetFilterField">${filterOptions}</select></label>
+          <label><span>Valor</span><input id="datasetFilterValue" value="${escapeHtml(analyzer.filterValue || "")}" placeholder="Contiene..."></label>
+          <label><span>Ordenar por</span><select id="datasetSortBy">${sortOptions}</select></label>
+          <label><span>Dirección</span><select id="datasetSortDirection"><option value="asc" ${analyzer.sortDirection !== "desc" ? "selected" : ""}>Ascendente</option><option value="desc" ${analyzer.sortDirection === "desc" ? "selected" : ""}>Descendente</option></select></label>
+          <button class="secondary small-inline" type="button" data-arch-action="apply-data-analyzer">Aplicar</button>
+        </div>
+        <div class="dataset-table-wrap">
+          <table class="dataset-table">
+            <thead><tr>${fields.map((field) => `<th>${escapeHtml(datasetFieldLabel(slot, field))}</th>`).join("")}</tr></thead>
+            <tbody>
+              ${(result.rows || []).length
+                ? result.rows.map((row) => `<tr>${fields.map((field) => `<td>${escapeHtml(row[field] == null ? "" : row[field])}</td>`).join("")}</tr>`).join("")
+                : `<tr><td colspan="${Math.max(1, fields.length)}">No hay registros para los filtros seleccionados.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        <div class="dataset-pagination">
+          <span>Página ${page + 1} de ${pages} · ${Number(result.total || 0)} registro(s)</span>
+          <div class="button-row">
+            <button class="ghost small-inline" type="button" data-arch-action="data-analyzer-prev" ${page <= 0 ? "disabled" : ""}>← Anterior</button>
+            <button class="ghost small-inline" type="button" data-arch-action="data-analyzer-next" ${page + 1 >= pages ? "disabled" : ""}>Siguiente →</button>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function dataStageMarkup() {
+    const slots = state.dataSlots || [];
+    if (!slots.length) {
+      return `<div class="instance-preparation"><div class="notice-soft"><b>Este documento no requiere una plantilla de datos propia</b><span>Puede trabajar con datos maestros, fuentes institucionales o información heredada del proceso.</span></div></div>`;
+    }
+
+    return `<div class="instance-data-stage">
+      <div class="section-head">
+        <div><h2>Datos del proceso</h2><p>Descarga la plantilla correspondiente, cárgala y confírmala. Los datos confirmados se reutilizan durante todo el mismo período y proceso.</p></div>
+      </div>
+      <div class="dataset-slot-grid">
+        ${slots.map((slot) => {
+          const ready = importForDataset(slot.key, "ready");
+          const pending = importForDataset(slot.key, "pending_review");
+          const status = ready ? "Guardado" : pending ? "Pendiente" : "Sin cargar";
+          const statusClass = ready ? "good" : pending ? "warn" : "";
+          return `
+            <article class="dataset-slot-card">
+              <div class="arch-card-head">
+                <div>
+                  <b>${escapeHtml(slot.label)}</b>
+                  <small>${escapeHtml(slot.description || "")}</small>
+                </div>
+                <span class="status ${statusClass}">${status}</span>
+              </div>
+              <div class="dataset-slot-meta">
+                <span>${slot.inherited ? "Heredado del proceso" : "Datos de este documento"}</span>
+                ${ready ? `<span>${Number(ready.profile && ready.profile.totalRows || 0)} registros · ${escapeHtml(ready.sourceName)}</span>` : ""}
+              </div>
+              <div class="button-row">
+                <button class="ghost small-inline" type="button" data-arch-action="download-data-template" data-dataset-key="${escapeHtml(slot.key)}">Descargar plantilla</button>
+                <button class="secondary small-inline" type="button" data-arch-action="upload-data-slot" data-dataset-key="${escapeHtml(slot.key)}">${ready ? "Reemplazar Excel" : "Cargar Excel"}</button>
+                ${ready ? `<button class="ghost small-inline" type="button" data-arch-action="view-data-slot" data-dataset-key="${escapeHtml(slot.key)}">Ver datos</button>` : ""}
+                ${pending ? `<button class="ghost small-inline" type="button" data-arch-action="review-pending-data" data-id="${escapeHtml(pending.id)}">Revisar carga</button>` : ""}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+      ${datasetAnalyzerMarkup()}
+    </div>`;
+  }
+
   function preparationStageMarkup() {
     if (state.instance && state.instance.engineId === "form.deteccion") return formationPreparationMarkup();
     const readiness = state.dataReadiness && state.dataReadiness.sections || [];
