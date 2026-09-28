@@ -642,9 +642,12 @@ function selectedImports(db, dossierId, options) {
     ? new Set(options.importIds.map(String))
     : null;
   const datasetKey = String(options && options.datasetKey || "");
+  const hasDatasetKeys = Boolean(options && Array.isArray(options.datasetKeys));
+  const datasetKeys = hasDatasetKeys ? new Set(options.datasetKeys.map(String)) : null;
   return all.filter((row) =>
     (!ids || ids.has(String(row.id))) &&
     (!datasetKey || String(row.dataset_key || "") === datasetKey) &&
+    (!datasetKeys || datasetKeys.has(String(row.dataset_key || ""))) &&
     importMatchesScope(row, options || {})
   );
 }
