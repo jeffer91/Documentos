@@ -297,9 +297,12 @@ function dataReadinessForSection(userDataPath, instance, section) {
 function sectionDataContext(userDataPath, instance, section) {
   const dossier = hub.getDossier(userDataPath, instance.dossierId);
   const masterData = hub.listMasterData(userDataPath, instance.dossierId);
-  const imports = ingestion.listImports(userDataPath, instance.dossierId).map((item) => ({
+  const imports = ingestion.listImports(userDataPath, instance.dossierId)
+    .filter((item) => item.status === "ready")
+    .map((item) => ({
     id: item.id,
     sourceName: item.sourceName,
+    datasetKey: item.datasetKey || "",
     scopeType: item.scopeType,
     scopeKey: item.scopeKey,
     sha256: item.sha256,
