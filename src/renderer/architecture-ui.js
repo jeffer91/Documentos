@@ -1883,6 +1883,7 @@
   }
 
   function instanceStageMarkup() {
+    if (state.instanceStage === "data") return dataStageMarkup();
     if (state.instanceStage === "preparation") return preparationStageMarkup();
     if (state.instanceStage === "review") return reviewStageMarkup();
     if (state.instanceStage === "output") return outputStageMarkup();
@@ -1909,6 +1910,7 @@
     const required = (state.instance.sections || []).filter((item) => item.required !== false);
     const approved = required.filter((item) => item.status === "approved").length;
     const steps = [
+      ["data", "Datos"],
       ["preparation", "Preparación"],
       ["document", "Documento"],
       ["review", "Revisión"],
