@@ -200,6 +200,7 @@ function dataReadinessForSection(userDataPath, instance, section) {
     scopeKey: instance.scopeKey,
     scopePolicy: "inclusive"
   };
+  if (ownSlots.length) scopeOptions.datasetKeys = ownSlots.map((slot) => slot.key);
   if (readyImports.length) scopeOptions.importIds = readyImports.map((item) => item.id);
 
   const availability = ingestion.inspectDataAvailability(userDataPath, instance.dossierId, scopeOptions);
