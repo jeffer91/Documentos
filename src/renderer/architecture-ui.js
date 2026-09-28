@@ -19,6 +19,19 @@
     citationValidation: null,
     dataReadiness: null,
     generationRun: null,
+    dataSlots: [],
+    dataAnalyzer: {
+      datasetKey: "",
+      page: 0,
+      pageSize: 50,
+      search: "",
+      filterField: "",
+      filterValue: "",
+      sortBy: "",
+      sortDirection: "asc",
+      result: null,
+      summary: null
+    },
     sectionRecommendations: {},
     currentSectionKey: "",
     instanceStage: "document",
@@ -471,6 +484,22 @@
     state.generationRun = response.generationRun || null;
     if (!state.dossier || state.dossier.id !== state.instance.dossierId) {
       await loadDossier(state.instance.dossierId);
+    }
+    const slotsResponse = await api.listDataSlots(state.instance.engineId, state.dossier && state.dossier.processKey || "");
+    state.dataSlots = slotsResponse && slotsResponse.ok ? slotsResponse.slots || [] : [];
+    if (state.dataAnalyzer.datasetKey && !state.dataSlots.some((slot) => slot.key === state.dataAnalyzer.datasetKey)) {
+      state.dataAnalyzer = {
+        datasetKey: "",
+        page: 0,
+        pageSize: 50,
+        search: "",
+        filterField: "",
+        filterValue: "",
+        sortBy: "",
+        sortDirection: "asc",
+        result: null,
+        summary: null
+      };
     }
     const visible = state.instance.sections || [];
     if (!visible.some((item) => item.key === state.currentSectionKey)) {
