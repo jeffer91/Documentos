@@ -18,6 +18,8 @@ const visualRenderer = require("../src/main/visual-renderer-service.cjs");
 const citationService = require("../src/main/citation-service.cjs");
 const dataIngestion = require("../src/main/data-ingestion-service.cjs");
 const dataBindings = require("../src/main/document-data-binding-service.cjs");
+const dataTemplateRegistry = require("../src/main/data-template-registry.cjs");
+const dataTemplateService = require("../src/main/data-template-service.cjs");
 const aiOrchestrator = require("../src/main/ai-orchestrator.cjs");
 const aiProviderService = require("../src/main/ai-provider-service.cjs");
 const draftExport = require("../src/main/draft-export-service.cjs");
@@ -781,6 +783,136 @@ async function run() {
     assert.ok(imageNarrativeValidation.errors.some((item) => item.includes("contexto previo")));
     assert.ok(imageNarrativeValidation.errors.some((item) => item.includes("análisis posterior")));
 
+    // Bloque 3A: datasets por proceso, plantilla Excel, confirmación, reemplazo y preanalizador.
+    const datasetDossier = processHub.createDossier(temp, {
+      periodId: periodV4.id,
+      processKey: "formacion",
+      population: "all",
+      label: "Formación datasets Smoke"
+    });
+    const detectionSlots = dataTemplateRegistry.slotsForEngine("form.deteccion", "formacion");
+    const planSlots = dataTemplateRegistry.slotsForEngine("form.plan", "formacion");
+    const reportSlots = dataTemplateRegistry.slotsForEngine("form.informe", "formacion");
+    assert.strictEqual(detectionSlots.length, 2);
+    assert.ok(planSlots.length >= 3);
+    assert.ok(reportSlots.length >= 4);
+    const careersSlot = detectionSlots.find((item) => item.key === "formacion.carreras");
+    assert.ok(careersSlot);
+
+    const careersTemplatePath = path.join(temp, "plantilla-carreras-smoke.xlsx");
+    dataTemplateService.writeTemplate(careersTemplatePath, careersSlot, {
+      processLabel: "Formación docente",
+      periodLabel: periodV4.label
+    });
+    let careersWorkbook = XLSX.readFile(careersTemplatePath);
+    assert.ok(careersWorkbook.SheetNames.includes("DATOS"));
+    assert.ok(careersWorkbook.SheetNames.includes("INSTRUCCIONES"));
+    careersWorkbook.Sheets.DATOS = XLSX.utils.aoa_to_sheet([
+      ["Carrera"],
+      ["Estética Integral"],
+      ["Enfermería"]
+    ]);
+    XLSX.writeFile(careersWorkbook, careersTemplatePath);
+
+    const pendingCareers = dataIngestion.importDataFile(temp, datasetDossier.id, careersTemplatePath, {
+      type: "dossier",
+      key: "",
+      datasetKey: careersSlot.key,
+      engineId: "form.deteccion"
+    });
+    assert.strictEqual(pendingCareers.status, "pending_review");
+    assert.strictEqual(pendingCareers.validation.ok, true);
+    assert.strictEqual(pendingCareers.profile.totalRows, 2, "Solo debe contarse la hoja DATOS.");
+    assert.strictEqual(
+      dataIngestion.queryData(temp, datasetDossier.id, { datasetKey: careersSlot.key, select: ["career"] }).total,
+      0,
+      "Una carga pendiente no debe alimentar el documento."
+    );
+
+    const confirmedCareers = dataIngestion.confirmImport(temp, pendingCareers.id);
+    assert.strictEqual(confirmedCareers.status, "ready");
+    let careersQuery = dataIngestion.queryData(temp, datasetDossier.id, {
+      datasetKey: careersSlot.key,
+      select: ["career"],
+      sortBy: "career",
+      sortDirection: "asc",
+      limit: 50
+    });
+    assert.strictEqual(careersQuery.total, 2);
+    assert.deepStrictEqual(
+      careersQuery.rows.map((row) => row.career).sort(),
+      ["Enfermería", "Estética Integral"].sort()
+    );
+
+    const replacementPath = path.join(temp, "plantilla-carreras-reemplazo-smoke.xlsx");
+    dataTemplateService.writeTemplate(replacementPath, careersSlot, {
+      processLabel: "Formación docente",
+      periodLabel: periodV4.label
+    });
+    let replacementWorkbook = XLSX.readFile(replacementPath);
+    replacementWorkbook.Sheets.DATOS = XLSX.utils.aoa_to_sheet([
+      ["Carrera"],
+      ["Marketing"],
+      ["Estética Integral"],
+      ["Desarrollo de Software"]
+    ]);
+    XLSX.writeFile(replacementWorkbook, replacementPath);
+    const pendingReplacement = dataIngestion.importDataFile(temp, datasetDossier.id, replacementPath, {
+      type: "dossier",
+      key: "",
+      datasetKey: careersSlot.key,
+      engineId: "form.deteccion"
+    });
+    assert.strictEqual(pendingReplacement.status, "pending_review");
+    assert.strictEqual(
+      dataIngestion.queryData(temp, datasetDossier.id, { datasetKey: careersSlot.key, select: ["career"] }).total,
+      2,
+      "Mientras el reemplazo no se confirme, la fuente vigente debe seguir intacta."
+    );
+    dataIngestion.confirmImport(temp, pendingReplacement.id);
+    careersQuery = dataIngestion.queryData(temp, datasetDossier.id, {
+      datasetKey: careersSlot.key,
+      select: ["career"],
+      limit: 2,
+      offset: 1,
+      sortBy: "career",
+      sortDirection: "asc"
+    });
+    assert.strictEqual(careersQuery.total, 3);
+    assert.strictEqual(careersQuery.offset, 1);
+    assert.strictEqual(careersQuery.returnedRows, 2);
+    const searchCareers = dataIngestion.queryData(temp, datasetDossier.id, {
+      datasetKey: careersSlot.key,
+      select: ["career"],
+      search: "estetica"
+    });
+    assert.strictEqual(searchCareers.total, 1);
+    assert.strictEqual(searchCareers.rows[0].career, "Estética Integral");
+    const readyCareerImports = dataIngestion.listImports(temp, datasetDossier.id)
+      .filter((item) => item.datasetKey === careersSlot.key && item.status === "ready");
+    assert.strictEqual(readyCareerImports.length, 1, "El Excel anterior debe reemplazarse, no versionarse.");
+
+    const discardPath = path.join(temp, "plantilla-carreras-descartar-smoke.xlsx");
+    dataTemplateService.writeTemplate(discardPath, careersSlot, {
+      processLabel: "Formación docente",
+      periodLabel: periodV4.label
+    });
+    let discardWorkbook = XLSX.readFile(discardPath);
+    discardWorkbook.Sheets.DATOS = XLSX.utils.aoa_to_sheet([["Carrera"], ["Carrera temporal"]]);
+    XLSX.writeFile(discardWorkbook, discardPath);
+    const pendingDiscard = dataIngestion.importDataFile(temp, datasetDossier.id, discardPath, {
+      type: "dossier",
+      key: "",
+      datasetKey: careersSlot.key,
+      engineId: "form.deteccion"
+    });
+    dataIngestion.discardImport(temp, pendingDiscard.id);
+    assert.strictEqual(
+      dataIngestion.queryData(temp, datasetDossier.id, { datasetKey: careersSlot.key, select: ["career"] }).total,
+      3,
+      "Descartar una carga no debe alterar el dataset vigente."
+    );
+
     // Bloque 3: motor de datos completo, filtrable y seguro para IA.
     const largeDataPath = path.join(temp, "datos-complexivo-6001.xlsx");
     const largeRows = [["Cédula", "Carrera", "Sede", "Núcleo", "Componente", "Nota"]];
@@ -1432,6 +1564,8 @@ async function run() {
     const frozenApa = processHub.freezeFinal(temp, apaInstance.id);
     assert.ok(frozenApa.finalFrozenAt);
     assert.ok(frozenApa.frozenSnapshot.citationSnapshot);
+    assert.ok(Array.isArray(frozenApa.frozenSnapshot.dataSources), "La final debe congelar el manifiesto de fuentes de datos.");
+    assert.ok(frozenApa.frozenSnapshot.dataSources.every((item) => item.sha256), "Cada fuente congelada debe conservar su SHA-256.");
     assert.deepStrictEqual(frozenApa.frozenSnapshot.citationSnapshot.keys, ["APA:USED"]);
     assert.strictEqual(frozenApa.frozenSnapshot.citationSnapshot.references.length, 1);
     assert.strictEqual(
